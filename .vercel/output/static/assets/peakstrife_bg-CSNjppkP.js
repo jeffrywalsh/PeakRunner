@@ -1,0 +1,1 @@
+var e=`/assets/peakstrife_bg-D51DAwre.wasm`;export{e as default};

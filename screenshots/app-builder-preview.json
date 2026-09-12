@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Peakstrife",
+      "hasCanvas": true,
+      "bodyTextLen": 262,
+      "bodyTextHash": "d321c2d893f3fa19ec870887b35bece073c40d508dad87487669846c81044400",
+      "bodyTextPrefix": "SKI THE RIDGELINE PEAKSTRIFE High-speed ski and disc combat on a",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Peakstrife",
+      "hasCanvas": true,
+      "bodyTextLen": 262,
+      "bodyTextHash": "d321c2d893f3fa19ec870887b35bece073c40d508dad87487669846c81044400",
+      "bodyTextPrefix": "SKI THE RIDGELINE PEAKSTRIFE High-speed ski and disc combat on a",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}
