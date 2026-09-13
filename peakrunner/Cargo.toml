@@ -38,6 +38,8 @@ web-sys = { version = "0.3", features = [
     "BiquadFilterType",
     "Document",
     "Element",
+    "EventTarget",
+    "MouseEvent",
     "GainNode",
     "Gamepad",
     "GamepadButton",

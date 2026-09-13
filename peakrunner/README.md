@@ -45,6 +45,6 @@ trunk serve
 
 ## Controls
 
-WASD moves. The mouse looks. Space jumps; hold it through a landing to ski, and hold it in the air to jet. Click fires. 1 and 2 switch weapons. Esc pauses.
+WASD moves. The mouse looks. Hold Space to ski: slow, and it still hops; fast, and ground friction stays off so the hill builds speed. Right click jets straight up. Hold WASD with the jet and some of that lift pushes you that way. Left click fires. The flag adds weight. 1 and 2 switch weapons. Esc pauses.
 
 A gamepad uses the left stick to move, the right stick to look, the south button or left trigger to jump, and the right trigger to fire.

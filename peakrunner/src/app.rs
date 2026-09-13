@@ -6,6 +6,7 @@ use serde::Deserialize;
 
 use crate::audio::Audio;
 use crate::drawlist::build_frame;
+use crate::mouse;
 use crate::scene::{self, SceneCallback};
 use crate::sim::{MatchState, World};
 
@@ -58,6 +59,7 @@ struct Pad {
     ly: f32,
     jump: bool,
     fire: bool,
+    jet: bool,
 }
 
 pub struct PeakRunnerApp {
@@ -71,9 +73,12 @@ pub struct PeakRunnerApp {
     touch: bool,
     grabbed: bool,
     touch_jump: bool,
+    touch_jet: bool,
     touch_fire: bool,
     touch_swap: bool,
     look_pending: egui::Vec2,
+    /// The click that started the match is still down. Don't treat it as fire.
+    wait_fire_release: bool,
     #[cfg(not(target_arch = "wasm32"))]
     pads: Option<gilrs::Gilrs>,
 }
@@ -93,9 +98,11 @@ impl PeakRunnerApp {
             touch: false,
             grabbed: false,
             touch_jump: false,
+            touch_jet: false,
             touch_fire: false,
             touch_swap: false,
             look_pending: egui::Vec2::ZERO,
+            wait_fire_release: false,
             #[cfg(not(target_arch = "wasm32"))]
             pads: gilrs::Gilrs::new().ok(),
         })
@@ -109,7 +116,7 @@ impl PeakRunnerApp {
         if rect.height() > 1.0 {
             self.frame_aspect = rect.width() / rect.height();
         }
-        if ctx.input(|i| i.any_touches()) || rect.width() < 720.0 {
+        if ctx.input(|i| i.any_touches()) {
             self.touch = true;
         }
 
@@ -124,12 +131,10 @@ impl PeakRunnerApp {
             self.world.add_look(self.look_pending.x, self.look_pending.y);
             self.look_pending = egui::Vec2::ZERO;
         }
+        let mouse = mouse::sample(ctx, self.mode == Mode::Play);
         if self.mode == Mode::Play {
             self.grab(ctx, true);
-            if self.grabbed {
-                let look = ctx.input(|i| i.pointer.delta());
-                self.world.add_look(look.x, look.y);
-            }
+            self.world.add_look(mouse.dx, mouse.dy);
         } else {
             self.grab(ctx, false);
         }
@@ -162,12 +167,20 @@ impl PeakRunnerApp {
             }
         });
         let jump = ctx.input(|i| i.key_down(egui::Key::Space)) || pad.jump || self.touch_jump;
-        let mouse_fire = self.mode == Mode::Play
-            && ctx.input(|i| i.pointer.primary_down() && !i.any_touches());
+        let jet = mouse.jet || pad.jet || self.touch_jet;
+        let mut mouse_fire = self.mode == Mode::Play && mouse.fire;
+        if self.wait_fire_release {
+            if mouse_fire {
+                mouse_fire = false;
+            } else {
+                self.wait_fire_release = false;
+            }
+        }
         let fire = mouse_fire || pad.fire || self.touch_fire;
         self.world.input.move_x = mx.clamp(-1.0, 1.0);
         self.world.input.move_z = mz.clamp(-1.0, 1.0);
         self.world.input.jump = jump;
+        self.world.input.jet = jet && self.mode == Mode::Play;
         self.world.input.fire = fire;
         self.world.input.look_stick_x = pad.lx;
         self.world.input.look_stick_y = pad.ly;
@@ -194,6 +207,7 @@ impl PeakRunnerApp {
         self.world.start_match(self.ember);
         self.audio.play("start");
         self.mode = Mode::Play;
+        self.wait_fire_release = true;
         self.grab(ctx, true);
     }
 
@@ -217,10 +231,6 @@ impl PeakRunnerApp {
     }
 
     fn grab(&mut self, ctx: &egui::Context, lock: bool) {
-        if self.touch {
-            self.grabbed = false;
-            return;
-        }
         self.grabbed = lock && self.mode == Mode::Play;
         ctx.send_viewport_cmd(egui::ViewportCommand::CursorGrab(if self.grabbed {
             egui::CursorGrab::Locked
@@ -244,6 +254,7 @@ impl PeakRunnerApp {
             ly: 0.0,
             jump: false,
             fire: false,
+            jet: false,
         };
         if let Some(pads) = &mut self.pads {
             while pads.next_event().is_some() {}
@@ -255,6 +266,7 @@ impl PeakRunnerApp {
                 pad.lx = lx;
                 pad.ly = -ly;
                 pad.jump = gp.is_pressed(gilrs::Button::South) || gp.is_pressed(gilrs::Button::LeftTrigger2);
+                pad.jet = gp.is_pressed(gilrs::Button::LeftTrigger);
                 pad.fire = gp.is_pressed(gilrs::Button::RightTrigger2) || gp.is_pressed(gilrs::Button::RightTrigger);
             }
         }
@@ -281,6 +293,7 @@ fn poll_web_pad() -> Pad {
         ly: 0.0,
         jump: false,
         fire: false,
+        jet: false,
     };
     let Some(window) = web_sys::window() else {
         return pad;
@@ -316,6 +329,7 @@ fn poll_web_pad() -> Pad {
                 .unwrap_or(false)
         };
         pad.jump = pressed(0) || pressed(6);
+        pad.jet = pressed(4);
         pad.fire = pressed(7) || pressed(5);
         break;
     }
@@ -359,8 +373,9 @@ impl eframe::App for PeakRunnerApp {
             Mode::Play => {
                 if let Some(hud) = self.hud.clone() {
                     let touch = self.touch;
-                    let (jump, fire, swap, look) = play_hud(ui, &hud, touch, &mut self.stick);
+                    let (jump, fire, jet, swap, look) = play_hud(ui, &hud, touch, &mut self.stick);
                     self.touch_jump = jump;
+                    self.touch_jet = jet;
                     self.touch_fire = fire;
                     if swap {
                         self.touch_swap = true;
@@ -388,7 +403,7 @@ impl PeakRunnerApp {
                 ui.add_space(4.0);
                 ui.label(RichText::new("PEAKRUNNER").color(FG).size(64.0).strong());
                 ui.add_space(6.0);
-                ui.label(RichText::new("High-speed ski and disc combat on a frozen rift. Run, hold Space through the landing to ski, jet the gaps, steal their flag.").color(MUTED));
+                ui.label(RichText::new("High-speed ski and disc combat on a frozen rift. Hold Space to cut friction and ride the hill. Right click jets straight up. Hold WASD with it to spend some lift and drive that way.").color(MUTED));
                 ui.add_space(14.0);
                 ui.horizontal(|ui| {
                     team_button(ui, "Ember", self.ember, EMBER, || self.ember = true);
@@ -402,7 +417,9 @@ impl PeakRunnerApp {
                 ui.horizontal(|ui| {
                     hint(ui, "Move", "WASD");
                     hint(ui, "Look", "Mouse");
-                    hint(ui, "Ski / jet", "Space");
+                    hint(ui, "Jump / ski bug", "Space");
+                    hint(ui, "Jet", "Right click");
+                    hint(ui, "Jet steer", "WASD");
                     hint(ui, "Fire", "Click · 1/2");
                 });
             });
@@ -489,7 +506,7 @@ fn play_hud(
     hud: &Hud,
     touch: bool,
     stick: &mut [f32; 2],
-) -> (bool, bool, bool, egui::Vec2) {
+) -> (bool, bool, bool, bool, egui::Vec2) {
     let rect = ui.max_rect();
     let painter = ui.painter();
     let kph = (hud.speed * 3.6).round() as i32;
@@ -605,7 +622,7 @@ fn play_hud(
         painter.text(
             rect.right_bottom() + Vec2::new(-22.0, -40.0),
             Align2::RIGHT_BOTTOM,
-            format!("Space ski/jet · Esc pause\n{}", if hud.team == 0 { "Ember" } else { "Glacier" }),
+            format!("Hold Space to ski · Right click jet · Esc\n{}", if hud.team == 0 { "Ember" } else { "Glacier" }),
             FontId::proportional(13.0),
             MUTED,
         );
@@ -615,7 +632,7 @@ fn play_hud(
     if touch {
         touch_controls(ui, stick)
     } else {
-        (false, false, false, egui::Vec2::ZERO)
+        (false, false, false, false, egui::Vec2::ZERO)
     }
 }
 
@@ -665,7 +682,7 @@ fn minimap(ui: &egui::Ui, top_right: egui::Pos2, hud: &Hud) {
     }
 }
 
-fn touch_controls(ui: &mut egui::Ui, stick: &mut [f32; 2]) -> (bool, bool, bool, egui::Vec2) {
+fn touch_controls(ui: &mut egui::Ui, stick: &mut [f32; 2]) -> (bool, bool, bool, bool, egui::Vec2) {
     let rect = ui.max_rect();
     let zone = egui::Rect::from_min_size(rect.left_bottom() + Vec2::new(16.0, -168.0), Vec2::splat(140.0));
     let drag = ui.interact(zone, ui.id().with("move"), Sense::drag());
@@ -692,9 +709,10 @@ fn touch_controls(ui: &mut egui::Ui, stick: &mut [f32; 2]) -> (bool, bool, bool,
     };
 
     let fire = hold_button(ui, rect.right_bottom() + Vec2::new(-28.0, -28.0), "Fire", EMBER);
-    let jump = hold_button(ui, rect.right_bottom() + Vec2::new(-108.0, -28.0), "Jet", GLACIER);
-    let swap = tap_button(ui, rect.right_bottom() + Vec2::new(-188.0, -28.0), "Swap");
-    (jump, fire, swap, look)
+    let jet = hold_button(ui, rect.right_bottom() + Vec2::new(-108.0, -28.0), "Jet", GLACIER);
+    let jump = hold_button(ui, rect.right_bottom() + Vec2::new(-188.0, -28.0), "Ski", FG);
+    let swap = tap_button(ui, rect.right_bottom() + Vec2::new(-268.0, -28.0), "Swap");
+    (jump, fire, jet, swap, look)
 }
 
 fn hold_button(ui: &mut egui::Ui, center_br: egui::Pos2, label: &str, color: Color32) -> bool {
