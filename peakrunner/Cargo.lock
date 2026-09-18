@@ -2050,12 +2050,25 @@ dependencies = [
  "glam",
  "log",
  "naga",
+ "peakrunner-net",
+ "png",
+ "pollster",
  "rodio",
  "serde",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "peakrunner-net"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

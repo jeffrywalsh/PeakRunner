@@ -1,42 +1,51 @@
 use glam::{Vec2, Vec3};
 
 use crate::terrain::{
-    height, normal, pillars, spawn, Pillar, EMBER_HOME, EYE, GLACIER_HOME, MAP, PLAYER_RADIUS,
+    height, pillars, MapId, Pillar, EMBER_HOME, EYE, GLACIER_HOME, PLAYER_RADIUS,
 };
 
 pub const STEP: f32 = 1.0 / 60.0;
-/// Stock Tribes 2 gravity. Light armor walks at 15 there; we walk at 11.2.
+// Ascend-inspired tuning in meters/seconds, not a binary-exact engine port.
+// Keep the existing jump thresholds, but use smooth held skiing and air control.
 const T2: f32 = 11.2 / 15.0;
 const GRAVITY: f32 = 20.0;
 const MASS: f32 = 90.0;
-const FLAG_MASS: f32 = 30.0;
 /// `jumpForce / mass` from the Classic light armor, applied along the ground normal.
 const JUMP_IMPULSE: f32 = 8.34;
 const MIN_JUMP_SPEED: f32 = 20.0 * T2;
 const MAX_JUMP_SPEED: f32 = 30.0 * T2;
-/// Classic's 500 is for kilometer maps. This valley is 256 m.
-const HORIZ_MAX: f32 = 85.0;
-const HORIZ_RESIST_SPEED: f32 = 48.74 * T2;
-const HORIZ_RESIST: f32 = 0.0;
+/// Safety ceiling, not a cruising-speed target. Routes can exceed 300 km/h.
+const HORIZ_MAX: f32 = 125.0;
 const UP_MAX: f32 = 52.0 * T2;
 const UP_RESIST_SPEED: f32 = 20.89 * T2;
 const UP_RESIST: f32 = 0.35;
 
 const WALK_ACCEL: f32 = 78.0;
 const WALK_MAX: f32 = 11.2;
-const GROUND_DRAG: f32 = 16.0;
-const AIR_DRAG: f32 = 0.08;
-const SKI_TURN: f32 = 4.5;
-/// Straight-up jet. Net climb is this minus gravity (20).
-const JET_LIFT: f32 = 32.0;
-/// Fraction of that lift spent sideways when a movement key is held.
-const JET_STEAL: f32 = 0.28;
-/// A jet from a standstill should drift, not become a ski line.
-const JET_HORIZ_MAX: f32 = 14.0;
-const ENERGY_MAX: f32 = 100.0;
-const ENERGY_JET: f32 = 21.0;
-const ENERGY_REGEN: f32 = 14.0;
-const DISC_SPEED: f32 = 66.0;
+const GROUND_BRAKE: f32 = 32.0;
+const AIR_ACCEL: f32 = 6.0;
+const SKI_TURN_ACCEL: f32 = 28.0;
+/// Tuned downhill assistance for an Ascend-like ski, with ordinary uphill gravity.
+const SKI_SLOPE_GRAVITY: f32 = 2.0;
+/// Climb accel. Not spent when a movement key is held.
+const JET_ACCEL: f32 = 37.28;
+/// Extra sideways accel under the cap. Added on top of the climb, not taken from it.
+const JET_HORIZ_ACCEL: f32 = 22.0;
+/// 72 km/h. Thrust falls off here so jetting alone cannot make a ski line.
+const JET_THRUST_CAP: f32 = 72.0 / 3.6;
+/// Four-second tank with a five-second recharge, tuned for continuous ski routes.
+pub const ENERGY_MAX: f32 = 60.0;
+const ENERGY_JET: f32 = 15.0;
+const ENERGY_REGEN: f32 = 12.0;
+const MIN_JET_ENERGY: f32 = 3.0;
+/// Classic `dryVelocity`. The disc is a linear round, not a mortar.
+const DISC_SPEED: f32 = 95.0;
+/// Classic `velInheritFactor`. Without this the disc runs away and you cannot disc jump.
+const DISC_INHERIT: f32 = 0.75;
+/// Classic `damageRadius`.
+const DISC_RADIUS: f32 = 7.5;
+/// Classic `kickBackStrength` 2000 on a 90 kg body, at the center of the blast.
+const DISC_KICK: f32 = 2000.0 / 90.0;
 const BOLT_SPEED: f32 = 98.0;
 const MATCH_TIME: f32 = 8.0 * 60.0;
 const CAPTURES: u32 = 3;
@@ -118,6 +127,7 @@ pub struct Player {
     pub respawn: f32,
     pub carrying: Option<Team>,
     pub is_bot: bool,
+    pub remote: bool,
     pub on_ground: bool,
     pub skiing: bool,
     pub jetting: bool,
@@ -126,7 +136,6 @@ pub struct Player {
     bot_role: BotRole,
     bot_goal: Vec3,
     bot_think: f32,
-    regen_delay: f32,
     coyote: f32,
 }
 
@@ -137,12 +146,14 @@ pub struct Disc {
     pub owner: usize,
     pub life: f32,
     pub kind: u8, // 0 disc, 1 bolt
+    pub spin: f32,
 }
 
 pub struct Explosion {
     pub pos: Vec3,
     pub age: f32,
     pub max_r: f32,
+    pub kind: u8,
 }
 
 pub struct Flag {
@@ -175,6 +186,7 @@ pub struct World {
     pub deaths: u32,
     pub events: String,
     pub time: f32,
+    pub map: MapId,
     rng: u32,
 }
 
@@ -239,6 +251,7 @@ impl World {
             deaths: 0,
             events: String::new(),
             time: 0.0,
+            map: MapId::Valley,
             rng: 0xC0FFEE,
         }
     }
@@ -248,6 +261,26 @@ impl World {
         let v = r.f32();
         self.rng = r.0;
         v
+    }
+
+    pub fn set_map(&mut self, id: MapId) {
+        self.map = id;
+        self.pillars = crate::terrain::pillars_on(id);
+        if self.players.is_empty() {
+            self.place_flags();
+        }
+    }
+
+    fn ground(&self, x: f32, z: f32) -> f32 {
+        crate::terrain::height_on(self.map, x, z)
+    }
+
+    fn map_size(&self) -> f32 {
+        crate::terrain::info(self.map).size
+    }
+
+    fn stand(&self, ember: bool) -> Vec3 {
+        crate::terrain::spawn_on(self.map, ember)
     }
 
     pub fn set_paused(&mut self, paused: bool) {
@@ -276,13 +309,38 @@ impl World {
 
         // Face the valley, not the rim. Ember sits at low Z.
         let yaw = if ember { std::f32::consts::PI } else { 0.0 };
-        self.players.push(make_player(team, false, spawn(ember), yaw, BotRole::Offense));
+        self.players.push(make_player(team, false, self.stand(ember), yaw, BotRole::Offense));
         self.player_id = 0;
+        self.fill_match(ember, team, yaw);
+    }
 
+    /// A joined rift: you on the snow, no local bots. Other skiers come from the server.
+    pub fn start_rift(&mut self, ember: bool) {
+        let team = if ember { Team::Ember } else { Team::Glacier };
+        self.players.clear();
+        self.discs.clear();
+        self.explosions.clear();
+        self.score = [0, 0];
+        self.kills = 0;
+        self.deaths = 0;
+        self.time_left = MATCH_TIME;
+        self.state = MatchState::Playing;
+        self.acc = 0.0;
+        self.trauma = 0.0;
+        self.message = "IN THE RIFT".into();
+        self.message_t = 2.4;
+        self.events = "start".into();
+        let yaw = if ember { std::f32::consts::PI } else { 0.0 };
+        self.players.push(make_player(team, false, self.stand(ember), yaw, BotRole::Offense));
+        self.player_id = 0;
+        self.place_flags();
+    }
+
+    fn fill_match(&mut self, ember: bool, team: Team, yaw: f32) {
         for i in 0..2 {
             let o = Vec3::new((i as f32 - 0.5) * 6.0, 0.0, 4.0);
-            let mut p = spawn(ember) + o;
-            p.y = height(p.x, p.z) + 1.2;
+            let mut p = self.stand(ember) + o;
+            p.y = self.ground(p.x, p.z) + 1.2;
             let role = if i == 0 { BotRole::Offense } else { BotRole::Defense };
             self.players.push(make_player(team, true, p, yaw, role));
         }
@@ -291,25 +349,31 @@ impl World {
         let oyaw = if other_ember { std::f32::consts::PI } else { 0.0 };
         for i in 0..3 {
             let o = Vec3::new((i as f32 - 1.0) * 5.5, 0.0, 3.0);
-            let mut p = spawn(other_ember) + o;
-            p.y = height(p.x, p.z) + 1.2;
+            let mut p = self.stand(other_ember) + o;
+            p.y = self.ground(p.x, p.z) + 1.2;
             let role = if i == 2 { BotRole::Defense } else { BotRole::Offense };
             self.players.push(make_player(other, true, p, oyaw, role));
         }
 
-        let eh = height(EMBER_HOME.x, EMBER_HOME.z);
-        let gh = height(GLACIER_HOME.x, GLACIER_HOME.z);
+        self.place_flags();
+    }
+
+    fn place_flags(&mut self) {
+        let ember = crate::terrain::info(self.map).ember;
+        let glacier = crate::terrain::info(self.map).glacier;
+        let eh = self.ground(ember.x, ember.z);
+        let gh = self.ground(glacier.x, glacier.z);
         self.flags[0] = Flag {
             team: Team::Ember,
-            pos: Vec3::new(EMBER_HOME.x, eh + 0.2, EMBER_HOME.z),
-            home: Vec3::new(EMBER_HOME.x, eh + 0.2, EMBER_HOME.z),
+            pos: Vec3::new(ember.x, eh + 0.2, ember.z),
+            home: Vec3::new(ember.x, eh + 0.2, ember.z),
             carrier: None,
             drop_timer: 0.0,
         };
         self.flags[1] = Flag {
             team: Team::Glacier,
-            pos: Vec3::new(GLACIER_HOME.x, gh + 0.2, GLACIER_HOME.z),
-            home: Vec3::new(GLACIER_HOME.x, gh + 0.2, GLACIER_HOME.z),
+            pos: Vec3::new(glacier.x, gh + 0.2, glacier.z),
+            home: Vec3::new(glacier.x, gh + 0.2, glacier.z),
             carrier: None,
             drop_timer: 0.0,
         };
@@ -505,6 +569,9 @@ impl World {
         self.input.jump_prev = self.input.jump;
 
         for i in 0..n {
+            if self.players[i].remote {
+                continue;
+            }
             if !self.players[i].alive {
                 self.players[i].respawn -= dt;
                 if self.players[i].respawn <= 0.0 {
@@ -514,7 +581,7 @@ impl World {
             }
 
             let is_local = i == self.player_id && !self.players[i].is_bot;
-            let (wish_x, wish_z, jump_held, _jump_edge, fire, jet) = if is_local {
+            let (wish_x, wish_z, jump_held, jump_edge, fire, jet) = if is_local {
                 (
                     self.input.move_x.clamp(-1.0, 1.0),
                     self.input.move_z.clamp(-1.0, 1.0),
@@ -527,6 +594,8 @@ impl World {
                 self.bot_wish(i)
             };
 
+            let map = self.map;
+            let edge = self.map_size() - 6.0;
             let land_hit = {
                 let p = &mut self.players[i];
                 p.cooldown = (p.cooldown - dt).max(0.0);
@@ -537,13 +606,17 @@ impl World {
                     wish /= wlen;
                 }
 
-                p.vel.y -= GRAVITY * dt;
+                p.vel.y -= gravity_for_speed(Vec2::new(p.vel.x, p.vel.z).length()) * dt;
 
-                let h = height(p.pos.x, p.pos.z);
-                let nrm = normal(p.pos.x, p.pos.z);
+                let h = crate::terrain::height_on(map, p.pos.x, p.pos.z);
+                let nrm = crate::terrain::normal_on(map, p.pos.x, p.pos.z);
                 let ground_y = h + PLAYER_RADIUS;
                 let was_ground = p.on_ground;
-                p.on_ground = p.pos.y <= ground_y + 0.12 && p.vel.y <= 6.0;
+                // Contact depends on motion relative to the slope, not world Y:
+                // a skier climbing a ramp can have positive Y velocity.
+                let contact_normal = ski_normal(map, p.pos.x, p.pos.z);
+                p.on_ground = p.pos.y <= ground_y + 0.12
+                    && p.vel.dot(contact_normal) <= 0.5;
                 if p.on_ground {
                     p.coyote = 0.14;
                 } else {
@@ -566,12 +639,10 @@ impl World {
                 let grounded = p.on_ground || p.coyote > 0.0;
                 let horiz_speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
                 let mass = player_mass(p);
-                // Held jump is the Tribes 2 ski switch. The hop fades from full
-                // below minJumpSpeed to nothing at maxJumpSpeed, so a fast hold
-                // stays on the snow instead of pogoing.
-                // A steep face grabs the ski. On a flat, the hop fades out with speed.
+                // A fresh press can hop; holding through landing always skis.
+                // This removes the repeated low-speed pogo of the earlier hybrid.
                 let steep = nrm.y < 0.82;
-                let hop = if jump_held && grounded && !steep {
+                let hop = if jump_edge && grounded && !steep {
                     jump_scale(horiz_speed, p.vel.y)
                 } else {
                     0.0
@@ -585,88 +656,79 @@ impl World {
                 p.skiing = jump_held && p.on_ground && (steep || hop <= 0.01);
 
                 p.jetting = false;
-                if jet && p.energy > 0.5 {
+                if jet && p.energy >= MIN_JET_ENERGY {
                     p.jetting = true;
-                    // Look does not steer the jet. No keys: straight up. WASD
-                    // spends part of that lift to push you that way.
+                    // Look does not aim the jet. Climb stays up. WASD is the
+                    // direction: it can turn a fast line, and it only adds speed
+                    // up to 72 km/h.
                     let scale = MASS / mass;
-                    let lift = JET_LIFT * scale;
-                    let steal = if wish.length_squared() > 0.04 {
-                        JET_STEAL * wish.length().min(1.0)
-                    } else {
-                        0.0
-                    };
-                    let before_h = Vec3::new(p.vel.x, 0.0, p.vel.z);
-                    p.vel.y += lift * (1.0 - steal) * dt;
-                    if steal > 0.0 {
-                        p.vel += wish.normalize_or_zero() * lift * steal * dt;
-                    }
-                    let after_h = Vec3::new(p.vel.x, 0.0, p.vel.z);
-                    let was = before_h.length();
-                    let now = after_h.length();
-                    let cap = JET_HORIZ_MAX.max(was);
-                    if now > cap && now > 0.01 {
-                        let s = cap / now;
-                        p.vel.x *= s;
-                        p.vel.z *= s;
+                    let up_speed = p.vel.y.max(0.0);
+                    p.vel.y += JET_ACCEL * scale * jet_falloff(up_speed) * dt;
+                    let before = Vec3::new(p.vel.x, 0.0, p.vel.z);
+                    let before_h = before.length();
+                    if wish.length_squared() > 0.04 {
+                        let wish_dir = wish.normalize_or_zero();
+                        let along = before.dot(wish_dir).max(0.0);
+                        let push = JET_HORIZ_ACCEL * scale * jet_falloff(along) * wish.length().min(1.0);
+                        p.vel += wish_dir * push * dt;
+                        let after = Vec3::new(p.vel.x, 0.0, p.vel.z);
+                        let now = after.length();
+                        let cap = if before_h >= JET_THRUST_CAP {
+                            before_h
+                        } else {
+                            JET_THRUST_CAP
+                        };
+                        if now > cap && now > 0.01 {
+                            let s = cap / now;
+                            p.vel.x = after.x * s;
+                            p.vel.z = after.z * s;
+                        }
                     }
                     p.on_ground = false;
                     p.skiing = false;
                     p.coyote = 0.0;
                     p.energy = (p.energy - ENERGY_JET * dt).max(0.0);
-                    p.regen_delay = 0.42;
-                }
-
-                if p.jetting {
-                    // keep
                 } else {
-                    p.regen_delay = (p.regen_delay - dt).max(0.0);
-                    if p.regen_delay <= 0.0 {
-                        p.energy = (p.energy + ENERGY_REGEN * dt).min(ENERGY_MAX);
-                    }
+                    p.energy = (p.energy + ENERGY_REGEN * dt).min(ENERGY_MAX);
                 }
-
-                let horiz = Vec3::new(p.vel.x, 0.0, p.vel.z);
-                let speed = horiz.length();
 
                 if p.on_ground && !p.skiing {
-                    // Walk: friction pulls you to a run, and keys accelerate inside that cap.
-                    if speed > 0.05 {
-                        let drag = (GROUND_DRAG * dt).min(1.0);
-                        p.vel.x *= 1.0 - drag;
-                        p.vel.z *= 1.0 - drag;
-                    }
-                    p.vel += wish * WALK_ACCEL * dt;
-                    let h2 = Vec3::new(p.vel.x, 0.0, p.vel.z);
-                    let s2 = h2.length();
-                    if s2 > WALK_MAX {
-                        let scale = WALK_MAX / s2;
-                        p.vel.x *= scale;
-                        p.vel.z *= scale;
-                    }
+                    // Approach the desired walking speed; releasing ski brakes
+                    // progressively instead of instantly deleting route momentum.
+                    let horizontal = Vec3::new(p.vel.x, 0.0, p.vel.z);
+                    let delta = wish * WALK_MAX - horizontal;
+                    let accel = if horizontal.length() > WALK_MAX || wish.length_squared() < 0.01 {
+                        GROUND_BRAKE
+                    } else { WALK_ACCEL };
+                    p.vel += delta.clamp_length_max(accel * dt);
                 } else if p.skiing {
-                    ride_ski(p, wish, dt);
+                    ride_ski(map, p, wish, dt);
                 } else {
-                    // Air: coast. Movement keys do nothing until you touch snow.
-                    let drag = AIR_DRAG + if p.carrying.is_some() { 0.12 } else { 0.0 };
-                    p.vel.x *= 1.0 - drag * dt;
-                    p.vel.z *= 1.0 - drag * dt;
+                    // Ascend-style air control: coast without drag, steer with
+                    // WASD. Above walking speed, steering cannot add energy.
+                    if !p.jetting {
+                        steer_horizontal(p, wish, AIR_ACCEL, WALK_MAX, dt);
+                    }
                 }
                 apply_speed_limits(p, dt);
 
                 p.pos += p.vel * dt;
                 if p.skiing {
-                    let ground_y = height(p.pos.x, p.pos.z) + PLAYER_RADIUS;
+                    let ground_y = crate::terrain::height_on(map, p.pos.x, p.pos.z) + PLAYER_RADIUS;
                     let drop = p.pos.y - ground_y;
-                    // Stay on the face. A real hop has already cleared skiing.
-                    if drop < 2.2 {
+                    let nrm = ski_normal(map, p.pos.x, p.pos.z);
+                    // Catch a nearby descending surface, never pull an outgoing
+                    // velocity down to a crest. Ramps must launch the player.
+                    if drop <= 0.0 || (drop < 0.15 && p.vel.dot(nrm) <= 0.0) {
                         p.pos.y = ground_y;
-                        let nrm = ski_normal(p.pos.x, p.pos.z);
                         let vn = p.vel.dot(nrm);
                         if vn < 0.0 {
                             p.vel -= nrm * vn;
                         }
                         p.on_ground = true;
+                    } else {
+                        p.on_ground = false;
+                        p.skiing = false;
                     }
                 }
 
@@ -675,16 +737,16 @@ impl World {
                     p.pos.x = 6.0;
                     p.vel.x = p.vel.x.abs() * 0.4;
                 }
-                if p.pos.x > MAP - 6.0 {
-                    p.pos.x = MAP - 6.0;
+                if p.pos.x > edge {
+                    p.pos.x = edge;
                     p.vel.x = -p.vel.x.abs() * 0.4;
                 }
                 if p.pos.z < 6.0 {
                     p.pos.z = 6.0;
                     p.vel.z = p.vel.z.abs() * 0.4;
                 }
-                if p.pos.z > MAP - 6.0 {
-                    p.pos.z = MAP - 6.0;
+                if p.pos.z > edge {
+                    p.pos.z = edge;
                     p.vel.z = -p.vel.z.abs() * 0.4;
                 }
 
@@ -742,7 +804,7 @@ impl World {
         let uphill = to.y > 5.0;
         let r = self.rng();
         let jump_edge = on_ground && r < 0.02;
-        let jet = energy > 18.0 && (!on_ground || uphill);
+        let jet = energy >= MIN_JET_ENERGY && (!on_ground || uphill);
         (mx, mz.max(0.15), true, jump_edge, fire && r < 0.7, jet)
     }
 
@@ -750,19 +812,21 @@ impl World {
         let pos = self.players[i].pos;
         let mut vel = self.players[i].vel;
         let mut new_pos = pos;
-        for p in &self.pillars {
-            let base_y = height(p.x, p.z);
-            if pos.y > base_y + p.h + 1.2 {
+        let map = self.map;
+        let pillars: Vec<(f32, f32, f32, f32)> = self.pillars.iter().map(|p| (p.x, p.z, p.r, p.h)).collect();
+        for (px, pz, pr, ph) in pillars {
+            let base_y = crate::terrain::height_on(map, px, pz);
+            if pos.y > base_y + ph + 1.2 {
                 continue;
             }
-            let dx = new_pos.x - p.x;
-            let dz = new_pos.z - p.z;
+            let dx = new_pos.x - px;
+            let dz = new_pos.z - pz;
             let d = dx.hypot(dz);
-            let min = p.r + PLAYER_RADIUS;
+            let min = pr + PLAYER_RADIUS;
             if d < min {
                 let (nx, nz) = if d > 1e-3 { (dx / d, dz / d) } else { (1.0, 0.0) };
-                new_pos.x = p.x + nx * min;
-                new_pos.z = p.z + nz * min;
+                new_pos.x = px + nx * min;
+                new_pos.z = pz + nz * min;
                 let vn = vel.x * nx + vel.z * nz;
                 if vn < 0.0 {
                     vel.x -= nx * vn * 1.35;
@@ -777,11 +841,11 @@ impl World {
     fn shoot(&mut self, i: usize) {
         let p = &self.players[i];
         let dir = look_dir(p.yaw, p.pitch);
-        let origin = p.pos + Vec3::Y * 1.35 + dir * 1.5;
+        let origin = p.pos + Vec3::Y * 1.2 + dir * 1.05;
         let kind = p.weapon;
         let speed = if kind == 0 { DISC_SPEED } else { BOLT_SPEED };
-        let inherit = p.vel * 0.4;
-        let mut vel = dir * speed + inherit;
+        let inherit = if kind == 0 { DISC_INHERIT } else { 0.35 };
+        let mut vel = dir * speed + p.vel * inherit;
         let is_bot = p.is_bot;
         let team = p.team;
         if is_bot {
@@ -795,8 +859,9 @@ impl World {
             vel,
             team,
             owner: i,
-            life: if kind == 0 { 3.4 } else { 1.6 },
+            life: if kind == 0 { 5.0 } else { 1.6 },
             kind,
+            spin: 0.0,
         });
         {
             let p = &mut self.players[i];
@@ -817,6 +882,8 @@ impl World {
         let mut explode: Vec<(Vec3, usize, u8, Team)> = Vec::new();
         let mut keep = Vec::new();
 
+        let map = self.map;
+        let far = self.map_size() - 1.0;
         for mut d in self.discs.drain(..) {
             d.life -= dt;
             if d.life <= 0.0 {
@@ -825,10 +892,13 @@ impl World {
             }
             let mut dead = false;
             for _ in 0..n_sub {
-                d.vel.y -= GRAVITY * 0.22 * sdt;
+                d.spin += sdt * 42.0;
+                // Discs fly straight; only the repeater bolt is ballistic.
+                let grav = if d.kind == 0 { 0.0 } else { 0.22 };
+                d.vel.y -= GRAVITY * grav * sdt;
                 let next = d.pos + d.vel * sdt;
-                let h = height(next.x, next.z);
-                if next.y < h + 0.28 || next.x < 1.0 || next.x > MAP - 1.0 || next.z < 1.0 || next.z > MAP - 1.0
+                let h = crate::terrain::height_on(map, next.x, next.z);
+                if next.y < h + 0.28 || next.x < 1.0 || next.x > far || next.z < 1.0 || next.z > far
                 {
                     explode.push((Vec3::new(next.x, h.max(next.y), next.z), d.owner, d.kind, d.team));
                     dead = true;
@@ -862,11 +932,12 @@ impl World {
     }
 
     fn explode(&mut self, pos: Vec3, owner: usize, kind: u8, team: Team) {
-        let max_r = if kind == 0 { 8.4 } else { 2.2 };
+        let max_r = if kind == 0 { DISC_RADIUS } else { 2.2 };
         self.explosions.push(Explosion {
             pos,
             age: 0.0,
             max_r,
+            kind,
         });
         self.push_event("boom");
         let dmg_core = if kind == 0 { 52.0 } else { 14.0 };
@@ -888,9 +959,17 @@ impl World {
             let mul = if i == owner { 0.4 } else { 1.0 };
             let dmg = (12.0 + dmg_core * fall * fall) * mul;
             self.players[i].health -= dmg;
-            let dir = (self.players[i].pos + Vec3::Y - pos).normalize_or_zero();
-            let kick = if kind == 0 { 22.0 } else { 6.0 };
-            self.players[i].vel += dir * kick * fall;
+            // Kick from the blast, not from the chest, so a disc at your feet throws you up.
+            let body = self.players[i].pos + Vec3::Y * 0.7;
+            let away = (body - pos).normalize_or_zero();
+            let kick = if kind == 0 { DISC_KICK } else { 6.0 };
+            let push = away * kick * fall;
+            self.players[i].vel += push;
+            if push.y > 4.0 {
+                self.players[i].on_ground = false;
+                self.players[i].skiing = false;
+                self.players[i].coyote = 0.0;
+            }
             if i == pid {
                 self.damage_flash = 0.7;
                 self.trauma = (self.trauma + 0.35 * fall).min(1.0);
@@ -938,15 +1017,16 @@ impl World {
             pos: self.players[i].pos + Vec3::Y,
             age: 0.0,
             max_r: 4.5,
+            kind: 2,
         });
     }
 
     fn respawn(&mut self, i: usize) {
         let ember = self.players[i].team == Team::Ember;
-        let mut pos = spawn(ember);
+        let mut pos = self.stand(ember);
         pos.x += (self.rng() - 0.5) * 8.0;
         pos.z += (self.rng() - 0.5) * 6.0;
-        pos.y = height(pos.x, pos.z) + 1.2;
+        pos.y = self.ground(pos.x, pos.z) + 1.2;
         let p = &mut self.players[i];
         p.pos = pos;
         p.vel = Vec3::ZERO;
@@ -965,9 +1045,10 @@ impl World {
     }
 
     fn drop_flag(&mut self, team: Team, pos: Vec3) {
+        let y = self.ground(pos.x, pos.z) + 0.4;
         let f = &mut self.flags[team.idx()];
         f.carrier = None;
-        f.pos = Vec3::new(pos.x, height(pos.x, pos.z) + 0.4, pos.z);
+        f.pos = Vec3::new(pos.x, y, pos.z);
         f.drop_timer = 14.0;
         self.msg(
             if team == self.players[self.player_id].team {
@@ -995,7 +1076,8 @@ impl World {
             if self.flags[fi].carrier.is_none() && self.flags[fi].drop_timer > 0.0 {
                 self.flags[fi].drop_timer -= dt;
                 let pos = self.flags[fi].pos;
-                self.flags[fi].pos.y = height(pos.x, pos.z) + 0.4;
+                let y = self.ground(pos.x, pos.z) + 0.4;
+                self.flags[fi].pos.y = y;
                 if self.flags[fi].drop_timer <= 0.0 {
                     self.return_flag(fi);
                 }
@@ -1118,6 +1200,18 @@ impl World {
             .map(|p| Vec2::new(p.vel.x, p.vel.z).length())
             .unwrap_or(0.0)
     }
+    pub fn sync_remotes(&mut self, poses: &[(String, f32, f32, f32, f32)]) {
+        let me = self.players.get(self.player_id).map(|p| p.team).unwrap_or(Team::Ember);
+        self.players.retain(|p| !p.remote);
+        for (name, x, y, z, yaw) in poses {
+            let mut skier = make_player(me.other(), false, Vec3::new(*x, *y, *z), *yaw, BotRole::Offense);
+            skier.remote = true;
+            skier.alive = true;
+            let _ = name;
+            self.players.push(skier);
+        }
+    }
+
     pub fn player_pos(&self) -> Vec3 {
         self.players
             .get(self.player_id)
@@ -1128,12 +1222,14 @@ impl World {
     pub fn camera(&self) -> (Vec3, Vec3, f32) {
         if self.state == MatchState::Flyby || self.players.is_empty() {
             let t = self.flyby;
+            let c = self.map_size() * 0.5;
+            let span = (self.map_size() * 0.22).clamp(52.0, 380.0);
             let eye = Vec3::new(
-                128.0 + (t * 0.18).sin() * 52.0,
-                38.0 + (t * 0.11).cos() * 6.0,
-                128.0 + (t * 0.18).cos() * 86.0,
+                c + (t * 0.18).sin() * span * 0.6,
+                self.ground(c, c) + 28.0,
+                c + (t * 0.18).cos() * span,
             );
-            let target = Vec3::new(128.0, 16.0, 128.0);
+            let target = Vec3::new(c, self.ground(c, c) + 8.0, c);
             let dir = (target - eye).normalize_or_zero();
             return (eye, dir, 62.0);
         }
@@ -1219,7 +1315,7 @@ impl World {
         }
         let msg = self.message.replace('"', "");
         format!(
-            "{{\"health\":{:.1},\"energy\":{:.1},\"speed\":{:.1},\"yaw\":{:.4},\"pitch\":{:.4},\"px\":{:.2},\"py\":{:.2},\"pz\":{:.2},\"ember\":{},\"glacier\":{},\"time\":{:.1},\"state\":{},\"weapon\":{},\"flag\":{},\"ownFlag\":{},\"hit\":{:.2},\"flash\":{:.2},\"msg\":\"{}\",\"kills\":{},\"deaths\":{},\"winner\":{},\"team\":{},\"onGround\":{},\"ski\":{},\"jet\":{},\"alive\":{},\"cd\":{:.2},\"events\":\"{}\",\"blips\":\"{}\"}}",
+            "{{\"health\":{:.1},\"energy\":{:.1},\"speed\":{:.1},\"yaw\":{:.4},\"pitch\":{:.4},\"px\":{:.2},\"py\":{:.2},\"pz\":{:.2},\"ember\":{},\"glacier\":{},\"time\":{:.1},\"state\":{},\"weapon\":{},\"flag\":{},\"ownFlag\":{},\"hit\":{:.2},\"flash\":{:.2},\"msg\":\"{}\",\"kills\":{},\"deaths\":{},\"winner\":{},\"team\":{},\"onGround\":{},\"ski\":{},\"jet\":{},\"alive\":{},\"cd\":{:.2},\"events\":\"{}\",\"blips\":\"{}\",\"mapSize\":{:.0}}}",
             health,
             energy,
             speed,
@@ -1248,7 +1344,8 @@ impl World {
             alive,
             cd,
             self.events,
-            blips
+            blips,
+            self.map_size()
         )
     }
 }
@@ -1256,6 +1353,126 @@ impl World {
 #[cfg(test)]
 mod controls {
     use super::*;
+
+    fn solo_airborne() -> World {
+        let mut world = World::new();
+        world.start_match(true);
+        world.players.truncate(1);
+        let p = &mut world.players[0];
+        p.pos = Vec3::new(128.0, 150.0, 128.0);
+        p.vel = Vec3::ZERO;
+        p.yaw = 0.0;
+        p.pitch = 0.0;
+        p.on_ground = false;
+        world
+    }
+
+    #[test]
+    fn airborne_momentum_survives_coasting_and_flag_pickup() {
+        for flag in [None, Some(Team::Glacier)] {
+            let mut world = solo_airborne();
+            world.players[0].vel = Vec3::new(0.0, 0.0, -50.0);
+            world.players[0].carrying = flag;
+            step(&mut world, 60);
+            assert!((world.players[0].vel.z + 50.0).abs() < 0.01, "coasting must preserve route speed");
+            assert!(world.players[0].alive);
+        }
+    }
+
+    #[test]
+    fn air_strafe_steers_left_and_right_without_free_speed() {
+        for direction in [-1.0, 1.0] {
+            let mut world = solo_airborne();
+            world.players[0].vel = Vec3::new(0.0, 0.0, -50.0);
+            world.input.move_x = direction;
+            world.input.move_z = 1.0;
+            step(&mut world, 30);
+            let p = &world.players[0];
+            assert!(p.pos.x * direction > 128.0 * direction + 0.2, "strafe sign must agree with the view");
+            assert!(p.vel.x * direction > 1.5);
+            assert!(Vec2::new(p.vel.x, p.vel.z).length() <= 50.01);
+        }
+    }
+
+    #[test]
+    fn holding_ski_through_landing_does_not_repeat_the_jump() {
+        let mut world = World::new();
+        world.start_match(true);
+        world.players.truncate(1);
+        world.input.jump = true;
+        step(&mut world, 120);
+        let p = &world.players[0];
+        assert!(p.skiing && p.on_ground, "holding Space should settle into skiing");
+        assert!(p.vel.y.abs() < 0.1, "no automatic second hop");
+        world.input.jump = false;
+        step(&mut world, 1);
+        world.input.jump = true;
+        step(&mut world, 1);
+        assert!(world.players[0].vel.y > 4.0, "a new press can still jump");
+    }
+
+    #[test]
+    fn ski_contact_does_not_pull_an_outgoing_velocity_back_to_terrain() {
+        let mut world = World::new();
+        world.start_match(true);
+        world.players.truncate(1);
+        let p = &mut world.players[0];
+        p.vel = Vec3::new(30.0, 8.0, 0.0);
+        p.on_ground = true;
+        let start_y = p.pos.y;
+        world.input.jump = true;
+        step(&mut world, 1);
+        let p = &world.players[0];
+        assert!(!p.on_ground && !p.skiing, "outgoing motion must launch from a crest");
+        assert!(p.pos.y > start_y + 0.1);
+        assert!(p.vel.x > 29.9);
+    }
+
+    #[test]
+    fn empty_jetpack_recharges_in_five_seconds() {
+        let mut world = solo_airborne();
+        world.players[0].pos.y = 1000.0;
+        world.players[0].energy = 0.0;
+        step(&mut world, 150);
+        assert!((world.players[0].energy - 30.0).abs() < 0.1);
+        step(&mut world, 150);
+        assert!((world.players[0].energy - ENERGY_MAX).abs() < 0.1);
+    }
+
+    #[test]
+    fn discs_inherit_velocity_and_fly_without_gravity() {
+        let mut world = solo_airborne();
+        world.players[0].vel = Vec3::new(20.0, 0.0, 0.0);
+        world.shoot(0);
+        let d = &world.discs[0];
+        assert!((d.vel.x - 15.0).abs() < 0.001, "retain weapon velocity inheritance");
+        assert!((d.vel.z + 95.0).abs() < 0.001);
+        let y = d.pos.y;
+        for _ in 0..30 { world.step_discs(STEP); }
+        assert_eq!(world.discs.len(), 1);
+        assert!((world.discs[0].pos.y - y).abs() < 0.001, "disc should not sag");
+    }
+
+    #[test]
+    fn running_reaches_its_advertised_speed() {
+        let mut world = World::new();
+        world.start_match(true);
+        world.players.truncate(1);
+        world.players[0].yaw = 0.0;
+        world.input.move_z = 1.0;
+        step(&mut world, 30);
+        let v = world.players[0].vel;
+        assert!(Vec2::new(v.x, v.z).length() > WALK_MAX * 0.95);
+    }
+
+    #[test]
+    fn fast_routes_get_a_smooth_gravity_reduction() {
+        assert_eq!(gravity_for_speed(50.0), GRAVITY);
+        assert!((gravity_for_speed(250.0 / 3.6 - 0.001)
+            - gravity_for_speed(250.0 / 3.6 + 0.001)).abs() < 0.001);
+        assert!(gravity_for_speed(90.0) < GRAVITY * 0.8);
+        assert!(gravity_for_speed(120.0) >= GRAVITY * 0.65 - 0.001);
+    }
 
     fn step(world: &mut World, frames: u32) {
         for _ in 0..frames {
@@ -1350,13 +1567,13 @@ mod controls {
         }
         {
             let p = &mut world.players[world.player_id];
+            p.pos = Vec3::new(EMBER_HOME.x, height(EMBER_HOME.x, EMBER_HOME.z) + PLAYER_RADIUS, EMBER_HOME.z);
             p.vel = Vec3::new(MAX_JUMP_SPEED + 4.0, 0.0, 0.0);
             p.on_ground = true;
         }
         let before = MAX_JUMP_SPEED + 4.0;
-        world.input.jump = true;
-        world.input.move_z = 1.0;
-        for _ in 0..40 {
+        for _ in 0..12 {
+            world.input.jump = true;
             world.tick(STEP);
         }
         let p = &world.players[world.player_id];
@@ -1365,6 +1582,55 @@ mod controls {
         assert!(
             speed <= before + 0.4,
             "skiing must not drive you faster on a flat, before={before:.1} after={speed:.1}"
+        );
+    }
+
+    #[test]
+    fn downhill_ski_outruns_plain_gravity() {
+        let x = 128.0;
+        let z = 46.0;
+        let n = ski_normal(MapId::Valley, x, z);
+        let g = Vec3::new(0.0, -GRAVITY, 0.0);
+        let tangent = g - n * g.dot(n);
+        let down = Vec3::new(tangent.x, 0.0, tangent.z);
+        assert!(
+            down.length() > 3.0,
+            "the drop should be a real slope, accel={}",
+            down.length()
+        );
+        let mut world = World::new();
+        world.start_match(true);
+        for _ in 0..10 {
+            world.tick(STEP);
+        }
+        {
+            let p = &mut world.players[world.player_id];
+            // Start tangent to the slope. A horizontal velocity pointing out
+            // of this downhill face is a launch, not supported skiing.
+            let start = tangent.normalize_or_zero() * (MAX_JUMP_SPEED + 4.0);
+            p.pos = Vec3::new(x, height(x, z) + PLAYER_RADIUS, z);
+            p.vel = start;
+            p.on_ground = true;
+            p.yaw = start.x.atan2(start.z);
+        }
+        let before = {
+            let p = &world.players[world.player_id];
+            Vec3::new(p.vel.x, 0.0, p.vel.z).length()
+        };
+        let mut contact_frames = 0;
+        for _ in 0..45 {
+            world.input.jump = true;
+            world.tick(STEP);
+            contact_frames += u32::from(world.players[world.player_id].skiing);
+        }
+        let p = &world.players[world.player_id];
+        let after = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
+        let gain = after - before;
+        let plain = down.length() * 45.0 * STEP;
+        assert!(contact_frames > 10, "the slope should support sustained ski contact, got {contact_frames}");
+        assert!(
+            gain > plain * 1.25,
+            "downhill ski should outrun plain gravity, gain={gain:.2} plain={plain:.2}"
         );
     }
 
@@ -1422,7 +1688,7 @@ mod controls {
     }
 
     #[test]
-    fn the_flag_adds_weight() {
+    fn flag_pickup_does_not_change_jump_strength() {
         let mut light = World::new();
         let mut heavy = World::new();
         for world in [&mut light, &mut heavy] {
@@ -1438,11 +1704,11 @@ mod controls {
         heavy.tick(STEP);
         let a = light.players[light.player_id].vel.y;
         let b = heavy.players[heavy.player_id].vel.y;
-        assert!(b < a - 0.5, "flag mass should soften the hop, light={a:.2} heavy={b:.2}");
+        assert!((b - a).abs() < 0.01, "a flag must not alter movement, light={a:.2} carrier={b:.2}");
     }
 
     #[test]
-    fn w_does_not_propel_in_the_air() {
+    fn air_control_can_start_a_slow_drift() {
         let mut world = World::new();
         world.start_match(true);
         for _ in 0..40 {
@@ -1471,13 +1737,13 @@ mod controls {
         let h1 = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
         assert!(!p.on_ground, "still airborne");
         assert!(
-            h1 < h0 + 0.35,
-            "W in the air must not propel, h0={h0:.2} h1={h1:.2}"
+            h1 > h0 + 0.8 && h1 <= WALK_MAX,
+            "W should give limited air control, h0={h0:.2} h1={h1:.2}"
         );
     }
 
     #[test]
-    fn jet_ignores_look_and_wasd_spends_lift() {
+    fn jet_keeps_climb_and_wasd_adds_a_push() {
         let mut idle = World::new();
         let mut held = World::new();
         let mut looked = World::new();
@@ -1506,13 +1772,185 @@ mod controls {
         let c = &looked.players[looked.player_id];
         let b_h = Vec3::new(b.vel.x, 0.0, b.vel.z).length();
         let a_h = Vec3::new(a.vel.x, 0.0, a.vel.z).length();
-        assert!(a.vel.y > b.vel.y + 1.0, "WASD should spend lift, idle vy={} held vy={}", a.vel.y, b.vel.y);
-        assert!(b_h > a_h + 1.0, "WASD should drive the jet, held={b_h:.1} idle={a_h:.1}");
+        assert!(
+            (a.vel.y - b.vel.y).abs() < 0.5,
+            "WASD must not spend climb, idle vy={} held vy={}",
+            a.vel.y,
+            b.vel.y
+        );
+        assert!(b_h > a_h + 1.0, "WASD should add a push, held={b_h:.1} idle={a_h:.1}");
         assert!(
             (a.vel.y - c.vel.y).abs() < 0.4,
             "look must not change the jet, idle vy={} looked vy={}",
             a.vel.y,
             c.vel.y
+        );
+    }
+
+    #[test]
+    fn a_fast_ski_keeps_full_jet_climb() {
+        let mut straight = World::new();
+        let mut held = World::new();
+        for world in [&mut straight, &mut held] {
+            world.start_match(true);
+            for _ in 0..20 {
+                world.tick(STEP);
+            }
+            let p = &mut world.players[world.player_id];
+            p.on_ground = false;
+            p.pos.y += 12.0;
+            p.vel = Vec3::new(JET_THRUST_CAP + 10.0, 0.0, 0.0);
+            p.energy = ENERGY_MAX;
+            p.yaw = 0.0;
+        }
+        for _ in 0..20 {
+            straight.input.jet = true;
+            held.input.jet = true;
+            held.input.move_z = 1.0;
+            straight.tick(STEP);
+            held.tick(STEP);
+        }
+        let a = straight.players[straight.player_id].vel.y;
+        let b = held.players[held.player_id].vel.y;
+        assert!(
+            (a - b).abs() < 0.4,
+            "past the thrust cap a move key must not change climb, straight={a:.2} held={b:.2}"
+        );
+    }
+
+    #[test]
+    fn jet_tank_supports_a_four_second_route_burn() {
+        let mut world = World::new();
+        world.start_match(true);
+        for _ in 0..20 {
+            world.tick(STEP);
+        }
+        {
+            let p = &mut world.players[world.player_id];
+            p.on_ground = false;
+            p.pos.y += 40.0;
+            p.vel = Vec3::ZERO;
+            p.energy = ENERGY_MAX;
+        }
+        let mut burned = 0;
+        for _ in 0..400 {
+            world.input.jet = true;
+            world.tick(STEP);
+            if world.players[world.player_id].jetting {
+                burned += 1;
+            } else if burned > 0 {
+                break;
+            }
+        }
+        let seconds = burned as f32 * STEP;
+        assert!(
+            (seconds - 3.8).abs() < 0.1,
+            "tank should burn for roughly four seconds before reserve, got {seconds:.2}"
+        );
+        assert!(
+            world.players[world.player_id].energy < MIN_JET_ENERGY,
+            "the burn should stop at minJetEnergy"
+        );
+    }
+
+    #[test]
+    fn jet_alone_does_not_make_a_ski_line() {
+        let mut world = World::new();
+        world.start_match(true);
+        for _ in 0..20 {
+            world.tick(STEP);
+        }
+        {
+            let p = &mut world.players[world.player_id];
+            p.on_ground = false;
+            p.pos.y += 40.0;
+            p.vel = Vec3::ZERO;
+            p.energy = ENERGY_MAX;
+            p.yaw = 0.0;
+        }
+        for _ in 0..180 {
+            world.input.jet = true;
+            world.input.move_z = 1.0;
+            world.tick(STEP);
+            if !world.players[world.player_id].jetting && world.players[world.player_id].energy < MIN_JET_ENERGY {
+                break;
+            }
+        }
+        let p = &world.players[world.player_id];
+        let h = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
+        assert!(
+            h <= JET_THRUST_CAP + 1.0,
+            "jetting with W should fade by 72 km/h, h={h:.2} cap={:.2}",
+            JET_THRUST_CAP
+        );
+    }
+
+    #[test]
+    fn a_disc_at_your_feet_throws_you() {
+        let mut world = World::new();
+        world.start_match(true);
+        for _ in 0..20 {
+            world.tick(STEP);
+        }
+        let id = world.player_id;
+        {
+            let p = &mut world.players[id];
+            p.pitch = -1.2;
+            p.vel = Vec3::ZERO;
+            p.weapon = 0;
+            p.cooldown = 0.0;
+            p.on_ground = true;
+        }
+        world.input.weapon = 0;
+        world.input.fire = true;
+        world.tick(STEP);
+        world.input.fire = false;
+        let mut peak = 0.0_f32;
+        for _ in 0..50 {
+            world.tick(STEP);
+            peak = peak.max(world.players[id].vel.y);
+        }
+        assert!(
+            peak > 8.0,
+            "a disc into the snow at your feet should throw you, peak vy={peak:.2}"
+        );
+    }
+
+    #[test]
+    fn jet_steers_a_fast_line_without_speeding_it_up() {
+        let mut world = World::new();
+        world.start_match(true);
+        for _ in 0..20 {
+            world.tick(STEP);
+        }
+        {
+            let p = &mut world.players[world.player_id];
+            p.on_ground = false;
+            p.pos.y += 30.0;
+            p.vel = Vec3::new(JET_THRUST_CAP + 15.0, 0.0, 0.0);
+            p.energy = ENERGY_MAX;
+            p.yaw = 0.0;
+        }
+        let before = {
+            let p = &world.players[world.player_id];
+            Vec3::new(p.vel.x, 0.0, p.vel.z).length()
+        };
+        for _ in 0..30 {
+            world.input.jet = true;
+            world.input.move_z = 1.0;
+            world.tick(STEP);
+        }
+        let p = &world.players[world.player_id];
+        let h = Vec3::new(p.vel.x, 0.0, p.vel.z);
+        assert!(
+            h.z < -1.0,
+            "holding W while jetting should steer a fast line, vz={}",
+            h.z
+        );
+        assert!(
+            (h.length() - before).abs() < 1.5,
+            "steering must not build a faster line, before={before:.1} after={:.1}",
+            h.length()
         );
     }
 
@@ -1571,8 +2009,22 @@ mod controls {
     }
 }
 
-fn player_mass(p: &Player) -> f32 {
-    MASS + if p.carrying.is_some() { FLAG_MASS } else { 0.0 }
+fn player_mass(_p: &Player) -> f32 {
+    MASS
+}
+
+fn gravity_for_speed(speed: f32) -> f32 {
+    // Gentle high-speed float, blended rather than a sudden threshold change.
+    let blend = ((speed - 250.0 / 3.6) / (100.0 / 3.6)).clamp(0.0, 1.0);
+    GRAVITY * (1.0 - 0.35 * blend * blend * (3.0 - 2.0 * blend))
+}
+
+fn steer_horizontal(p: &mut Player, wish: Vec3, accel: f32, low_speed_cap: f32, dt: f32) {
+    let before = Vec3::new(p.vel.x, 0.0, p.vel.z);
+    let cap = before.length().max(low_speed_cap);
+    let after = (before + wish * accel * dt).clamp_length_max(cap);
+    p.vel.x = after.x;
+    p.vel.z = after.z;
 }
 
 /// Full hop below minJumpSpeed, none at maxJumpSpeed. Vertical speed also fades
@@ -1595,51 +2047,57 @@ fn jump_scale(horiz: f32, vy: f32) -> f32 {
     h * v
 }
 
-fn ski_normal(x: f32, z: f32) -> Vec3 {
-    let e = 6.0;
-    let hl = height(x - e, z);
-    let hr = height(x + e, z);
-    let hd = height(x, z - e);
-    let hu = height(x, z + e);
+fn ski_normal(map: MapId, x: f32, z: f32) -> Vec3 {
+    let e = if crate::terrain::info(map).size > 1000.0 { 12.0 } else { 6.0 };
+    let h = |x, z| crate::terrain::height_on(map, x, z);
+    let hl = h(x - e, z);
+    let hr = h(x + e, z);
+    let hd = h(x, z - e);
+    let hu = h(x, z + e);
     Vec3::new(hl - hr, 2.0 * e, hd - hu).normalize_or_zero()
 }
 
-fn ride_ski(p: &mut Player, wish: Vec3, dt: f32) {
+fn jet_falloff(speed: f32) -> f32 {
+    let knee = JET_THRUST_CAP * 0.8;
+    if speed <= knee {
+        1.0
+    } else if speed >= JET_THRUST_CAP {
+        0.0
+    } else {
+        1.0 - (speed - knee) / (JET_THRUST_CAP - knee)
+    }
+}
+
+fn ride_ski(map: MapId, p: &mut Player, wish: Vec3, dt: f32) {
     // Gravity was already applied straight down. On frictionless snow that
-    // into-ground part becomes slide. Nothing here adds speed of its own.
-    let n = ski_normal(p.pos.x, p.pos.z);
+    // into-ground part becomes slide. Descending multiplies that slide.
+    let n = ski_normal(map, p.pos.x, p.pos.z);
     let vn = p.vel.dot(n);
     if vn < 0.0 {
         p.vel -= n * vn;
     }
-    let speed = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
+    let g = Vec3::new(0.0, -gravity_for_speed(Vec2::new(p.vel.x, p.vel.z).length()), 0.0);
+    let tangent = g - n * g.dot(n);
+    let down = Vec3::new(tangent.x, 0.0, tangent.z);
+    let moving_down = Vec3::new(p.vel.x, 0.0, p.vel.z).dot(down) > 0.0;
+    if moving_down {
+        p.vel += tangent * (SKI_SLOPE_GRAVITY - 1.0) * dt;
+    }
+    let speed = p.vel.length();
     if speed > 1.2 && wish.length_squared() > 0.04 {
-        let dir = Vec3::new(p.vel.x, 0.0, p.vel.z).normalize_or_zero();
-        let steer = (dir + wish * (SKI_TURN * dt)).normalize_or_zero();
-        p.vel.x = steer.x * speed;
-        p.vel.z = steer.z * speed;
+        // Steer in the slope plane, preserving total speed. Fixed acceleration
+        // gives wide high-speed turns instead of the old instant rail-like carve.
+        let tangent_wish = wish - n * wish.dot(n);
+        p.vel = (p.vel + tangent_wish * SKI_TURN_ACCEL * dt).normalize_or_zero() * speed;
     }
 }
 
 fn apply_speed_limits(p: &mut Player, dt: f32) {
-    let carrying = p.carrying.is_some();
-    let mut cap = HORIZ_MAX;
-    let mut resist = HORIZ_RESIST;
-    let mut resist_at = HORIZ_RESIST_SPEED;
-    if carrying {
-        cap *= 0.7;
-        resist = resist.max(0.55);
-        resist_at *= 0.55;
-    }
     let h = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
     if h > 0.01 {
         let mut nh = h;
-        if nh > resist_at && resist > 0.0 {
-            let excess = nh - resist_at;
-            nh = resist_at + excess * (1.0 - resist * dt).max(0.0);
-        }
-        if nh > cap {
-            nh = cap;
+        if nh > HORIZ_MAX {
+            nh = HORIZ_MAX;
         }
         let s = nh / h;
         p.vel.x *= s;
@@ -1667,6 +2125,7 @@ fn make_player(team: Team, bot: bool, pos: Vec3, yaw: f32, role: BotRole) -> Pla
         respawn: 0.0,
         carrying: None,
         is_bot: bot,
+        remote: false,
         on_ground: true,
         skiing: false,
         jetting: false,
@@ -1676,7 +2135,6 @@ fn make_player(team: Team, bot: bool, pos: Vec3, yaw: f32, role: BotRole) -> Pla
         bot_role: role,
         bot_goal: pos,
         bot_think: 0.0,
-        regen_delay: 0.0,
         coyote: 0.0,
     }
 }

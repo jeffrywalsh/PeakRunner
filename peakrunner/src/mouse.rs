@@ -58,7 +58,7 @@ fn web_delta() -> egui::Vec2 {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn web_delta() -> Vec2 {
+fn web_delta() -> egui::Vec2 {
     wasm_take_delta()
 }
 

@@ -6,7 +6,7 @@ use eframe::egui_wgpu::{CallbackResources, CallbackTrait, ScreenDescriptor};
 use glam::{Mat4, Vec3};
 
 use crate::drawlist::{normal_columns, DrawFrame, EmitDraw, LitDraw, MeshId};
-use crate::terrain;
+use crate::terrain::{self, MapId};
 
 const SLOT: u64 = 256;
 const WORLD_SIZE: u64 = 240;
@@ -63,7 +63,7 @@ pub struct SceneGpu {
     sky_layout: wgpu::BindGroupLayout,
     emit_layout: wgpu::BindGroupLayout,
     blit_layout: wgpu::BindGroupLayout,
-    meshes: [Mesh; 4],
+    meshes: [Mesh; 5],
     sampler: wgpu::Sampler,
     uniform: wgpu::Buffer,
     uniform_slots: u32,
@@ -78,6 +78,7 @@ pub struct SceneGpu {
     size: (u32, u32),
     snow: Vec<Vec3>,
     target_is_srgb: bool,
+    terrain_map: MapId,
 }
 
 impl SceneGpu {
@@ -122,10 +123,11 @@ impl SceneGpu {
         let blit_pipe = blit_pipeline(device, &shader, &blit_layout, target_format, blit_entry);
 
         let meshes = [
-            upload(device, "terrain", &terrain::sample_mesh()),
+            upload(device, "terrain", &terrain::sample_mesh_of(MapId::Valley)),
             upload(device, "cube", &cube_mesh()),
             upload(device, "sphere", &sphere_mesh(10, 16)),
             upload(device, "disc", &disc_mesh()),
+            upload(device, "beveled housing", &bevel_mesh()),
         ];
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("scene"),
@@ -177,6 +179,7 @@ impl SceneGpu {
             size: (4, 4),
             snow,
             target_is_srgb: target_format.is_srgb(),
+            terrain_map: MapId::Valley,
         }
     }
 
@@ -189,6 +192,11 @@ impl SceneGpu {
         height: u32,
         frame: &DrawFrame,
     ) {
+        if self.terrain_map != frame.map {
+            self.meshes[0] = upload(device, "terrain", &terrain::sample_mesh_of(frame.map));
+            self.terrain_map = frame.map;
+        }
+
         let width = width.max(1);
         let height = height.max(1);
         if self.size != (width, height) {
@@ -206,10 +214,11 @@ impl SceneGpu {
         let eye = frame.eye;
         let dt = frame.dt;
         for s in &mut self.snow {
+            if frame.map == MapId::Raindance { break; }
             s.y -= 4.2 * dt;
             s.x += 0.4 * dt;
             let w = eye + *s;
-            if w.y < terrain::height(w.x, w.z) + 0.4 || (w - eye).length() > 24.0 {
+            if w.y < terrain::height_on(frame.map, w.x, w.z) + 0.4 || (w - eye).length() > 24.0 {
                 *s = Vec3::new(
                     ((s.x + 17.0) % 40.0) - 20.0,
                     10.0 + ((s.z.abs() * 3.0) % 8.0),
@@ -255,7 +264,7 @@ impl SceneGpu {
             lit_offs.push(push(
                 &mut staging,
                 &mut cursor,
-                bytemuck::bytes_of(&world_uniform(draw, frame.proj * frame.view, frame.eye, frame.sun, frame.fog)),
+                bytemuck::bytes_of(&world_uniform(draw, frame.proj * frame.view, frame.eye, frame.sun, frame.fog, frame.fog_density)),
             ));
         }
         let mut emit_offs = Vec::with_capacity(frame.emit.len());
@@ -272,7 +281,7 @@ impl SceneGpu {
             vm_offs.push(push(
                 &mut staging,
                 &mut cursor,
-                bytemuck::bytes_of(&world_uniform(draw, frame.vm_proj, Vec3::ZERO, vm_sun, Vec3::ZERO)),
+                bytemuck::bytes_of(&world_uniform(draw, frame.vm_proj, Vec3::ZERO, vm_sun, Vec3::ZERO, 0.0)),
             ));
         }
 
@@ -380,7 +389,7 @@ impl SceneGpu {
     }
 }
 
-fn world_uniform(draw: &LitDraw, vp: Mat4, cam: Vec3, sun: Vec3, fog: Vec3) -> WorldUniform {
+fn world_uniform(draw: &LitDraw, vp: Mat4, cam: Vec3, sun: Vec3, fog: Vec3, density: f32) -> WorldUniform {
     let n = normal_columns(draw.model);
     WorldUniform {
         mvp: (vp * draw.model).to_cols_array_2d(),
@@ -393,7 +402,7 @@ fn world_uniform(draw: &LitDraw, vp: Mat4, cam: Vec3, sun: Vec3, fog: Vec3) -> W
         sun: sun.to_array(),
         mode: draw.mode,
         fog: fog.to_array(),
-        pad0: 0.0,
+        pad0: density,
         color: draw.color.to_array(),
         pad1: 0.0,
     }
@@ -475,7 +484,8 @@ fn make_target(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
     let color_view = color.create_view(&wgpu::TextureViewDescriptor::default());
@@ -788,31 +798,94 @@ fn sphere_mesh(lat: u32, lon: u32) -> (Vec<f32>, Vec<u16>) {
     (v, idx)
 }
 
+/// Chamfered rectangular extrusion, unit size, facing down local -Z.
+fn bevel_mesh() -> (Vec<f32>, Vec<u16>) {
+    let outline = [(-0.35, -0.5), (0.35, -0.5), (0.5, -0.3), (0.5, 0.3),
+        (0.35, 0.5), (-0.35, 0.5), (-0.5, 0.3), (-0.5, -0.3)];
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    for i in 0..8 {
+        let (x, y) = outline[i];
+        let (xx, yy) = outline[(i + 1) % 8];
+        let n = Vec3::new(yy - y, x - xx, 0.0).normalize();
+        let b = (vertices.len() / 6) as u16;
+        for p in [[x, y, -0.5], [xx, yy, -0.5], [xx, yy, 0.5], [x, y, 0.5]] {
+            vertices.extend_from_slice(&[p[0], p[1], p[2], n.x, n.y, n.z]);
+        }
+        indices.extend_from_slice(&[b, b + 1, b + 2, b, b + 2, b + 3]);
+    }
+    for sign in [-1.0, 1.0] {
+        let b = (vertices.len() / 6) as u16;
+        vertices.extend_from_slice(&[0.0, 0.0, sign * 0.5, 0.0, 0.0, sign]);
+        for (x, y) in outline {
+            vertices.extend_from_slice(&[x, y, sign * 0.5, 0.0, 0.0, sign]);
+        }
+        for i in 0..8u16 {
+            let a = b + 1 + i;
+            let c = b + 1 + (i + 1) % 8;
+            indices.extend_from_slice(&if sign > 0.0 { [b, a, c] } else { [b, c, a] });
+        }
+    }
+    (vertices, indices)
+}
+
 fn disc_mesh() -> (Vec<f32>, Vec<u16>) {
     let n = 24u16;
-    let mut v = vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+    let mut v = vec![0.0, 0.5, 0.0, 0.0, 1.0, 0.0];
     for i in 0..n {
         let a = i as f32 / n as f32 * std::f32::consts::TAU;
-        v.extend_from_slice(&[a.cos(), 0.0, a.sin(), 0.0, 1.0, 0.0]);
+        v.extend_from_slice(&[a.cos(), 0.5, a.sin(), 0.0, 1.0, 0.0]);
     }
     let mut idx = Vec::new();
     for i in 0..n {
         let a = 1 + i;
         let b = 1 + (i + 1) % n;
-        idx.extend_from_slice(&[0, a, b]);
+        idx.extend_from_slice(&[0, b, a]);
     }
     let base = (n + 1) as usize;
-    v.extend_from_slice(&[0.0, -0.08, 0.0, 0.0, -1.0, 0.0]);
+    v.extend_from_slice(&[0.0, -0.5, 0.0, 0.0, -1.0, 0.0]);
     for i in 0..n {
         let a = i as f32 / n as f32 * std::f32::consts::TAU;
-        v.extend_from_slice(&[a.cos(), -0.08, a.sin(), 0.0, -1.0, 0.0]);
+        v.extend_from_slice(&[a.cos(), -0.5, a.sin(), 0.0, -1.0, 0.0]);
     }
     let b0 = base as u16;
     for i in 0..n {
         let a = b0 + 1 + i;
         let c = b0 + 1 + (i + 1) % n;
-        idx.extend_from_slice(&[b0, c, a]);
+        idx.extend_from_slice(&[b0, a, c]);
     }
+    // Give the projectile a visible rim when seen edge-on.
+    for i in 0..n {
+        let a = i as f32 / n as f32 * std::f32::consts::TAU;
+        let b = (i + 1) as f32 / n as f32 * std::f32::consts::TAU;
+        let base = (v.len() / 6) as u16;
+        for (angle, y) in [(a, -0.5), (b, -0.5), (b, 0.5), (a, 0.5)] {
+            v.extend_from_slice(&[angle.cos(), y, angle.sin(), angle.cos(), 0.0, angle.sin()]);
+        }
+        idx.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
+    }
+    // A raised ridge so the spin is visible. A plain disc is a circle from every angle.
+    let ridge = v.len() / 6;
+    let bar = [
+        [-0.12, 0.02, -0.16],
+        [0.95, 0.02, -0.16],
+        [0.95, 0.02, 0.16],
+        [-0.12, 0.02, 0.16],
+        [-0.12, 0.16, -0.1],
+        [0.95, 0.16, -0.1],
+        [0.95, 0.16, 0.1],
+        [-0.12, 0.16, 0.1],
+    ];
+    for p in bar {
+        v.extend_from_slice(&[p[0], p[1] + 0.5, p[2], 0.0, 1.0, 0.0]);
+    }
+    let r0 = ridge as u16;
+    idx.extend_from_slice(&[
+        r0, r0 + 1, r0 + 2, r0, r0 + 2, r0 + 3,
+        r0 + 4, r0 + 6, r0 + 5, r0 + 4, r0 + 7, r0 + 6,
+        r0, r0 + 4, r0 + 5, r0, r0 + 5, r0 + 1,
+        r0 + 3, r0 + 2, r0 + 6, r0 + 3, r0 + 6, r0 + 7,
+    ]);
     (v, idx)
 }
 
@@ -868,6 +941,68 @@ const _: () = assert!(std::mem::size_of::<EmitUniform>() == EMIT_SIZE as usize);
 
 #[cfg(test)]
 mod shader_check {
+    /// Real GPU render of the production scene, without opening a game window.
+    /// Run with --ignored --nocapture; captures are for visual review, not golden tests.
+    #[test]
+    #[ignore = "requires a GPU adapter"]
+    fn render_gameplay_captures() {
+        use super::*;
+        pollster::block_on(async {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+            let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default())
+                .await.expect("GPU adapter");
+            let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default())
+                .await.expect("GPU device");
+            let mut scene = SceneGpu::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+            let mut world = crate::sim::World::new();
+            world.set_map(MapId::Raindance);
+            world.start_match(true);
+            world.players.truncate(1);
+            world.players[0].yaw = std::f32::consts::PI;
+            world.players[0].pitch = -0.12;
+            let label = std::env::var("PEAKRUNNER_CAPTURE_LABEL").unwrap_or_else(|_| "current".into());
+            std::fs::create_dir_all("screenshots").unwrap();
+            for (name, width, height, cooldown) in [
+                ("desktop", 1280u32, 800u32, 0.0),
+                ("portrait", 390, 844, 0.0),
+                ("firing", 1280, 800, 0.98),
+            ] {
+                world.players[0].cooldown = cooldown;
+                let frame = crate::drawlist::build_frame(&world, width as f32 / height as f32, 0.0);
+                let mut encoder = device.create_command_encoder(&Default::default());
+                scene.render(&device, &queue, &mut encoder, width, height, &frame);
+                let stride = (width * 4).div_ceil(256) * 256;
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("capture"), size: (stride * height) as u64,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                });
+                encoder.copy_texture_to_buffer(
+                    scene.color.as_image_copy(),
+                    wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0, bytes_per_row: Some(stride), rows_per_image: Some(height),
+                    } },
+                    wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                );
+                queue.submit([encoder.finish()]);
+                let (tx, rx) = std::sync::mpsc::channel();
+                buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| { tx.send(r).unwrap(); });
+                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                rx.recv().unwrap().unwrap();
+                let mapped = buffer.slice(..).get_mapped_range().unwrap();
+                let pixels: Vec<u8> = mapped.chunks(stride as usize)
+                    .flat_map(|row| row[..width as usize * 4].iter().copied()).collect();
+                assert!(pixels.chunks_exact(4).any(|p| p[0] > 80 && p[1] > 80), "blank render");
+                let path = format!("screenshots/{label}-{name}.png");
+                let mut encoder = png::Encoder::new(std::fs::File::create(&path).unwrap(), width, height);
+                encoder.set_color(png::ColorType::Rgba);
+                encoder.set_depth(png::BitDepth::Eight);
+                encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
+                println!("Rendered {path}");
+            }
+        });
+    }
+
     #[test]
     fn shaders_validate() {
         let module = naga::front::wgsl::parse_str(include_str!("shaders.wgsl"))

@@ -8,7 +8,8 @@ use crate::audio::Audio;
 use crate::drawlist::build_frame;
 use crate::mouse;
 use crate::scene::{self, SceneCallback};
-use crate::sim::{MatchState, World};
+use crate::sim::{MatchState, World, ENERGY_MAX};
+use crate::terrain::{self, MapId};
 
 const EMBER: Color32 = Color32::from_rgb(226, 74, 50);
 const GLACIER: Color32 = Color32::from_rgb(62, 200, 224);
@@ -22,6 +23,8 @@ enum Mode {
     Play,
     Pause,
     End,
+    Browser,
+    Lobby,
 }
 
 #[derive(Clone, Deserialize)]
@@ -50,6 +53,8 @@ struct Hud {
     alive: u8,
     events: String,
     blips: String,
+    #[serde(default)]
+    map_size: f32,
 }
 
 struct Pad {
@@ -67,6 +72,7 @@ pub struct PeakRunnerApp {
     audio: Audio,
     mode: Mode,
     ember: bool,
+    map: MapId,
     hud: Option<Hud>,
     frame_aspect: f32,
     stick: [f32; 2],
@@ -81,6 +87,8 @@ pub struct PeakRunnerApp {
     wait_fire_release: bool,
     #[cfg(not(target_arch = "wasm32"))]
     pads: Option<gilrs::Gilrs>,
+    #[cfg(not(target_arch = "wasm32"))]
+    net: NetUi,
 }
 
 impl PeakRunnerApp {
@@ -88,10 +96,15 @@ impl PeakRunnerApp {
         scene::install(cc)?;
         style_ui(&cc.egui_ctx);
         Ok(Self {
-            world: World::new(),
+            world: {
+                let mut world = World::new();
+                world.set_map(MapId::Raindance);
+                world
+            },
             audio: Audio::new(),
             mode: Mode::Menu,
             ember: true,
+            map: MapId::Raindance,
             hud: None,
             frame_aspect: 16.0 / 9.0,
             stick: [0.0, 0.0],
@@ -105,6 +118,8 @@ impl PeakRunnerApp {
             wait_fire_release: false,
             #[cfg(not(target_arch = "wasm32"))]
             pads: gilrs::Gilrs::new().ok(),
+            #[cfg(not(target_arch = "wasm32"))]
+            net: NetUi::new(),
         })
     }
 
@@ -119,6 +134,7 @@ impl PeakRunnerApp {
         if ctx.input(|i| i.any_touches()) {
             self.touch = true;
         }
+        self.poll_net(ctx);
 
         let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         if escape && self.mode == Mode::Play {
@@ -204,6 +220,7 @@ impl PeakRunnerApp {
 
     fn start(&mut self, ctx: &egui::Context) {
         self.audio.unlock();
+        self.world.set_map(self.map);
         self.world.start_match(self.ember);
         self.audio.play("start");
         self.mode = Mode::Play;
@@ -224,6 +241,13 @@ impl PeakRunnerApp {
     }
 
     fn menu(&mut self, ctx: &egui::Context) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(session) = self.net.session.take() {
+                session.leave();
+            }
+            self.net.dropped_in = false;
+        }
         self.world.state = MatchState::Flyby;
         self.mode = Mode::Menu;
         self.grab(ctx, false);
@@ -371,6 +395,10 @@ impl eframe::App for PeakRunnerApp {
         match self.mode {
             Mode::Menu => self.menu_ui(ui),
             Mode::Play => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if self.net.dropped_in {
+                    rift_roster(ui, &self.net.lobby);
+                }
                 if let Some(hud) = self.hud.clone() {
                     let touch = self.touch;
                     let (jump, fire, jet, swap, look) = play_hud(ui, &hud, touch, &mut self.stick);
@@ -385,6 +413,8 @@ impl eframe::App for PeakRunnerApp {
             }
             Mode::Pause => self.pause_ui(ui),
             Mode::End => self.end_ui(ui),
+            Mode::Browser => self.browser_ui(ui),
+            Mode::Lobby => self.lobby_ui(ui),
         }
     }
 
@@ -403,21 +433,42 @@ impl PeakRunnerApp {
                 ui.add_space(4.0);
                 ui.label(RichText::new("PEAKRUNNER").color(FG).size(64.0).strong());
                 ui.add_space(6.0);
-                ui.label(RichText::new("High-speed ski and disc combat on a frozen rift. Hold Space to cut friction and ride the hill. Right click jets straight up. Hold WASD with it to spend some lift and drive that way.").color(MUTED));
+                ui.label(RichText::new("Ascend-inspired movement. Hold Space to ski, carry speed downhill, then jet over the next ridge. WASD steers on slopes and in the air. Right click gives lift; release it to recharge. The disc launcher takes its look from Tribes 1.").color(MUTED));
                 ui.add_space(14.0);
                 ui.horizontal(|ui| {
                     team_button(ui, "Ember", self.ember, EMBER, || self.ember = true);
                     team_button(ui, "Glacier", !self.ember, GLACIER, || self.ember = false);
                 });
                 ui.add_space(12.0);
+                ui.label(RichText::new("MAP").color(GLACIER).size(13.0));
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    for spec in terrain::maps() {
+                        let on = self.map == spec.id;
+                        let label = format!("{} · {}", spec.name, if spec.size >= 1000.0 { format!("{:.1} km", spec.size / 1000.0) } else { format!("{:.0} m", spec.size) });
+                        let fill = if on { FG } else { Color32::from_rgb(22, 28, 38) };
+                        let text = if on { BG } else { FG };
+                        if ui.add(egui::Button::new(RichText::new(label).color(text)).fill(fill).min_size(Vec2::new(168.0, 36.0))).clicked() {
+                            self.map = spec.id;
+                            self.world.set_map(spec.id);
+                        }
+                    }
+                });
+                if let Some(spec) = terrain::maps().iter().find(|m| m.id == self.map) {
+                    ui.label(RichText::new(spec.note).color(MUTED).size(13.0));
+                }
+                ui.add_space(12.0);
                 if ui.add(egui::Button::new(RichText::new("Start match").size(20.0).color(BG)).fill(FG).min_size(Vec2::new(180.0, 44.0))).clicked() {
                     self.start(ui.ctx());
+                }
+                if ui.add(egui::Button::new(RichText::new("Find match").size(18.0).color(FG)).min_size(Vec2::new(180.0, 40.0))).clicked() {
+                    self.open_browser();
                 }
                 ui.add_space(16.0);
                 ui.horizontal(|ui| {
                     hint(ui, "Move", "WASD");
                     hint(ui, "Look", "Mouse");
-                    hint(ui, "Jump / ski bug", "Space");
+                    hint(ui, "Jump / ski", "Space");
                     hint(ui, "Jet", "Right click");
                     hint(ui, "Jet steer", "WASD");
                     hint(ui, "Fire", "Click · 1/2");
@@ -602,8 +653,8 @@ fn play_hud(
         painter.line_segment([a, b], egui::Stroke::new(1.5, hit));
     }
 
-    bar(ui, rect.left_bottom() + Vec2::new(22.0, -78.0), "Armor", hud.health, EMBER);
-    bar(ui, rect.left_bottom() + Vec2::new(22.0, -48.0), "Energy", hud.energy, GLACIER);
+    bar(ui, rect.left_bottom() + Vec2::new(22.0, -78.0), "Armor", hud.health, 100.0, EMBER);
+    bar(ui, rect.left_bottom() + Vec2::new(22.0, -48.0), "Energy", hud.energy, ENERGY_MAX, GLACIER);
     painter.text(
         rect.center_bottom() + Vec2::new(0.0, -56.0),
         Align2::CENTER_BOTTOM,
@@ -636,13 +687,14 @@ fn play_hud(
     }
 }
 
-fn bar(ui: &egui::Ui, origin: egui::Pos2, label: &str, value: f32, color: Color32) {
+fn bar(ui: &egui::Ui, origin: egui::Pos2, label: &str, value: f32, max: f32, color: Color32) {
     let painter = ui.painter();
     painter.text(origin, Align2::LEFT_TOP, format!("{label}  {:.0}", value), FontId::proportional(12.0), MUTED);
     let track = egui::Rect::from_min_size(origin + Vec2::new(0.0, 16.0), Vec2::new(180.0, 6.0));
     painter.rect_filled(track, 3.0, Color32::from_rgb(28, 36, 48));
     let mut fill = track;
-    fill.max.x = track.min.x + track.width() * (value / 100.0).clamp(0.0, 1.0);
+    let span = if max > 0.0 { max } else { 1.0 };
+    fill.max.x = track.min.x + track.width() * (value / span).clamp(0.0, 1.0);
     painter.rect_filled(fill, 3.0, color);
 }
 
@@ -661,8 +713,9 @@ fn minimap(ui: &egui::Ui, top_right: egui::Pos2, hud: &Hud) {
         let z = bits.next().and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.0);
         let team = bits.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
         let kind = bits.next().unwrap_or("0");
-        let px = rect.left() + 6.0 + (x / 256.0) * (size - 12.0);
-        let py = rect.top() + 6.0 + (z / 256.0) * (size - 12.0);
+        let span = if hud.map_size > 1.0 { hud.map_size } else { 256.0 };
+        let px = rect.left() + 6.0 + (x / span) * (size - 12.0);
+        let py = rect.top() + 6.0 + (z / span) * (size - 12.0);
         let color = if team == 0 { EMBER } else { GLACIER };
         let p = egui::pos2(px, py);
         if kind == "2" {
@@ -729,6 +782,258 @@ fn tap_button(ui: &mut egui::Ui, center_br: egui::Pos2, label: &str) -> bool {
     ui.painter().circle_stroke(rect.center(), 28.0, egui::Stroke::new(1.0, FG));
     ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, FontId::proportional(13.0), FG);
     resp.clicked()
+}
+
+impl PeakRunnerApp {
+    fn poll_net(&mut self, ctx: &egui::Context) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(inbox) = &self.net.inbox {
+                if let Ok(result) = inbox.try_recv() {
+                    self.net.listing = match result {
+                        Ok(servers) => Listing::Ready(servers),
+                        Err(err) => Listing::Failed(err),
+                    };
+                    self.net.inbox = None;
+                }
+            }
+            let connected = self
+                .net
+                .session
+                .as_ref()
+                .map(|session| {
+                    self.net.lobby = session.lobby();
+                    self.net.lobby.connected
+                })
+                .unwrap_or(false);
+            if connected && self.mode == Mode::Lobby && !self.net.dropped_in {
+                self.drop_into_rift(ctx);
+            }
+            if self.mode == Mode::Play && self.net.dropped_in {
+                if let Some(me) = self.world.players.get(self.world.player_id) {
+                    let pose = (me.pos.x, me.pos.y, me.pos.z, me.yaw);
+                    if let Some(session) = &self.net.session {
+                        session.send_pose(pose.0, pose.1, pose.2, pose.3);
+                    }
+                }
+                let mine = self.net.name.clone();
+                let poses: Vec<_> = self
+                    .net
+                    .lobby
+                    .poses
+                    .iter()
+                    .filter(|pose| pose.name != mine)
+                    .map(|pose| {
+                        let y = crate::terrain::height_on(self.world.map, pose.x, pose.z) + 1.2;
+                        (pose.name.clone(), pose.x, y, pose.z, pose.yaw)
+                    })
+                    .collect();
+                self.world.sync_remotes(&poses);
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn drop_into_rift(&mut self, ctx: &egui::Context) {
+        self.net.dropped_in = true;
+        self.world.set_map(self.map);
+        self.world.start_rift(self.ember);
+        self.mode = Mode::Play;
+        self.wait_fire_release = true;
+        self.grab(ctx, true);
+    }
+
+    fn open_browser(&mut self) {
+        self.mode = Mode::Browser;
+        #[cfg(not(target_arch = "wasm32"))]
+        self.refresh_servers();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn refresh_servers(&mut self) {
+        let addr = self.net.directory.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.net.inbox = Some(rx);
+        self.net.listing = Listing::Loading;
+        std::thread::spawn(move || {
+            let result = peakrunner_net::browse(&addr).map_err(|err| err.to_string());
+            let _ = tx.send(result);
+        });
+    }
+
+    fn browser_ui(&mut self, ui: &mut egui::Ui) {
+        egui::Area::new(egui::Id::new("browser"))
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::new()
+                    .fill(Color32::from_rgba_unmultiplied(12, 18, 28, 236))
+                    .corner_radius(10.0)
+                    .inner_margin(22.0)
+                    .show(ui, |ui| {
+                        ui.set_width(460.0);
+                        ui.label(RichText::new("FIND A RIFT").size(12.0).color(GLACIER));
+                        ui.label(RichText::new("Open games").size(28.0).color(FG).strong());
+                        ui.add_space(8.0);
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            ui.label(RichText::new("Match listing runs in the desktop game.").color(MUTED));
+                            if big(ui, "Back", false) {
+                                self.mode = Mode::Menu;
+                            }
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        self.browser_native(ui);
+                    });
+            });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn browser_native(&mut self, ui: &mut egui::Ui) {
+        ui.label(RichText::new("Directory").size(12.0).color(MUTED));
+        ui.text_edit_singleline(&mut self.net.directory);
+        ui.label(RichText::new("Your name").size(12.0).color(MUTED));
+        ui.text_edit_singleline(&mut self.net.name);
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if ui.button("Refresh").clicked() {
+                self.refresh_servers();
+            }
+            if ui.button("Back").clicked() {
+                self.mode = Mode::Menu;
+            }
+        });
+        ui.add_space(10.0);
+        match &self.net.listing {
+            Listing::Idle | Listing::Loading => {
+                ui.label(RichText::new("Looking for games…").color(MUTED));
+            }
+            Listing::Failed(err) => {
+                ui.label(RichText::new(err).color(EMBER));
+            }
+            Listing::Ready(servers) if servers.is_empty() => {
+                ui.label(RichText::new("No games are advertising. Start a server, then refresh.").color(MUTED));
+            }
+            Listing::Ready(servers) => {
+                let chosen: Vec<_> = servers.clone();
+                for server in chosen {
+                    let label = format!(
+                        "{}   {} of {} connected   {}:{}",
+                        server.name, server.players, server.max_players, server.host, server.port
+                    );
+                    if ui.add(egui::Button::new(label).min_size(Vec2::new(420.0, 36.0))).clicked() {
+                        match peakrunner_net::connect(&server.host, server.port, &self.net.name) {
+                            Ok(session) => {
+                                self.net.session = Some(session);
+                                self.mode = Mode::Lobby;
+                            }
+                            Err(err) => self.net.listing = Listing::Failed(err.to_string()),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn lobby_ui(&mut self, ui: &mut egui::Ui) {
+        egui::Area::new(egui::Id::new("lobby"))
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::new()
+                    .fill(Color32::from_rgba_unmultiplied(12, 18, 28, 236))
+                    .corner_radius(10.0)
+                    .inner_margin(22.0)
+                    .show(ui, |ui| {
+                        ui.set_width(360.0);
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            let lobby = self.net.lobby.clone();
+                            let title = if lobby.match_name.is_empty() {
+                                "Connecting".to_string()
+                            } else {
+                                lobby.match_name.clone()
+                            };
+                            ui.label(RichText::new("IN THE RIFT").size(12.0).color(GLACIER));
+                            ui.label(RichText::new(title).size(28.0).color(FG).strong());
+                            if let Some(err) = &lobby.error {
+                                ui.label(RichText::new(err).color(EMBER));
+                            } else if lobby.connected {
+                                ui.label(RichText::new(format!("{} · {} skiers", lobby.map, lobby.players.len())).color(MUTED));
+                            } else {
+                                ui.label(RichText::new("Connecting to the server…").color(MUTED));
+                            }
+                            ui.add_space(8.0);
+                            for name in &lobby.players {
+                                ui.label(RichText::new(format!("· {name}")).color(FG));
+                            }
+                            ui.add_space(12.0);
+                        }
+                        if big(ui, "Leave", false) {
+                            self.leave_lobby();
+                        }
+                    });
+            });
+    }
+
+    fn leave_lobby(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(session) = self.net.session.take() {
+                session.leave();
+            }
+            self.net.dropped_in = false;
+        }
+        self.mode = Mode::Browser;
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct NetUi {
+    directory: String,
+    name: String,
+    listing: Listing,
+    inbox: Option<std::sync::mpsc::Receiver<Result<Vec<peakrunner_net::ServerAdvert>, String>>>,
+    session: Option<peakrunner_net::Session>,
+    lobby: peakrunner_net::Lobby,
+    dropped_in: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl NetUi {
+    fn new() -> Self {
+        Self {
+            directory: "192.168.1.64:7780".into(),
+            name: "Skier".into(),
+            listing: Listing::Idle,
+            inbox: None,
+            session: None,
+            lobby: peakrunner_net::Lobby::default(),
+            dropped_in: false,
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+enum Listing {
+    Idle,
+    Loading,
+    Ready(Vec<peakrunner_net::ServerAdvert>),
+    Failed(String),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn rift_roster(ui: &egui::Ui, lobby: &peakrunner_net::Lobby) {
+    let names = if lobby.players.is_empty() {
+        "Connecting".to_string()
+    } else {
+        lobby.players.join("  ·  ")
+    };
+    ui.painter().text(
+        ui.max_rect().center_top() + Vec2::new(0.0, 18.0),
+        Align2::CENTER_TOP,
+        format!("{}   {}", lobby.match_name, names),
+        egui::FontId::proportional(16.0),
+        FG,
+    );
 }
 
 fn team_button(ui: &mut egui::Ui, label: &str, on: bool, color: Color32, mut set: impl FnMut()) {

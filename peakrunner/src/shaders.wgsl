@@ -52,6 +52,20 @@ fn vs_world(in: LitIn) -> LitOut {
     return out;
 }
 
+fn terrain_hash(p: vec2<f32>) -> f32 {
+    let p3 = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
+    let q = p3 + dot(p3, p3.yzx + 33.33);
+    return fract((q.x + q.y) * q.z);
+}
+
+fn terrain_noise(p: vec2<f32>) -> f32 {
+    let cell = floor(p);
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(terrain_hash(cell), terrain_hash(cell + vec2<f32>(1.0, 0.0)), u.x),
+        mix(terrain_hash(cell + vec2<f32>(0.0, 1.0)), terrain_hash(cell + vec2<f32>(1.0)), u.x), u.y);
+}
+
 @fragment
 fn fs_world(in: LitOut) -> @location(0) vec4<f32> {
     let n = normalize(in.n);
@@ -60,19 +74,33 @@ fn fs_world(in: LitOut) -> @location(0) vec4<f32> {
     if (world.mode > 0.5) {
         let slope = 1.0 - n.y;
         let rock = vec3<f32>(0.27, 0.25, 0.23);
-        let snow = vec3<f32>(0.88, 0.91, 0.95);
+        let snow = vec3<f32>(0.66, 0.73, 0.79);
         let ice = vec3<f32>(0.42, 0.55, 0.64);
-        let snow_amt = smoothstep(0.42, 0.12, slope) * smoothstep(8.0, 20.0, in.world_pos.y);
-        let ice_amt = smoothstep(14.0, 3.0, in.world_pos.y);
+        let snow_amt = (1.0 - smoothstep(0.12, 0.42, slope)) * smoothstep(8.0, 20.0, in.world_pos.y);
+        let ice_amt = 1.0 - smoothstep(3.0, 14.0, in.world_pos.y);
         albedo = mix(mix(rock, ice, ice_amt * 0.55), snow, snow_amt);
-        let grain = fract(sin(dot(in.world_pos.xz, vec2<f32>(12.9898, 78.233))) * 43758.5453);
-        albedo = albedo * (0.92 + 0.08 * grain);
+        let broad = terrain_noise(in.world_pos.xz * 0.045);
+        let detail = terrain_noise(in.world_pos.xz * 0.7);
+        if (world.mode > 1.5) {
+            let grass = mix(vec3<f32>(0.24, 0.28, 0.13), vec3<f32>(0.47, 0.45, 0.25), broad);
+            let stone = mix(vec3<f32>(0.28, 0.27, 0.24), vec3<f32>(0.49, 0.46, 0.38), detail);
+            albedo = mix(grass, stone, smoothstep(0.17, 0.48, slope + (broad - 0.5) * 0.14));
+        }
+        // Continuous world-space detail, faded in the distance to avoid shimmer.
+        let detail_fade = 1.0 - smoothstep(40.0, 220.0, length(world.cam - in.world_pos));
+        albedo *= 0.88 + 0.12 * broad + (detail - 0.5) * 0.12 * detail_fade;
     }
     var col = albedo * (0.22 + 0.78 * ndl);
     col = col + albedo * vec3<f32>(0.12, 0.16, 0.22) * max(n.y, 0.0);
     col = col + world.color * world.emit;
+    if (world.mode < 0.5 && world.emit < 0.5) {
+        let half_dir = normalize(world.sun + normalize(world.cam - in.world_pos));
+        let specular = pow(max(dot(n, half_dir), 0.0), 36.0);
+        col += vec3<f32>(0.2, 0.22, 0.23) * specular;
+    }
     let dist = length(world.cam - in.world_pos);
-    let fog = clamp(1.0 - exp(-dist * 0.0072), 0.0, 0.92);
+    let density = select(0.0072, world.pad0, world.pad0 > 0.0);
+    let fog = clamp(1.0 - exp(-dist * density), 0.0, 0.92);
     col = mix(col, world.fog, fog);
     return vec4<f32>(col, 1.0);
 }
@@ -101,11 +129,15 @@ fn fs_sky(in: FullOut) -> @location(0) vec4<f32> {
     let far = sky.inv_vp * vec4<f32>(in.ndc, 1.0, 1.0);
     let dir = normalize(far.xyz / far.w - sky.cam);
     let h = dir.y;
-    let zenith = vec3<f32>(0.05, 0.08, 0.14);
+    let zenith = vec3<f32>(0.16, 0.26, 0.38);
     let horizon = vec3<f32>(0.62, 0.48, 0.38);
     let ground = vec3<f32>(0.18, 0.20, 0.24);
     var col = mix(horizon, zenith, smoothstep(-0.02, 0.55, h));
     col = mix(ground, col, smoothstep(-0.18, 0.04, h));
+    let cloud_uv = dir.xz / max(dir.y + 0.25, 0.12);
+    let cloud = terrain_noise(cloud_uv * 2.3) * 0.65 + terrain_noise(cloud_uv * 6.0) * 0.35;
+    let cover = smoothstep(0.48, 0.76, cloud) * smoothstep(0.03, 0.22, h);
+    col = mix(col, vec3<f32>(0.68, 0.67, 0.62), cover * 0.65);
     let sun_d = max(dot(dir, sky.sun), 0.0);
     col = col + vec3<f32>(1.0, 0.86, 0.62) * pow(sun_d, 180.0) * 1.6;
     col = col + vec3<f32>(1.0, 0.55, 0.28) * pow(sun_d, 6.0) * 0.18;

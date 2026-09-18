@@ -1,0 +1,21 @@
+[package]
+name = "peakrunner-net"
+version = "0.1.0"
+edition = "2021"
+description = "PeakRunner match directory and game-server connector."
+publish = false
+rust-version = "1.95"
+
+[dependencies]
+env_logger = "0.11"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[[bin]]
+name = "peakrunner-directory"
+path = "src/bin/directory.rs"
+
+[[bin]]
+name = "peakrunner-server"
+path = "src/bin/server.rs"
