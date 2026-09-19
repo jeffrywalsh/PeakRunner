@@ -37,6 +37,31 @@ Raindance asset bytes and movement remain unchanged.
 
 ## Remaining integration, in order
 
+### Server rotation checkpoint
+
+Dedicated QUIC server accepts optional `PEAKRUNNER_MATCH_ROTATION` JSON:
+
+```json
+[{"map":"raindance","mode":"ctf"},{"map":"valley","mode":"ctf"}]
+```
+
+This overrides the initial `PEAKRUNNER_MATCH_MAP`. Omit it for the existing
+single-map behavior. Rotation is bounded to 32 entries/8 KiB; unknown maps,
+modes and fields fail configuration. Repeated entries are permitted as weighting.
+The public server configuration has NOT been changed.
+
+After intermission the server advances the rotation, preserves connection slots,
+identities/teams, acknowledgements, rate limits and monotonic tick/round state,
+and creates fresh world state. Stale queued inputs are discarded at transition.
+Empty servers return to the first rotation entry. Status reports the active map.
+Tests cover policy parsing, wrap/reset, world-transition invariants and two real
+local clients receiving the server-selected starting map.
+
+This currently uses both built-in maps and the old combined compatibility hash.
+It does NOT yet provide per-selected-map admission, custom pack coexistence, or
+mode/rotation discovery fields. Full live round-transition render/transport QA
+is still required before merge. No public deployment or new release yet.
+
 1. Replace the global optional `map_pack::PACK` with an immutable installed-pack
    registry. Keep built-in Raindance available when another pack is installed.
    Decide a stable wire identity (never process-local catalog indices), and bound

@@ -150,8 +150,12 @@ pub async fn run_server(bind: SocketAddr, cert: &[u8], key: &[u8]) -> io::Result
     let endpoint = Endpoint::server(cfg, bind)?;
     let map = std::env::var("PEAKRUNNER_MATCH_MAP").unwrap_or_else(|_| "Valley".into());
     let name = std::env::var("PEAKRUNNER_MATCH_NAME").unwrap_or_else(|_| "Springdale Central".into());
-    let host = GameHost::bind("127.0.0.1:0", &name, 8, &map)?
+    let mut host = GameHost::bind("127.0.0.1:0", &name, 8, &map)?
         .with_password(std::env::var("PEAKRUNNER_MATCH_PASSWORD").unwrap_or_default());
+    if let Some(rotation) = std::env::var_os("PEAKRUNNER_MATCH_ROTATION") {
+        let rotation = rotation.into_string().map_err(|_| invalid("rotation must be UTF-8 JSON"))?;
+        host = host.with_rotation(&rotation)?;
+    }
     let backend = host.local_addr(); let game = host.spawn();
     let status = game.status.clone();
     let public_status = status.clone();

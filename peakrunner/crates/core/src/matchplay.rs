@@ -70,6 +70,26 @@ pub struct Match {
 }
 
 impl Match {
+    /// Server-owned round boundary: retain connection slots/identities and clocks,
+    /// but never carry projectiles, equipment, scores or movement between maps.
+    pub fn rotate_to(&mut self, map: MapId) {
+        let mut next = Self::new(map);
+        next.tick = self.tick;
+        next.round = self.round;
+        next.phase = self.phase;
+        next.phase_left = self.phase_left;
+        next.acks.clone_from(&self.acks);
+        next.chat_next.clone_from(&self.chat_next);
+        next.rename_next.clone_from(&self.rename_next);
+        for (slot, old) in self.world.players.iter().enumerate() {
+            if old.net_id == 0 { continue; }
+            let p = &mut next.world.players[slot];
+            p.net_id = old.net_id; p.name = old.name.clone(); p.team = old.team;
+            next.world.respawn(slot);
+        }
+        *self = next;
+    }
+
     pub fn new(map: MapId) -> Self {
         let mut world = World::new();
         world.set_map(map);
@@ -263,6 +283,46 @@ impl Match {
             _ => true,
         }).cloned().collect();
         state
+    }
+}
+
+#[cfg(test)]
+mod rotation_tests {
+    use super::*;
+    #[test]
+    fn map_transition_preserves_slots_clocks_and_rate_limits_not_world_state() {
+        let mut game = Match::new(MapId::Valley);
+        game.join(11, "First").unwrap();
+        game.join(22, "Second").unwrap();
+        game.join(33, "Third").unwrap();
+        game.leave(0); // Noncontiguous occupied slots must stay stable.
+        game.tick = 500; game.round = 7;
+        game.phase = Phase::Intermission; game.phase_left = STEP;
+        game.acks[1] = 123;
+        assert!(game.chat(1, "Before rotation"));
+        game.world.score = [3, 2];
+        game.world.players[1].frags = 9;
+        game.world.players[1].vel = Vec3::splat(70.);
+        let team = game.world.players[1].team;
+        game.rotate_to(MapId::Raindance);
+        assert_eq!(game.world.map, MapId::Raindance);
+        assert_eq!(game.tick, 500); assert_eq!(game.round, 7);
+        assert_eq!(game.world.players[0].net_id, 0);
+        assert_eq!(game.world.players[1].net_id, 22);
+        assert_eq!(game.world.players[2].net_id, 33);
+        assert_eq!(game.world.players[1].name, "Second");
+        assert_eq!(game.world.players[1].team, team);
+        assert_eq!(game.acks[1], 123);
+        assert!(!game.chat(1, "Too soon"));
+        assert_eq!(game.world.score, [0, 0]);
+        assert_eq!(game.world.players[1].frags, 0);
+        assert_eq!(game.world.players[1].vel, Vec3::ZERO);
+        assert!(game.world.discs.is_empty()); assert!(game.world.feed.is_empty());
+        game.step(&[]);
+        assert_eq!(game.round, 8); assert_eq!(game.phase, Phase::Playing);
+        game.leave(1); game.leave(2);
+        assert_eq!(game.phase, Phase::Waiting); assert_eq!(game.round, 0);
+        assert!(game.tick > 500);
     }
 }
 

@@ -10,6 +10,7 @@ use crate::wire::{Framed, private_bind, invalid};
 
 pub struct GameHost {
     listener: TcpListener, name: String, map: MapId, max_players: usize, password: String,
+    rotation: crate::rotation::Rotation,
 }
 pub struct GameHandle {
     stop: Arc<AtomicBool>, thread: Option<thread::JoinHandle<()>>,
@@ -33,7 +34,12 @@ impl GameHost {
         if name.is_empty() || name.len() > 64 || name.chars().any(char::is_control) { return Err(invalid("invalid match name")); }
         let listener = TcpListener::bind(private_bind(addr)?)?;
         listener.set_nonblocking(true)?;
-        Ok(Self { listener, name: name.into(), map, max_players: max_players as usize, password: String::new() })
+        Ok(Self { listener, name: name.into(), map, max_players: max_players as usize, password: String::new(), rotation: crate::rotation::Rotation::single(map) })
+    }
+    pub fn with_rotation(mut self, json: &str) -> io::Result<Self> {
+        self.rotation = crate::rotation::Rotation::parse(json).map_err(|e| invalid(&e))?;
+        self.map = self.rotation.current();
+        Ok(self)
     }
     pub fn with_password(mut self, password: String) -> Self { self.password = password; self }
     pub fn local_addr(&self) -> std::net::SocketAddr { self.listener.local_addr().expect("bound") }
@@ -47,7 +53,7 @@ impl GameHost {
         let thread = thread::spawn(move || self.run(flag, count, stats));
         GameHandle { stop, thread: Some(thread), players, status }
     }
-    fn run(self, stop: Arc<AtomicBool>, count: Arc<AtomicU32>, status: Arc<Mutex<peakrunner_discovery::MatchStatus>>) {
+    fn run(mut self, stop: Arc<AtomicBool>, count: Arc<AtomicU32>, status: Arc<Mutex<peakrunner_discovery::MatchStatus>>) {
         let mut game = Match::new(self.map);
         let mut peers: Vec<Peer> = Vec::new();
         let mut id = 0u32;
@@ -134,6 +140,14 @@ impl GameHost {
                 } else { true }
             });
             let previous_phase = game.phase;
+            if game.world.players.iter().all(|p| p.net_id == 0) {
+                let first = self.rotation.reset();
+                if game.world.map != first { game.rotate_to(first); }
+            } else if game.phase == peakrunner_core::sim::Phase::Intermission && game.phase_left <= STEP {
+                game.rotate_to(self.rotation.advance());
+                commands.fill(None);
+                for peer in &mut peers { peer.current = Command::default(); peer.queue.clear(); }
+            }
             game.step(&commands);
             if game.phase != previous_phase {
                 log::info!("match_phase round={} phase={:?} score={:?}", game.round, game.phase, game.world.score);
@@ -150,7 +164,7 @@ impl GameHost {
             count.store(game.world.players.iter().filter(|p| p.net_id != 0).count() as u32, Ordering::Relaxed);
             if game.tick % 3 == 0 {
                 *status.lock().expect("match status") = peakrunner_discovery::MatchStatus {
-                    name: self.name.clone(), map: format!("{:?}", self.map),
+                    name: self.name.clone(), map: format!("{:?}", game.world.map),
                     players: count.load(Ordering::Relaxed), max_players: self.max_players as u32,
                     tick: game.tick, round: game.round, phase: format!("{:?}", game.phase),
                     score: game.world.score, time_left: game.world.time_left,

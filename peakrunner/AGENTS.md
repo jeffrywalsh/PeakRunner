@@ -81,6 +81,11 @@ They are not in the published `.20260919.4` binaries; never store passwords.
   runtime still uses the single-pack slot. See `docs/multi-map-system.md` on
   that branch for remaining registry, protocol, renderer and launcher work.
   Do NOT merge the incomplete branch or claim multiple packs are playable yet.
+  Server rotation checkpoint adds optional `PEAKRUNNER_MATCH_ROTATION` JSON
+  for built-in Valley/Raindance, CTF only. Advances after intermission and resets
+  to the first entry when empty; live deployment unchanged. See the branch docs
+  for tests and remaining full-transition QA. Compatibility still hashes the
+  old single pack; selected-map admission and registry remain unfinished.
   Continue with the immutable installed-pack registry; leave movement untouched.
   A new client release is still required to deliver preferences to launcher users;
   do not overwrite existing .4 archives or restart servers for this client-only work.
