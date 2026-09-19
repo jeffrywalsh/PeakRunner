@@ -21,7 +21,8 @@ operator can read game state. Restore files and pending deployment gates are in
 Only operator-configured official servers are listed. The directory polls match
 health and expires stale results; public registration/mutation endpoints do not
 exist. The QUIC gateway uses address validation, caps connections (16 global,
-8 per IP), admission bursts (12 per IP, replenishing one per three seconds),
+10 per IP, including status/pending admissions), admission bursts (12 per IP,
+replenishing one per three seconds),
 input packet size (256 bytes), input rate, write duration and idle duration.
 Inputs redundantly include three numbered frames. Snapshots are independently
 replaceable and LZ4-compressed, bounded to 12 fragments and 64 KiB after

@@ -236,7 +236,9 @@ fn admit(peers: &Admissions, ip: IpAddr) -> Option<Permit> {
     if map.len() >= 4096 && !map.contains_key(&ip) { return None; }
     let p = map.entry(ip).or_insert(Admission { active: 0, tokens: 12.0, seen: Instant::now() });
     p.tokens = (p.tokens + p.seen.elapsed().as_secs_f32() / 3.0).min(12.0); p.seen = Instant::now();
-    if p.active >= 8 || p.tokens < 1.0 { return None; }
+    // Eight players behind one NAT still leave room for directory status and
+    // one pending admission. The authoritative match itself remains eight slots.
+    if p.active >= 10 || p.tokens < 1.0 { return None; }
     p.tokens -= 1.0; p.active += 1;
     Some(Permit { peers: peers.clone(), ip })
 }
@@ -338,6 +340,16 @@ async fn shutdown() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn a_full_shared_nat_leaves_room_for_status_without_unbounded_admission() {
+        let peers: Admissions = Arc::new(Mutex::new(HashMap::new()));
+        let ip = "127.0.0.1".parse().unwrap();
+        let players: Vec<_> = (0..8).map(|_| admit(&peers, ip).unwrap()).collect();
+        let status = admit(&peers, ip).expect("full match blocked directory status");
+        let pending = admit(&peers, ip).unwrap();
+        assert!(admit(&peers, ip).is_none());
+        drop(status); drop(pending); drop(players);
+        assert_eq!(peers.lock().unwrap()[&ip].active, 0);
+    }
     #[test] fn compressed_snapshot_limits_cover_eight_player_weapon_load() {
         let mut game = peakrunner_core::sim::Match::new(peakrunner_core::terrain::MapId::Valley);
         for id in 1..=8 { game.join(id, &format!("Player{id}")).unwrap(); }
