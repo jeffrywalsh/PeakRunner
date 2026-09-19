@@ -2,7 +2,7 @@
   "repository": "git@github.com:jeffrywalsh/PeakRunner.git",
   "revision": "417bd71bcbf2a658d97b02cd3456e72130f7036e",
   "directory": "peakrunner",
-  "dockerfile": "crates/server/Dockerfile",
+  "dockerfile": "crates/directory/Dockerfile",
   "platform": "linux/amd64",
-  "tag": "peakrunner/server:417bd71"
+  "tag": "peakrunner/directory:417bd71"
 }
