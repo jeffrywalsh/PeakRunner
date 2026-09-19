@@ -26,9 +26,13 @@ Do not point these HTTP routes at the legacy raw TCP game ports.
 1. Clone the homelab repository onto the replacement Docker host, preserving this
    directory. Install Docker Engine with Compose v2+ and verify its SSH host key.
    Alternatively copy this entire directory from the PeakRunner repository.
-   Rebuild or load the pinned server/directory image first using
-   `../vps/source.json` and `../vps/OPERATIONS.md`; `source/` is an ignored build
-   context, not a source backup. The directory and VPS must use compatible protocols.
+   Rebuild or load the directory-only image using this directory's `source.json`.
+   From that revision's `peakrunner` workspace, build with
+   `docker build -f crates/directory/Dockerfile -t peakrunner/directory:local .`.
+   Inspect its ID and update the directory service's image pin before deploying.
+   `source/` is an ignored build context, not a source backup. The VPS server has
+   its own image and source record in `../vps/`; compatible protocols are required,
+   but directory and server updates can be deployed independently.
 2. On an administrator machine with Node 22+, recover the Cloudflare API token
    from your password manager/encrypted backup into an owner-only file **outside
    Git**. Required access: account Tunnel Edit, peakrunner.net DNS Edit and Zone

@@ -9,11 +9,16 @@ directory on dellcon; do not proxy the game UDP endpoint through its tunnel.
 checkout of that revision, build from the `peakrunner` directory:
 
 ```sh
-docker build --platform linux/amd64 -f crates/net/Dockerfile -t peakrunner/public:d457724 .
-docker save peakrunner/public:d457724 | gzip > peakrunner-server-image.tar.gz
+docker build --platform linux/amd64 -f crates/server/Dockerfile -t peakrunner/server:local .
+docker save peakrunner/server:local | gzip > peakrunner-server-image.tar.gz
 ```
 
 The Dockerfile pins both base image digests and Cargo uses the committed lockfile.
+Use the release tag recorded in `source.json` instead of `:local` for a published
+build. This image contains only `peakrunner-server`. The directory has its own
+Dockerfile, source record, and image in `../dellcon/`; do not deploy this server
+image to the directory. The former `peakrunner-quic` command is now
+`peakrunner-server` (including `--healthcheck`).
 Transfer the image over SSH and load it with `docker load`. An exact saved image
 preserves the ID in `release.conf`; a fresh rebuild can have different attestation
 metadata. Inspect its image ID, record it in `release.conf`, and test before use.

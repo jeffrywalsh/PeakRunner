@@ -1,44 +1,9 @@
-//! Public HTTP/WSS edge. TLS terminates at Cloudflare; cloudflared encrypts the
-//! journey to dellcon. Plain HTTP is confined to the dedicated Docker network.
-use std::{collections::HashMap, io::{self, Read}, net::{IpAddr, SocketAddr, TcpStream},
-    sync::{Arc, Mutex}, time::{Duration, Instant}};
-use axum::{Router, Json, extract::{State, ConnectInfo, WebSocketUpgrade, ws::{Message, WebSocket}},
-    http::{HeaderMap, StatusCode, header}, response::{IntoResponse, Response}, routing::get};
-use serde::{Serialize, Deserialize};
+//! Optional legacy WebSocket match endpoint. Never a directory service.
+use std::{collections::HashMap, io, net::{IpAddr, SocketAddr, TcpStream}, sync::{Arc, Mutex}, time::{Duration, Instant}};
+use axum::{Router, Json, extract::{State, ConnectInfo, WebSocketUpgrade, ws::{Message, WebSocket}}, http::{HeaderMap, StatusCode, header}, response::{IntoResponse, Response}, routing::get};
 use tokio::{sync::Semaphore, time::timeout};
-use crate::{GameHost, proto::{ClientMsg, ServerMsg, ServerAdvert, PROTOCOL}, wire::{Framed, invalid}};
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct MatchStatus {
-    pub name: String, pub map: String, pub players: u32, pub max_players: u32,
-    pub tick: u64, pub round: u32, pub phase: String, pub score: [u32; 2],
-    pub time_left: f32, pub password_required: bool,
-}
-#[derive(Serialize, Deserialize)]
-pub struct PublicDirectory { pub protocol: String, pub servers: Vec<ServerAdvert> }
-
-pub fn http_get(url: &str, https_only: bool) -> io::Result<Vec<u8>> {
-    let config = ureq::Agent::config_builder().https_only(https_only)
-        .max_redirects(0).timeout_global(Some(Duration::from_secs(4))).build();
-    let mut response = ureq::Agent::new_with_config(config).get(url).call().map_err(io::Error::other)?;
-    let mut bytes = Vec::new();
-    response.body_mut().as_reader().take(262_145).read_to_end(&mut bytes)?;
-    if bytes.len() > 262_144 { return Err(invalid("directory response too large")); }
-    Ok(bytes)
-}
-pub fn browse_https(url: &str) -> io::Result<Vec<ServerAdvert>> {
-    let data: PublicDirectory = serde_json::from_slice(&http_get(url, true)?).map_err(io::Error::other)?;
-    if data.protocol != PROTOCOL || data.servers.len() > 128 { return Err(invalid("incompatible directory")); }
-    for s in &data.servers {
-        if !s.host.starts_with("quic://") || crate::quic::endpoint_url(&s.host).is_err()
-            || s.name.is_empty() || s.name.len() > 64 || s.name.chars().any(char::is_control)
-            || s.players > s.max_players || !(2..=8).contains(&s.max_players) {
-            return Err(invalid("unsafe directory listing"));
-        }
-    }
-    Ok(data.servers)
-}
-
+use peakrunner_discovery::MatchStatus;
+use crate::{GameHost, proto::{ClientMsg, ServerMsg}, wire::Framed};
 struct Limit { active: usize, tokens: f32, seen: Instant }
 #[derive(Default)]
 struct Limits { ips: HashMap<IpAddr, Limit> }
@@ -62,7 +27,7 @@ impl Drop for Admission { fn drop(&mut self) {
 struct Edge {
     backend: Option<SocketAddr>, trusted_proxy: bool,
     slots: Arc<Semaphore>, limits: Arc<Mutex<Limits>>,
-    status: Arc<Mutex<Option<(MatchStatus, Instant)>>>, advertised: String,
+    status: Arc<Mutex<Option<(MatchStatus, Instant)>>>,
 }
 fn client_ip(headers: &HeaderMap, peer: IpAddr, trusted_proxy: bool) -> Option<IpAddr> {
     if !trusted_proxy { return Some(peer); }
@@ -129,33 +94,9 @@ fn live(edge: &Edge) -> Option<MatchStatus> {
 async fn status(State(edge): State<Edge>) -> Response {
     match live(&edge) { Some(status) => Json(status).into_response(), None => StatusCode::SERVICE_UNAVAILABLE.into_response() }
 }
-async fn listing(State(edge): State<Edge>) -> Response {
-    let servers = live(&edge).map(|s| vec![ServerAdvert { id: "dellcon-north-spine".into(),
-        name: s.name, map: s.map, host: edge.advertised.clone(), port: crate::quic::endpoint_url(&edge.advertised).ok().and_then(|u| u.port()).unwrap_or(7777),
-        players: s.players, max_players: s.max_players }]).unwrap_or_default();
-    let mut response = Json(PublicDirectory { protocol: PROTOCOL.into(), servers }).into_response();
-    response.headers_mut().insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
-    response.headers_mut().insert(header::X_CONTENT_TYPE_OPTIONS, "nosniff".parse().unwrap());
-    response
-}
-
-pub async fn serve(bind: &str, directory: bool, trusted_proxy: bool, backend_url: String, advertised: String) -> io::Result<()> {
-    crate::quic::endpoint_url(&advertised)?;
-    let edge = Edge { backend: None, trusted_proxy, slots: Arc::new(Semaphore::new(16)),
-        limits: Arc::new(Mutex::new(Limits::default())), status: Arc::new(Mutex::new(None)), advertised };
-    let mut game_handle = None;
-    let mut edge = edge;
-    if directory {
-        let output = edge.status.clone();
-        tokio::spawn(async move {
-            loop {
-                if let Ok(status) = crate::quic::query_status(&backend_url).await {
-                    *output.lock().unwrap() = Some((status, Instant::now()));
-                }
-                tokio::time::sleep(Duration::from_secs(5)).await;
-            }
-        });
-    } else {
+pub async fn serve(bind: &str, trusted_proxy: bool) -> io::Result<()> {
+    let mut edge = Edge { backend: None, trusted_proxy, slots: Arc::new(Semaphore::new(16)),
+        limits: Arc::new(Mutex::new(Limits::default())), status: Arc::new(Mutex::new(None)) };
         let host = GameHost::bind("127.0.0.1:0", "North Spine", 8, "Valley")?
             .with_password(std::env::var("PEAKRUNNER_MATCH_PASSWORD").unwrap_or_default());
         edge.backend = Some(host.local_addr());
@@ -169,13 +110,11 @@ pub async fn serve(bind: &str, directory: bool, trusted_proxy: bool, backend_url
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         });
-        game_handle = Some(handle);
-    }
-    let app = if directory { Router::new().route("/", get(listing)).route("/servers", get(listing)) }
-        else { Router::new().route("/match", get(upgrade)).route("/status", get(status)) };
+        let game_handle = handle;
+    let app = Router::new().route("/match", get(upgrade)).route("/status", get(status));
     let app = app.route("/healthz", get(status)).with_state(edge);
     let listener = tokio::net::TcpListener::bind(bind).await?;
-    log::info!("{} HTTP edge listening on {}", if directory { "directory" } else { "match" }, listener.local_addr()?);
+    log::info!("WebSocket match listening on {}", listener.local_addr()?);
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).with_graceful_shutdown(async {
         #[cfg(unix)] {
             let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("SIGTERM");
@@ -205,12 +144,11 @@ mod tests {
     async fn websocket_match_rejects_forgery_and_releases_disconnected_slots() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap(); drop(listener);
-        let server = tokio::spawn(async move { serve(&addr.to_string(), false, false,
-            String::new(), "quic://play.peakrunner.net:7777".into()).await });
+        let server = tokio::spawn(async move { serve(&addr.to_string(), false).await });
         tokio::time::sleep(Duration::from_millis(100)).await;
         let endpoint = format!("ws://{addr}/match");
-        let a = crate::connect(&endpoint, 0, "A").unwrap();
-        let b = crate::connect(&endpoint, 0, "B").unwrap();
+        let a = peakrunner_net::connect(&endpoint, 0, "A").unwrap();
+        let b = peakrunner_net::connect(&endpoint, 0, "B").unwrap();
         for _ in 0..200 {
             if a.lobby().players.len() == 2 && b.lobby().connected { break; }
             tokio::time::sleep(Duration::from_millis(10)).await;

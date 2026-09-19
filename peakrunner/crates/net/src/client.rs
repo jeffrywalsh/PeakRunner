@@ -20,7 +20,7 @@ impl Session {
     pub fn send_input(&self, command: Command) -> bool { self.outbound.try_send(command).is_ok() }
 }
 pub fn browse(addr: &str) -> io::Result<Vec<ServerAdvert>> {
-    if addr.starts_with("https://") { return crate::public::browse_https(addr); }
+    if addr.starts_with("https://") { return peakrunner_discovery::http::browse_https(addr); }
     if addr.contains("://") { return Err(io::Error::other("public directories require https://")); }
     directory::list(addr)
 }

@@ -1,7 +1,7 @@
 # PeakRunner
 
 Ski and disc capture-the-flag. A shared Rust simulation, a native/WASM client,
-and a headless match server. Online matches currently use the native client;
+and independent headless match-server and directory apps. Online matches use the native client;
 the browser build retains offline play.
 
 ## Play on this Mac
@@ -56,16 +56,15 @@ certificate and passed initial eight-client WAN checks. Choose **Find match** in
 desktop client. The directory is optional; direct joining works without it.
 
 ```sh
-cargo run --release -p peakrunner-net --bin peakrunner-server -- --name "North Spine" --map Valley
+cargo run --release -p peakrunner-server --bin peakrunner-lan-server -- --name "North Spine" --map Raindance
 cargo run --bin peakrunner
 ```
 
 Choose **Find match → Join directly** for the local server at `127.0.0.1:7781`.
-Or use **Find match → Host a private match → Host and join** to host from the
-game itself; closing your hosted match disconnects its guests.
+Hosting lives in the separate server app, not inside the client.
 For friends, bind the server to its specific LAN/VPN IP with `--bind ADDRESS`,
 and use that address in their native clients. The server selects Valley or
-Raindance for everyone. Teams are balanced on join; two opposing players start
+Raindance for everyone. Teams rebalance after departures; two opposing players start
 a three-second countdown. First to three captures or eight minutes ends the
 round; the next round starts after ten seconds. Tab shows the roster and K/D.
 Esc opens a menu without pausing the server or protecting your player.
@@ -77,6 +76,10 @@ Legacy direct IP connections still use plaintext TCP: use only on a trusted LAN
 or VPN, never port-forward them. Optional match passwords are not verified player
 accounts. See [multiplayer hosting and limits](docs/multiplayer.md)
 for directory setup, tests, security boundaries, and remaining work.
+
+See [application boundaries and independent builds](docs/apps.md). The directory
+has no gameplay-core dependency. Client and server share simulation and gameplay
+protocol code; all three share only the smaller discovery/networking library.
 
 ## Controls
 

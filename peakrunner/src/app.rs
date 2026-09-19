@@ -552,13 +552,7 @@ impl PeakRunnerApp {
                             let next = !self.audio.muted();
                             self.audio.set_muted(next);
                         }
-                        let leave = {
-                            #[cfg(not(target_arch = "wasm32"))]
-                            { if self.net.hosted.is_some() { "Close hosted match" } else { "Leave rift" } }
-                            #[cfg(target_arch = "wasm32")]
-                            { "Leave rift" }
-                        };
-                        if big(ui, leave, false) {
+                        if big(ui, "Leave rift", false) {
                             self.menu(ui.ctx());
                         }
                     });
@@ -863,7 +857,7 @@ impl PeakRunnerApp {
                 if let Ok(result) = inbox.try_recv() {
                     self.net.listing = match result {
                         Ok(servers) => Listing::Ready(servers),
-                        Err(err) => Listing::Failed(format!("Directory unavailable: {err}. Direct joining and hosting still work.")),
+                        Err(err) => Listing::Failed(format!("Directory unavailable: {err}. Direct joining still works.")),
                     };
                     self.net.inbox = None;
                 }
@@ -970,24 +964,7 @@ impl PeakRunnerApp {
                 self.join_server(host, port);
             } else { self.net.listing = Listing::Failed("Use quic://play.peakrunner.net:7777 or a private IP:port".into()); }
         }
-        ui.collapsing("Host a private match", |ui| {
-            ui.label(RichText::new("Bind to your LAN/VPN IP and port. Loopback is local-only.").color(MUTED));
-            ui.text_edit_singleline(&mut self.net.host_address);
-            ui.label(RichText::new(format!("Map: {} · 8 slots · share this address with friends",
-                terrain::info(self.map).name)).color(MUTED));
-            ui.label(RichText::new("Closing your hosted match disconnects everyone.").color(MUTED));
-            if ui.button("Host and join").clicked() {
-                let name = format!("{}'s match", self.net.name.trim());
-                match peakrunner_net::GameHost::bind(&self.net.host_address, &name, 8, terrain::info(self.map).name) {
-                    Ok(host) => {
-                        let addr = host.local_addr();
-                        self.net.hosted = Some(host.with_password(self.net.password.clone()).spawn());
-                        self.join_server(&addr.ip().to_string(), addr.port());
-                    }
-                    Err(err) => self.net.listing = Listing::Failed(err.to_string()),
-                }
-            }
-        });
+        ui.label(RichText::new("Hosting is handled by the separate PeakRunner Server app.").size(12.0).color(MUTED));
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             if ui.button("Refresh").clicked() {
@@ -1099,8 +1076,6 @@ impl PeakRunnerApp {
 
 #[cfg(not(target_arch = "wasm32"))]
 struct NetUi {
-    hosted: Option<peakrunner_net::GameHandle>,
-    host_address: String,
     password: String,
     direct: String,
     predictor: crate::online::Online,
@@ -1120,13 +1095,10 @@ impl NetUi {
         self.lobby = Default::default();
         self.predictor = Default::default();
         self.dropped_in = false;
-        self.hosted = None;
     }
 
     fn new() -> Self {
         Self {
-            hosted: None,
-            host_address: "127.0.0.1:7781".into(),
             password: String::new(),
             direct: "quic://play.peakrunner.net:7777".into(),
             predictor: Default::default(),
@@ -1203,7 +1175,7 @@ mod exit_tests {
         assert!(net.lobby.error.is_none());
         assert_eq!(net.lobby.player_id, 0);
         assert!(!net.dropped_in);
-        assert!(net.session.is_none() && net.hosted.is_none());
+        assert!(net.session.is_none());
         assert_eq!(net.predictor.tick, 0);
         net.disconnect(); // Leaving twice is harmless.
     }

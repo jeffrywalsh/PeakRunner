@@ -1,0 +1,23 @@
+[package]
+name = "peakrunner-directory"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+publish = false
+description = "Standalone server directory; no game simulation."
+default-run = "peakrunner-directory"
+[dependencies]
+peakrunner-discovery = { path = "../discovery" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
+axum = "0.8"
+getrandom = "0.4"
+env_logger = "0.11"
+log = "0.4"
+[[bin]]
+name = "peakrunner-directory"
+path = "src/main.rs"
+[[bin]]
+name = "peakrunner-lan-directory"
+path = "src/bin/lan.rs"

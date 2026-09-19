@@ -2585,15 +2585,72 @@ dependencies = [
 ]
 
 [[package]]
-name = "peakrunner-net"
+name = "peakrunner-directory"
 version = "0.1.0"
 dependencies = [
  "axum",
  "env_logger",
  "getrandom 0.4.3",
  "log",
+ "peakrunner-discovery",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "peakrunner-discovery"
+version = "0.1.0"
+dependencies = [
+ "quinn",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio",
+ "ureq",
+ "url",
+ "webpki-roots 1.0.9",
+]
+
+[[package]]
+name = "peakrunner-net"
+version = "0.1.0"
+dependencies = [
+ "peakrunner-core",
+ "peakrunner-discovery",
+ "peakrunner-protocol",
+ "quinn",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tungstenite",
+ "url",
+]
+
+[[package]]
+name = "peakrunner-protocol"
+version = "0.1.0"
+dependencies = [
  "lz4_flex",
  "peakrunner-core",
+ "peakrunner-discovery",
+ "postcard",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "peakrunner-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "env_logger",
+ "log",
+ "peakrunner-core",
+ "peakrunner-directory",
+ "peakrunner-discovery",
+ "peakrunner-net",
+ "peakrunner-protocol",
  "postcard",
  "quinn",
  "rcgen",
@@ -2603,9 +2660,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tungstenite",
- "ureq",
- "url",
- "webpki-roots 1.0.9",
 ]
 
 [[package]]

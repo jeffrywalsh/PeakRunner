@@ -165,7 +165,7 @@ const RAIN_STEP: f32 = 8.0;
 /// 255 steps of 8 m. The Tribes file stores 256 corners.
 const RAIN_SIZE: f32 = 2040.0;
 
-static RAIN: &[u8] = include_bytes!("../assets/raindance.h16");
+static RAIN: &[u8] = include_bytes!("../../../assets/raindance.h16");
 
 pub fn maps() -> [MapInfo; 2] {
     [

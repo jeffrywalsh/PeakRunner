@@ -1,15 +1,13 @@
 use std::collections::HashMap;
-use std::io::{self, BufReader};
-use std::net::{IpAddr, TcpListener, TcpStream};
+use std::io;
+use std::net::{IpAddr, TcpListener};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-use crate::proto::{DirRequest, DirResponse, ServerAdvert};
-use crate::wire::{Framed, private_bind, read_msg, write_msg, invalid};
+use peakrunner_discovery::{DirRequest, DirResponse, ServerAdvert};
+use peakrunner_discovery::wire::{Framed, private_bind};
 
 const STALE: Duration = Duration::from_secs(8);
-#[derive(Clone, Debug)]
-pub struct Lease { pub id: String, pub token: String }
 struct Listing { advert: ServerAdvert, token: String, seen: Instant, owner: IpAddr }
 pub struct DirectoryHandle {
     pub addr: std::net::SocketAddr, stop: Arc<AtomicBool>, thread: Option<JoinHandle<()>>,
@@ -95,34 +93,6 @@ fn handle(request: DirRequest, peer: IpAddr, listings: &mut HashMap<String, List
         DirRequest::List => DirResponse::Servers { servers: listings.values().map(|l| l.advert.clone()).collect() },
     }
 }
-pub fn register(directory: &str, name: &str, host: &str, port: u16, players: u32, max_players: u32, map: &str) -> io::Result<Lease> {
-    match exchange(directory, &DirRequest::Register { name: name.into(), host: host.into(), port,
-        players, max_players, map: map.into() })? {
-        DirResponse::Registered { id, token } => Ok(Lease { id, token }),
-        DirResponse::Error { message } => Err(io::Error::other(message)),
-        _ => Err(invalid("unexpected reply")),
-    }
-}
-pub fn heartbeat(directory: &str, lease: &Lease, players: u32) -> io::Result<()> {
-    match exchange(directory, &DirRequest::Heartbeat { id: lease.id.clone(), token: lease.token.clone(), players })? {
-        DirResponse::Ok => Ok(()), DirResponse::Error { message } => Err(io::Error::other(message)),
-        _ => Err(invalid("unexpected reply")),
-    }
-}
-pub fn list(directory: &str) -> io::Result<Vec<ServerAdvert>> {
-    match exchange(directory, &DirRequest::List)? {
-        DirResponse::Servers { servers } => Ok(servers),
-        _ => Err(invalid("unexpected directory reply")),
-    }
-}
-fn exchange(directory: &str, request: &DirRequest) -> io::Result<DirResponse> {
-    let mut stream = TcpStream::connect_timeout(&private_bind(directory)?, Duration::from_secs(2))?;
-    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(2)))?;
-    write_msg(&mut stream, request)?;
-    read_msg(&mut BufReader::new(stream))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

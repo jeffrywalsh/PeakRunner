@@ -9,7 +9,7 @@ rust-version = "1.95"
 default-run = "peakrunner"
 
 [workspace]
-members = [".", "crates/net", "crates/core"]
+members = [".", "crates/net", "crates/core", "crates/discovery", "crates/protocol", "crates/server", "crates/directory"]
 
 [dependencies]
 bytemuck = { version = "1.25", features = ["derive"] }

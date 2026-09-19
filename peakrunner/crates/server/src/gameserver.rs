@@ -14,7 +14,7 @@ pub struct GameHost {
 pub struct GameHandle {
     stop: Arc<AtomicBool>, thread: Option<thread::JoinHandle<()>>,
     pub players: Arc<AtomicU32>,
-    pub status: Arc<Mutex<crate::public::MatchStatus>>,
+    pub status: Arc<Mutex<peakrunner_discovery::MatchStatus>>,
 }
 impl Drop for GameHandle {
     fn drop(&mut self) {
@@ -45,12 +45,12 @@ impl GameHost {
         let flag = stop.clone();
         let players = Arc::new(AtomicU32::new(0));
         let count = players.clone();
-        let status = Arc::new(Mutex::new(crate::public::MatchStatus::default()));
+        let status = Arc::new(Mutex::new(peakrunner_discovery::MatchStatus::default()));
         let stats = status.clone();
         let thread = thread::spawn(move || self.run(flag, count, stats));
         GameHandle { stop, thread: Some(thread), players, status }
     }
-    fn run(self, stop: Arc<AtomicBool>, count: Arc<AtomicU32>, status: Arc<Mutex<crate::public::MatchStatus>>) {
+    fn run(self, stop: Arc<AtomicBool>, count: Arc<AtomicU32>, status: Arc<Mutex<peakrunner_discovery::MatchStatus>>) {
         let mut game = Match::new(self.map);
         let mut peers: Vec<Peer> = Vec::new();
         let mut id = 0u32;
@@ -151,7 +151,7 @@ impl GameHost {
             }
             count.store(game.world.players.iter().filter(|p| p.net_id != 0).count() as u32, Ordering::Relaxed);
             if game.tick % 3 == 0 {
-                *status.lock().expect("match status") = crate::public::MatchStatus {
+                *status.lock().expect("match status") = peakrunner_discovery::MatchStatus {
                     name: self.name.clone(), map: format!("{:?}", self.map),
                     players: count.load(Ordering::Relaxed), max_players: self.max_players as u32,
                     tick: game.tick, round: game.round, phase: format!("{:?}", game.phase),
@@ -187,14 +187,14 @@ pub fn run_from_args() {
         .expect("private game server bind").with_password(password);
     println!("PeakRunner: {name}, {map}, {}, 8 player CTF; private LAN/VPN transport", host.local_addr());
     let handle = host.spawn();
-    let mut lease: Option<crate::directory::Lease> = None;
+    let mut lease: Option<peakrunner_discovery::lan::Lease> = None;
     loop {
         if let Some(dir) = directory.as_deref() {
             let players = handle.players.load(Ordering::Relaxed);
             let result = if let Some(l) = &lease {
-                crate::directory::heartbeat(dir, l, players).map(|_| ())
+                peakrunner_discovery::lan::heartbeat(dir, l, players).map(|_| ())
             } else {
-                crate::directory::register(dir, &name, advertise.as_deref().unwrap_or(&bind), port, players, 8, &map)
+                peakrunner_discovery::lan::register(dir, &name, advertise.as_deref().unwrap_or(&bind), port, players, 8, &map)
                     .map(|l| { lease = Some(l); })
             };
             if let Err(e) = result { log::warn!("directory: {e}"); lease = None; }

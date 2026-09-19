@@ -12,7 +12,7 @@ certificate; initial eight-client WAN and loss/jitter checks passed. Longer huma
 multi-machine playtests are still needed before competitive-readiness claims.
 
 The intended split is a `directory` service on dellcon behind Cloudflare Tunnel,
-and `peakrunner-quic` on the VPS with only UDP 7777 published. Cloudflare handles
+and `peakrunner-server` on the VPS with only UDP 7777 published. Cloudflare handles
 HTTPS discovery, not gameplay. Gameplay encryption runs from native client to
 VPS; the local authoritative backend uses trusted loopback TCP. The server
 operator can read game state. Restore files and pending deployment gates are in
@@ -86,21 +86,17 @@ Do not use a password you use anywhere else. The server operator is trusted.
 
 ## Hosting
 
-In the native game: select the map on the main menu, open **Find match**, expand
-**Host a private match**, enter the host's specific LAN/VPN IP and port, and
-choose **Host and join**. Friends use **Join directly** with that same address.
-Loopback (`127.0.0.1`) is only for testing on one computer. A hosted match uses
-the same authoritative server as the headless executable; closing the host's
-match stops it for everyone. Hosting from the UI does not advertise a directory
-listing automatically. Optional passwords use the Find match password field.
+Hosting now belongs to the separate server app. Clients use **Find match → Join
+directly**; closing the client does not stop the server. The directory is a third
+independent app with no simulation dependency. See [app boundaries](apps.md).
 
-For a separate headless host:
+For a trusted-LAN headless host:
 
 Build from the `peakrunner` directory:
 
 ```sh
-cargo build --release -p peakrunner-net
-target/release/peakrunner-server --bind 127.0.0.1 --port 7781 --name "North Spine" --map Valley
+cargo build --release -p peakrunner-server -p peakrunner-directory
+target/release/peakrunner-lan-server --bind 127.0.0.1 --port 7781 --name "North Spine" --map Raindance
 ```
 
 Replace the loopback bind with the host's specific private LAN/VPN address to
@@ -115,8 +111,8 @@ source control and do not expose the service directly to the internet.
 Optional directory, on the same private network:
 
 ```sh
-target/release/peakrunner-directory 127.0.0.1:7780
-target/release/peakrunner-server --bind 127.0.0.1 --name "North Spine" --map Valley --directory 127.0.0.1:7780
+target/release/peakrunner-lan-directory 127.0.0.1:7780
+target/release/peakrunner-lan-server --bind 127.0.0.1 --name "North Spine" --map Raindance --directory 127.0.0.1:7780
 ```
 
 Change both addresses for a LAN/VPN setup. `--advertise` may specify the server
@@ -124,19 +120,20 @@ IP explicitly; it must match the connection's source IP seen by the directory.
 Listings heartbeat every two seconds and expire after eight seconds. There is
 no automatic deployment or assumption that a previously used host is running.
 
-Native clients optionally accept `PEAKRUNNER_JOIN=wss://play.peakrunner.net/match`
+Native clients optionally accept `PEAKRUNNER_JOIN=quic://play.peakrunner.net:7777`
 (or a private `IP:PORT`), `PEAKRUNNER_NAME`,
 and `PEAKRUNNER_MATCH_PASSWORD` at launch for direct session entry.
 
-The Dockerfile build context is the `peakrunner` directory, not `crates/net`.
-Its default directory bind is loopback; configure a specific private interface
-when operating a container. Do not publish it as an unprotected public service.
+The separate server and directory Dockerfiles use the `peakrunner` workspace
+as build context. The directory's HTTP origin belongs on the isolated tunnel
+network. Only the encrypted server's UDP port is published.
 
 ## Verification
 
 ```sh
 cargo test --workspace
-cargo test -p peakrunner-net eight_clients_sustain -- --ignored --nocapture
+cargo test -p peakrunner-server eight_clients_sustain -- --ignored --nocapture
+node scripts/check-app-boundaries.mjs
 cargo test --release -p peakrunner --lib -- --include-ignored
 cargo check --target wasm32-unknown-unknown
 ```
