@@ -271,13 +271,7 @@ impl PeakRunnerApp {
 
     fn menu(&mut self, ctx: &egui::Context) {
         #[cfg(not(target_arch = "wasm32"))]
-        {
-            if let Some(session) = self.net.session.take() {
-                session.leave();
-            }
-            self.net.dropped_in = false;
-            self.net.hosted = None;
-        }
+        self.net.disconnect();
         self.world.state = MatchState::Flyby;
         self.mode = Mode::Menu;
         self.grab(ctx, false);
@@ -887,7 +881,7 @@ impl PeakRunnerApp {
                 }
                 return;
             }
-            if self.net.lobby.connected {
+            if self.net.session.is_some() && self.net.lobby.connected {
                 if let Some(snapshot) = self.net.lobby.snapshot.clone() {
                     if !self.net.dropped_in {
                         self.net.predictor = crate::online::Online::default();
@@ -1096,13 +1090,9 @@ impl PeakRunnerApp {
 
     fn leave_lobby(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
-        {
-            if let Some(session) = self.net.session.take() {
-                session.leave();
-            }
-            self.net.dropped_in = false;
-            self.net.hosted = None;
-        }
+        self.net.disconnect();
+        self.world.state = MatchState::Flyby;
+        self.audio.set_jet(false);
         self.mode = Mode::Browser;
     }
 }
@@ -1125,6 +1115,14 @@ struct NetUi {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl NetUi {
+    fn disconnect(&mut self) {
+        if let Some(session) = self.session.take() { session.leave(); }
+        self.lobby = Default::default();
+        self.predictor = Default::default();
+        self.dropped_in = false;
+        self.hosted = None;
+    }
+
     fn new() -> Self {
         Self {
             hosted: None,
@@ -1184,6 +1182,31 @@ fn big(ui: &mut egui::Ui, label: &str, primary: bool) -> bool {
         egui::Button::new(RichText::new(label).color(FG))
     };
     ui.add_sized(Vec2::new(280.0, 40.0), button).clicked()
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod exit_tests {
+    use super::*;
+
+    #[test]
+    fn leaving_clears_the_snapshot_that_could_reenter_the_match() {
+        let mut net = NetUi::new();
+        net.lobby.connected = true;
+        net.lobby.player_id = 42;
+        net.lobby.snapshot = Some(crate::sim::Match::new(crate::terrain::MapId::Valley).snapshot());
+        net.lobby.error = Some("old error".into());
+        net.dropped_in = true;
+        net.predictor.tick = 100;
+        net.disconnect();
+        assert!(!net.lobby.connected);
+        assert!(net.lobby.snapshot.is_none());
+        assert!(net.lobby.error.is_none());
+        assert_eq!(net.lobby.player_id, 0);
+        assert!(!net.dropped_in);
+        assert!(net.session.is_none() && net.hosted.is_none());
+        assert_eq!(net.predictor.tick, 0);
+        net.disconnect(); // Leaving twice is harmless.
+    }
 }
 
 fn style_ui(ctx: &egui::Context) {
