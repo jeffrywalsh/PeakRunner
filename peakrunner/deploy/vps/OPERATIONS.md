@@ -9,8 +9,8 @@ directory on dellcon; do not proxy the game UDP endpoint through its tunnel.
 checkout of that revision, build from the `peakrunner` directory:
 
 ```sh
-docker build --platform linux/amd64 -f crates/net/Dockerfile -t peakrunner/public:8d4437e .
-docker save peakrunner/public:8d4437e | gzip > peakrunner-server-image.tar.gz
+docker build --platform linux/amd64 -f crates/net/Dockerfile -t peakrunner/public:012cd3b .
+docker save peakrunner/public:012cd3b | gzip > peakrunner-server-image.tar.gz
 ```
 
 The Dockerfile pins both base image digests and Cargo uses the committed lockfile.
@@ -52,6 +52,15 @@ No container registry account is required. Git stores source/config, not images.
    before moving hosts. Existing unexpected DNS records are preserved/refused.
 
 ## Routine checks and limitations
+
+- Teams are balanced by player count, not skill. New arrivals join the smaller
+  side; departures trigger balancing on the next server tick when the difference
+  exceeds one. Transfers prefer non-carriers, then dead players, then newest
+  arrivals. A transferred player respawns, retains personal stats, drops any
+  carried flag, and loses in-flight projectiles. Scores and match time continue.
+- The last departure resets all match state immediately to fresh warmup,
+  including round, flags, scores, clock and effects. The server tick continues
+  monotonically for health checks. Two opponents trigger a fresh countdown.
 
 - Docker health checks require an advancing simulation clock. Compose restarts
   exited processes, **not** merely unhealthy ones; investigate unhealthy status.
