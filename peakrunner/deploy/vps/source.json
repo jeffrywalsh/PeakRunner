@@ -1,0 +1,8 @@
+{
+  "repository": "git@github.com:jeffrywalsh/PeakRunner.git",
+  "revision": "d361a3ce37b7fecd032fa213370aa27ced9280ed",
+  "directory": "peakrunner",
+  "dockerfile": "crates/net/Dockerfile",
+  "platform": "linux/amd64",
+  "tag": "peakrunner/public:d361a3c"
+}

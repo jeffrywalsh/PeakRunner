@@ -1,5 +1,33 @@
 name: peakrunner-public
 services:
+  directory:
+    build:
+      context: ./source
+      dockerfile: crates/net/Dockerfile
+    image: sha256:a18653d71248afa7dd369cef5287521d286427c9ca9640ec370aa63cc7b5d215
+    command: [peakrunner-public, --directory]
+    environment:
+      PEAKRUNNER_HTTP_BIND: 0.0.0.0:8080
+      PEAKRUNNER_TRUST_CLOUDFLARE: "1"
+      PEAKRUNNER_STATUS_URL: quic://play.peakrunner.net:7777
+      PEAKRUNNER_PUBLIC_URL: quic://play.peakrunner.net:7777
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    healthcheck:
+      test: [CMD, peakrunner-public, --healthcheck]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+    networks: [public]
   tunnel:
     image: cloudflare/cloudflared@sha256:b269e8abd07a5bf6f3f4be65d5050b2174eca89c56a0241a8ff32a16aec454e4
     container_name: peakrunner-cloudflared

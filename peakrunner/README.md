@@ -51,8 +51,8 @@ Eight-player, server-authoritative CTF with encrypted public matches. The server
 runs movement, projectiles, damage, energy, respawns, flags, scores, and the match
 clock at 60 Hz. Clients predict their movement and reconcile to 20 Hz snapshots.
 The default directory is `https://dir.peakrunner.net/servers`; direct encrypted
-joining uses `quic://play.peakrunner.net:7777`. Public deployment is still pending
-certificate provisioning and WAN validation. Choose **Find match** in the updated
+joining uses `quic://play.peakrunner.net:7777`. The VPS match has a public CA
+certificate and passed initial eight-client WAN checks. Choose **Find match** in the updated
 desktop client. The directory is optional; direct joining works without it.
 
 ```sh

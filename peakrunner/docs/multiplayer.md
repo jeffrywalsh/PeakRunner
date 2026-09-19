@@ -7,8 +7,9 @@ The native client defaults to `https://dir.peakrunner.net/servers` and
 there is no insecure certificate bypass or plaintext fallback. Gameplay uses
 QUIC datagrams over direct UDP with TLS 1.3; reliable streams carry admission
 and status only. HTTPS directory responses are bounded, redirects are disabled,
-and public listings must use QUIC. Deployment is pending certificate provisioning
-and WAN testing; the new public match is not yet live.
+and public listings must use QUIC. The VPS match is deployed with a public CA
+certificate; initial eight-client WAN and loss/jitter checks passed. Longer human
+multi-machine playtests are still needed before competitive-readiness claims.
 
 The intended split is a `directory` service on dellcon behind Cloudflare Tunnel,
 and `peakrunner-quic` on the VPS with only UDP 7777 published. Cloudflare handles
@@ -26,6 +27,8 @@ Inputs redundantly include three numbered frames. Snapshots are independently
 replaceable and LZ4-compressed, bounded to 12 fragments and 64 KiB after
 decompression, with at most four incomplete assemblies. Transmit queues are
 16 KiB for snapshots and 1 KiB for inputs to avoid seconds of stale buffered state.
+Only one snapshot is pending for transmission; intermediate snapshots are skipped
+under congestion so fragments from multiple ticks do not crowd each other out.
 Old, duplicate and incomplete snapshots never block a newer complete snapshot.
 Zero-RTT is disabled. The old WSS implementation is not the public gameplay path.
 
@@ -154,10 +157,10 @@ This is a short local check, not a long-running or cross-machine certification.
 
 1. Verified player accounts and persistent reconnect identities if requested.
    TLS verifies the service, not the player. Public sessions are anonymous.
-2. Compact binary/delta snapshots and latency/loss testing on real networks.
-   The current JSON/TCP/WSS path prioritizes correctness and accessibility; TCP
-   head-of-line blocking and snapshot bandwidth make it unsuitable to certify
-   for competitive WAN play. There is no server rewind/lag compensation yet.
+2. Longer latency/loss testing on real networks. Public gameplay now uses
+   compressed binary snapshots over QUIC datagrams, not TCP/WSS. Delta snapshots
+   remain a possible bandwidth optimization. There is no server rewind/lag
+   compensation yet; short smoke tests are not competitive certification.
 3. Operator tools: kick/ban, reconnect identity, team management, readiness,
    map rotation, structured match logs, and durable results if requested.
 4. Longer multi-machine soak tests and profiling on low-end clients/servers.

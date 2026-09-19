@@ -1,0 +1,28 @@
+name: peakrunner-match
+services:
+  match:
+    image: ${PEAKRUNNER_IMAGE:?Set the tested immutable image tag or digest}
+    command: [peakrunner-quic]
+    user: "10001:10001"
+    environment:
+      PEAKRUNNER_MATCH_PASSWORD: ${PEAKRUNNER_MATCH_PASSWORD:-}
+    ports:
+      - "7777:7777/udp"
+    volumes:
+      - ./secrets/certs:/run/peakrunner:ro
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 384m
+    cpus: 1.0
+    pids_limit: 64
+    healthcheck:
+      test: [CMD, peakrunner-quic, --healthcheck]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}

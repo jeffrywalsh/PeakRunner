@@ -9,12 +9,15 @@ sync when changing infrastructure. Docker Compose project: `peakrunner-public`.
 - A digest-pinned cloudflared container, `peakrunner-cloudflared`, with automatic
   restart, bounded logs/resources, read-only filesystem and dropped capabilities.
 - Dedicated external Docker network `peakrunner-public`, created by the helper.
-- Four proxied DNS names and explicit tunnel ingress in `cloudflare.json`.
-- HTTP 503 maintenance responses only. The entry page, HTTPS directory and WSS
-  match transport are **not yet deployed**. The old LAN-only game containers
-  remain managed by `/data/docker-compose.yml`.
+- Three proxied DNS names and explicit tunnel ingress in `cloudflare.json`.
+- HTTPS directory at `dir.peakrunner.net/servers`, polling the VPS over validated
+  QUIC. Only operator-configured official matches are listed.
+- `play.peakrunner.net` is a DNS-only A record to the VPS, serving UDP 7777.
+  It does not send gameplay through Cloudflare Tunnel.
+- Apex/www still return HTTP 503 maintenance; the entry page is separate work.
+  Old LAN-only game containers remain managed by `/data/docker-compose.yml`.
 
-There are no inbound ports. Cloudflare routes directly to this dedicated tunnel;
+There are no published inbound ports for these dellcon services. Cloudflare routes directly to this dedicated tunnel;
 existing Caddy configuration is unchanged and remains in the homelab repository.
 Do not point these HTTP routes at the legacy raw TCP game ports.
 
@@ -23,6 +26,9 @@ Do not point these HTTP routes at the legacy raw TCP game ports.
 1. Clone the homelab repository onto the replacement Docker host, preserving this
    directory. Install Docker Engine with Compose v2+ and verify its SSH host key.
    Alternatively copy this entire directory from the PeakRunner repository.
+   Rebuild or load the pinned server/directory image first using
+   `../vps/source.json` and `../vps/OPERATIONS.md`; `source/` is an ignored build
+   context, not a source backup. The directory and VPS must use compatible protocols.
 2. On an administrator machine with Node 22+, recover the Cloudflare API token
    from your password manager/encrypted backup into an owner-only file **outside
    Git**. Required access: account Tunnel Edit, peakrunner.net DNS Edit and Zone
@@ -35,9 +41,10 @@ Do not point these HTTP routes at the legacy raw TCP game ports.
    named tunnel, creates missing DNS and network resources, obtains the
    tunnel-scoped credential and starts Compose remotely. API secrets are neither
    stored in this directory nor printed. Conflicting DNS is never overwritten.
-5. Verify the tunnel is healthy (`node cloudflare.mjs`) and public HTTPS returns
-   the expected response for all four names. Currently the expected status is
-   **503**, not a playable game. Check each connector when both hosts are active.
+   Use `--apply --sync-config` to apply the reviewed ingress configuration.
+5. Verify the tunnel is healthy (`node cloudflare.mjs`), `/servers` returns the
+   live VPS listing, and apex/www return maintenance. Gameplay uses QUIC, not an
+   HTTPS page. Check each connector when both hosts are active.
 6. After verifying the replacement, stop the old connector. Both machines can
    serve the same tunnel during migration; deploy matching backend services on
    both before serving real traffic. No DNS change is required when reusing the
@@ -46,6 +53,7 @@ Do not point these HTTP routes at the legacy raw TCP game ports.
 If the Cloudflare tunnel itself was deleted, the helper creates a replacement but
 refuses stale DNS conflicts. Review and explicitly replace only the four stale
 PeakRunner CNAME targets; it will not silently repoint existing records.
+The gameplay A record is independent of tunnel recreation.
 
 ## Routing changes and upgrades
 
@@ -53,6 +61,9 @@ Edit `cloudflare.json`, review/commit it, then run
 `node cloudflare.mjs --apply --sync-config`. This explicitly replaces this
 tunnel's routing configuration; ordinary `--apply` preserves existing routing.
 No flags means read-only status; `--start` only starts/reconciles Compose.
+`--apply --cutover-udp` changes only the expected gameplay tunnel CNAME into
+the configured DNS-only A record, or creates it if absent. Run it only after
+certificate-verified WAN checks. Unexpected existing DNS is refused/preserved.
 
 Pin a reviewed cloudflared image digest in `compose.yaml`, commit it, copy the
 updated deployment to the host, then run the helper with `--start`. Restore the

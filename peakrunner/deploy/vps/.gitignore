@@ -1,6 +1,6 @@
-/source/
+/secrets/
+/*.env
 /cf-key*
 /.env*
-/secrets/
 /*.pem
 /*.key

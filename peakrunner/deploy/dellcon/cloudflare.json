@@ -1,12 +1,14 @@
 {
   "zone": "peakrunner.net",
   "tunnel": "peakrunner-dellcon",
-  "hosts": ["peakrunner.net", "www.peakrunner.net", "dir.peakrunner.net", "play.peakrunner.net"],
+  "hosts": ["peakrunner.net", "www.peakrunner.net", "dir.peakrunner.net"],
+  "udp": {"name":"play.peakrunner.net", "address":"198.12.80.145"},
+  "settings": {"min_tls_version": "1.2", "always_use_https": "on", "websockets": "on"},
   "config": {
     "ingress": [
       {"hostname": "peakrunner.net", "service": "http_status:503"},
       {"hostname": "www.peakrunner.net", "service": "http_status:503"},
-      {"hostname": "dir.peakrunner.net", "service": "http_status:503"},
+      {"hostname": "dir.peakrunner.net", "service": "http://directory:8080"},
       {"hostname": "play.peakrunner.net", "service": "http_status:503"},
       {"service": "http_status:404"}
     ]
