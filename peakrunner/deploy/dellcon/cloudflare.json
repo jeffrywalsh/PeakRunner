@@ -1,0 +1,14 @@
+{
+  "zone": "peakrunner.net",
+  "tunnel": "peakrunner-dellcon",
+  "hosts": ["peakrunner.net", "www.peakrunner.net", "dir.peakrunner.net", "play.peakrunner.net"],
+  "config": {
+    "ingress": [
+      {"hostname": "peakrunner.net", "service": "http_status:503"},
+      {"hostname": "www.peakrunner.net", "service": "http_status:503"},
+      {"hostname": "dir.peakrunner.net", "service": "http_status:503"},
+      {"hostname": "play.peakrunner.net", "service": "http_status:503"},
+      {"service": "http_status:404"}
+    ]
+  }
+}

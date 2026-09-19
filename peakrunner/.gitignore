@@ -1,0 +1,3 @@
+# Local Cloudflare credentials must never be committed.
+/cf-key
+/cf-key.*

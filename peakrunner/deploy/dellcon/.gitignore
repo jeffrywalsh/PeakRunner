@@ -1,0 +1,5 @@
+/cf-key*
+/.env*
+/secrets/
+/*.pem
+/*.key
