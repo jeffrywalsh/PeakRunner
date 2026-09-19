@@ -3,6 +3,25 @@
 Branch: `feature/multi-map-system`, based on main `396cf0d`.
 Do not merge or deploy this branch until the complete pipeline is tested.
 
+## Server authority contract
+
+The server owns the configured ordered map/mode rotation and chooses the active
+entry. Clients cannot vote, override, or submit a mode through movement/input
+messages. A map's supported modes describe capability, not server policy. Only
+implemented modes may be configured; CTF is the only supported mode for now.
+
+Clients install map assets locally for fast rendering and matching collision
+prediction. The server loads the same authoritative geometry/spawn data and
+checks selected identity, revision/content fingerprint and mode at admission.
+Future menu map selection is for offline play only; multiplayer follows the host.
+Rotation changes must coordinate round state, asset readiness and late joins;
+never silently substitute a missing map or inherit a previous map's world state.
+
+Much later, enthusiast servers may deliver custom maps/mods. Reserve that as a
+separate security/design milestone: bounded downloads, consent/trust policy,
+content-addressed cache, validation and mod isolation. A hash verifies equality,
+not trust. No automatic server downloads or arbitrary code execution now.
+
 ## First checkpoint
 
 `core::map_catalog` defines a strict, portable metadata contract: stable lowercase
@@ -31,7 +50,9 @@ Raindance asset bytes and movement remain unchanged.
    A different *unselected* installed map must not prevent joining. Reject missing
    or mismatched selected content before granting a player slot. Bump protocol
    only when implementing this coordinated wire change.
-4. Present installed maps in the native menu. Update signed launcher layout and
+4. Present installed maps in the offline menu, and server-selected map/mode plus
+   missing-content status in the multiplayer browser. Add server-owned validated
+   rotation configuration (CTF only initially). Update signed launcher layout and
    packaging to distribute multiple packs, preserve old clients' update/rollback
    behavior, and keep directory independent of gameplay core.
 5. Test two distinct original packs coexisting, switching and loading safely,

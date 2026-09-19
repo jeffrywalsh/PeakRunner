@@ -87,6 +87,11 @@ They are not in the published `.20260919.4` binaries; never store passwords.
 
 ## Gameplay and security contracts
 
+- Multiplayer map rotation and modes are SERVER-selected. Client-local map data
+  supports fast rendering and prediction, not authority over map/mode choice.
+  Only implemented modes can be configured (CTF today). Future server-delivered
+  enthusiast maps/mods are a separate later milestone: no automatic downloads or
+  arbitrary server-provided code execution in the current multi-map foundation.
 - The server owns identity, teams, movement validity, damage, scores and outcomes.
   Do not accept client-supplied identity, team, frag or damage claims.
 - Names use `crates/core/src/names.rs`: 1–24 ASCII alphanumeric/space characters,
