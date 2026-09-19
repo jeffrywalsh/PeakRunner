@@ -9,8 +9,8 @@ directory on dellcon; do not proxy the game UDP endpoint through its tunnel.
 checkout of that revision, build from the `peakrunner` directory:
 
 ```sh
-docker build --platform linux/amd64 -f crates/net/Dockerfile -t peakrunner/public:d361a3c .
-docker save peakrunner/public:d361a3c | gzip > peakrunner-server-image.tar.gz
+docker build --platform linux/amd64 -f crates/net/Dockerfile -t peakrunner/public:8d4437e .
+docker save peakrunner/public:8d4437e | gzip > peakrunner-server-image.tar.gz
 ```
 
 The Dockerfile pins both base image digests and Cargo uses the committed lockfile.

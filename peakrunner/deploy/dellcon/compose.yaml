@@ -4,7 +4,7 @@ services:
     build:
       context: ./source
       dockerfile: crates/net/Dockerfile
-    image: sha256:a18653d71248afa7dd369cef5287521d286427c9ca9640ec370aa63cc7b5d215
+    image: sha256:6e91d9645277f562b1dde6813b314c33fe2b8c684f04d8281393a7b1525d1cde
     command: [peakrunner-public, --directory]
     environment:
       PEAKRUNNER_HTTP_BIND: 0.0.0.0:8080
