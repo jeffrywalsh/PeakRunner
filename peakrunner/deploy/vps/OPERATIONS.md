@@ -3,6 +3,31 @@
 The public game server is independent of dellcon. Keep the website and HTTPS
 directory on dellcon; do not proxy the game UDP endpoint through its tunnel.
 
+## Administration access
+
+Connect as `peakrunner-admin@198.12.80.145` with the existing SSH key. Direct root,
+password and keyboard-interactive SSH logins are disabled. The admin has the
+explicitly authorized `NOPASSWD: ALL` rule in `/etc/sudoers.d/peakrunner-admin`
+(root:root, 0440); use `sudo -n`. This intentionally grants root-equivalent access.
+The account is not a Docker-group member. Existing unrelated accounts are preserved.
+
+Source templates: `peakrunner-admin.sudoers` and `00-peakrunner-hardening.conf`.
+On a replacement host, create the admin account, install recovered authorized
+public keys with directory mode 0700/file mode 0600 and correct ownership,
+validate sudoers with `visudo -cf`, and test a fresh SSH connection plus
+`sudo -n id` BEFORE installing the root-login restriction. Keep SSH keys out of
+Git. Keep a recovery session and timed rollback until verification succeeds.
+Validate with `sshd -t`, reload SSH, verify new admin access and rejection of root
+and password-only login attempts, then cancel rollback.
+
+The migration backup of the previous SSH snippet is in
+`/root/peakrunner-ssh-migration-20260919/`. Recover through the working admin account
+or provider console if necessary; the root account was not deleted or disabled
+for console use. The temporary rollback timer was canceled after successful tests.
+Upload reviewed configs to a staging directory in the admin home, then use
+`sudo -n install` to place them in `/opt/peakrunner`; do not make production config
+directories world-writable. `provision-certificate.mjs` uses this admin plus sudo.
+
 ## Recreate the image
 
 `source.json` identifies the source revision and Linux/amd64 image tag. In a
@@ -45,10 +70,10 @@ No container registry account is required. Git stores source/config, not images.
 
    ```sh
    cd /opt/peakrunner
-   docker compose --env-file release.conf up -d
-   docker compose --env-file release.conf ps
-   docker compose --env-file release.conf logs --tail 30
-   certbot renew --dry-run --cert-name play.peakrunner.net
+   sudo -n docker compose --env-file release.conf up -d
+   sudo -n docker compose --env-file release.conf ps
+   sudo -n docker compose --env-file release.conf logs --tail 30
+   sudo -n certbot renew --dry-run --cert-name play.peakrunner.net
    ```
 
 5. Test UDP by IP override while still verifying the public hostname certificate.
@@ -57,6 +82,10 @@ No container registry account is required. Git stores source/config, not images.
    before moving hosts. Existing unexpected DNS records are preserved/refused.
 
 ## Routine checks and limitations
+
+- `PEAKRUNNER_MATCH_NAME` in Compose sets the public display name, currently
+  `Springdale Central`. The directory reads it from the live server; no separate
+  directory rename is needed. The stable directory ID is retained for clients.
 
 - The public match runs Raindance (2 km). `PEAKRUNNER_MATCH_MAP` in Compose
   selects `Valley` or `Raindance`; invalid names fail startup. Change it only

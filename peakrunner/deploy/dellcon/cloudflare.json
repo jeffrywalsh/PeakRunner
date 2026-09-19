@@ -6,8 +6,8 @@
   "settings": {"min_tls_version": "1.2", "always_use_https": "on", "websockets": "on"},
   "config": {
     "ingress": [
-      {"hostname": "peakrunner.net", "service": "http_status:503"},
-      {"hostname": "www.peakrunner.net", "service": "http_status:503"},
+      {"hostname": "peakrunner.net", "service": "http://site:8080"},
+      {"hostname": "www.peakrunner.net", "service": "http://site:8080"},
       {"hostname": "dir.peakrunner.net", "service": "http://directory:8080"},
       {"hostname": "play.peakrunner.net", "service": "http_status:503"},
       {"service": "http_status:404"}

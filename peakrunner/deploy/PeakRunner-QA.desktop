@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=PeakRunner
+Comment=Published Linux x64 playtest (software rendering under UTM)
+Exec=/home/tester/PeakRunner-QA/client/peakrunner
+Path=/home/tester/PeakRunner-QA/client
+Terminal=false
+Categories=Game;

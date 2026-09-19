@@ -1,0 +1,54 @@
+{
+  "version": "0.1.0-raindance.20260919.4",
+  "launcher_version": "0.1.0-r1",
+  "downloads": [
+    {
+      "platform": "MACOS / APPLE SILICON",
+      "title": "Mac launcher",
+      "description": "Install once; signed game/map updates, repair and rollback. Apple Silicon. Ad-hoc signed, not Apple notarized; may require Privacy & Security → Open Anyway.",
+      "label": "Get Mac launcher",
+      "url": "/downloads/PeakRunnerLauncher-0.1.0-r1-macos-arm64.zip",
+      "sha256": "449f3f91fe1abc08beaaf8e4914cefe9661d051b345aea84dfb76fc98d67c39b"
+    },
+    {
+      "platform": "WINDOWS / X64",
+      "title": "Windows launcher · experimental",
+      "description": "Unsigned x64 launcher with signed game updates. Launcher and Raindance rendered in Windows 11 ARM with the DirectX-capable backend. Native x64 hardware, audio and full gameplay still need testing.",
+      "label": "Get Windows launcher",
+      "url": "/downloads/PeakRunnerLauncher-0.1.0-r1-windows-x64.zip",
+      "sha256": "a264c794d2257f81648a4b009a7adf3b70baf4f94e43bdcee5e4ea2607f07bb0"
+    },
+    {
+      "platform": "LINUX / X64",
+      "title": "Linux launcher",
+      "description": "Signed updates, repair and rollback. Debian 12 / glibc 2.36+. Desktop OpenGL for launcher; Vulkan for game; ALSA, udev, X11/Wayland and libxkbcommon-x11. Software-rendered checks; audio and interactive gameplay untested.",
+      "label": "Get Linux launcher",
+      "url": "/downloads/PeakRunnerLauncher-0.1.0-r1-linux-x64.tar.gz",
+      "sha256": "fbfa853dbb0681cb86a9d94ffbc7f534abfa1606da63c680e16f7b25b2ff3e4b"
+    },
+    {
+      "platform": "STANDALONE / MACOS",
+      "title": "Mac standalone",
+      "description": "Full game with embedded Raindance assets. Apple Silicon, ad-hoc signed and not notarized. No automatic updates; an alternative to the launcher. Visual update; compatible with the .20260919.3 server.",
+      "label": "Mac full game",
+      "url": "/downloads/PeakRunner-0.1.0-raindance.20260919.4-macos-arm64.zip",
+      "sha256": "d43e9c78509aca6df3650e77e92deda830c0221f8f26062896db3d67d38e3e1a"
+    },
+    {
+      "platform": "STANDALONE / WINDOWS",
+      "title": "Windows standalone · experimental",
+      "description": "Unsigned x64 full-game ZIP with embedded assets. Same platform-testing limitations as the launcher build. Download a new archive for future updates. Visual update; compatible with the .20260919.3 server.",
+      "label": "Windows full game",
+      "url": "/downloads/PeakRunner-0.1.0-raindance.20260919.4-windows-x64.zip",
+      "sha256": "2a648f9f2c7f7ec80ba626144e24f938d633042f517c6b0be61842c85d641be9"
+    },
+    {
+      "platform": "STANDALONE / LINUX",
+      "title": "Linux standalone",
+      "description": "Full-game archive with embedded assets. Debian 12 / glibc 2.36+ and the game libraries above. Software-rendering checks do not establish playable frame rates. Visual update; compatible with the .20260919.3 server.",
+      "label": "Linux full game",
+      "url": "/downloads/PeakRunner-0.1.0-raindance.20260919.4-linux-x64.tar.gz",
+      "sha256": "6d823cae109a17c7f791d1ba054411f34f57962691aedaddda5f1253c74cf833"
+    }
+  ]
+}

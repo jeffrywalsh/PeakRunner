@@ -27,6 +27,11 @@ pub fn server_config(cert: &[u8], key: &[u8]) -> io::Result<quinn::ServerConfig>
 }
 struct Admission { active: usize, tokens: f32, seen: Instant }
 type Admissions = Arc<Mutex<HashMap<IpAddr, Admission>>>;
+type Pings = Arc<Mutex<HashMap<u32, u32>>>;
+struct PingEntry { pings: Pings, id: Option<u32> }
+impl Drop for PingEntry {
+    fn drop(&mut self) { if let Some(id) = self.id { self.pings.lock().unwrap().remove(&id); } }
+}
 struct Permit { peers: Admissions, ip: IpAddr }
 impl Drop for Permit { fn drop(&mut self) {
     if let Some(p) = self.peers.lock().unwrap().get_mut(&self.ip) { p.active = p.active.saturating_sub(1); }
@@ -46,21 +51,28 @@ fn admit(peers: &Admissions, ip: IpAddr) -> Option<Permit> {
 pub async fn serve(endpoint: Endpoint, backend: SocketAddr, status: Arc<Mutex<peakrunner_discovery::MatchStatus>>) {
     let slots = Arc::new(Semaphore::new(16));
     let peers: Admissions = Arc::new(Mutex::new(HashMap::new()));
+    let pings: Pings = Arc::new(Mutex::new(HashMap::new()));
     while let Some(incoming) = endpoint.accept().await {
         if !incoming.remote_address_validated() { let _ = incoming.retry(); continue; }
         let Ok(slot) = slots.clone().try_acquire_owned() else { incoming.refuse(); continue; };
         let Some(admission) = admit(&peers, incoming.remote_address().ip()) else { incoming.refuse(); continue; };
         let status = status.clone();
+        let pings = pings.clone();
         tokio::spawn(async move {
             let _slot = slot; let _admission = admission;
             if let Ok(Ok(conn)) = timeout(Duration::from_secs(4), incoming).await {
-                if let Err(e) = server_connection(&conn, backend, status).await { log::debug!("QUIC session closed: {e}"); }
+                if let Err(e) = server_connection(&conn, backend, status, pings).await { log::debug!("QUIC session closed: {e}"); }
                 conn.close(0u32.into(), b"session ended");
             }
         });
     }
 }
-async fn server_connection(conn: &Connection, backend: SocketAddr, status: Arc<Mutex<peakrunner_discovery::MatchStatus>>) -> io::Result<()> {
+async fn next_control(mut recv: quinn::RecvStream) -> (quinn::RecvStream, io::Result<ClientMsg>) {
+    let message = read_control(&mut recv).await;
+    (recv, message)
+}
+async fn server_connection(conn: &Connection, backend: SocketAddr, status: Arc<Mutex<peakrunner_discovery::MatchStatus>>, pings: Pings) -> io::Result<()> {
+    let mut ping = PingEntry { pings, id: None };
     let empty_datagram_space = conn.datagram_send_buffer_space();
     let (mut send, mut recv) = timeout(Duration::from_secs(3), conn.accept_bi()).await.map_err(io::Error::other)?.map_err(io::Error::other)?;
     let hello = timeout(Duration::from_secs(3), read_control::<ClientMsg>(&mut recv)).await.map_err(io::Error::other)??;
@@ -77,10 +89,23 @@ async fn server_connection(conn: &Connection, backend: SocketAddr, status: Arc<M
     let mut poll = tokio::time::interval(Duration::from_millis(2)); poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_seq = 0; let mut last_input = Instant::now();
     let mut tokens = 32.0f32; let mut refill = Instant::now();
-    let control = read_control::<ClientMsg>(&mut recv); tokio::pin!(control);
+    let mut chat_tokens = 8.0f32; let mut chat_refill = Instant::now();
+    let control = next_control(recv); tokio::pin!(control);
     loop {
         tokio::select! {
-            _ = &mut control => return Ok(()),
+            (stream, message) = &mut control => {
+                chat_tokens = (chat_tokens + chat_refill.elapsed().as_secs_f32() * 2.0).min(8.0);
+                chat_refill = Instant::now(); chat_tokens -= 1.0;
+                if chat_tokens < 0.0 { return Err(invalid("chat rate limit")); }
+                match message? {
+                    ClientMsg::Chat { text } if text.len() <= peakrunner_core::feed::MAX_BYTES => wire.send(&ClientMsg::Chat { text })?,
+                    ClientMsg::TeamChat { text } if text.len() <= peakrunner_core::feed::MAX_BYTES => wire.send(&ClientMsg::TeamChat { text })?,
+                    ClientMsg::Rename { name } if name.len() <= peakrunner_core::names::MAX_LEN => wire.send(&ClientMsg::Rename { name })?,
+                    ClientMsg::Leave => return Ok(()),
+                    _ => return Err(invalid("unexpected control message")),
+                }
+                control.set(next_control(stream));
+            },
             data = conn.read_datagram() => {
                 tokens = (tokens + refill.elapsed().as_secs_f32() * 120.0).min(32.0); refill = Instant::now(); tokens -= 1.0;
                 if tokens < 0.0 { return Err(invalid("input rate limit")); }
@@ -96,7 +121,13 @@ async fn server_connection(conn: &Connection, backend: SocketAddr, status: Arc<M
                 wire.flush()?;
                 for message in wire.receive::<ServerMsg>()? {
                     match message {
-                        ServerMsg::Snapshot { state } => {
+                        ServerMsg::Snapshot { mut state } => {
+                            if let Some(id) = ping.id {
+                                let mut values = ping.pings.lock().unwrap();
+                                values.insert(id, conn.rtt().as_millis().min(u32::MAX as u128) as u32);
+                                state.pings = state.players.iter().filter_map(|p|
+                                    values.get(&p.net_id).map(|ms| (p.net_id, *ms))).collect();
+                            }
                             // Finish the one pending snapshot instead of mixing
                             // fragments from multiple ticks or queuing old frames.
                             // Under congestion, skip intermediate snapshots; once
@@ -104,7 +135,10 @@ async fn server_connection(conn: &Connection, backend: SocketAddr, status: Arc<M
                             if conn.datagram_send_buffer_space() < empty_datagram_space { continue; }
                             for packet in chunks(&state)? { conn.send_datagram(packet.into()).map_err(io::Error::other)?; }
                         }
-                        control => timeout(Duration::from_secs(1), send_control(&mut send, &control)).await.map_err(io::Error::other)??,
+                        control => {
+                            if let ServerMsg::Welcome { player_id, .. } = &control { ping.id = Some(*player_id); }
+                            timeout(Duration::from_secs(1), send_control(&mut send, &control)).await.map_err(io::Error::other)??;
+                        }
                     }
                 }
             }
@@ -115,7 +149,8 @@ pub async fn run_server(bind: SocketAddr, cert: &[u8], key: &[u8]) -> io::Result
     let cfg = server_config(cert, key)?;
     let endpoint = Endpoint::server(cfg, bind)?;
     let map = std::env::var("PEAKRUNNER_MATCH_MAP").unwrap_or_else(|_| "Valley".into());
-    let host = GameHost::bind("127.0.0.1:0", "North Spine", 8, &map)?
+    let name = std::env::var("PEAKRUNNER_MATCH_NAME").unwrap_or_else(|_| "Springdale Central".into());
+    let host = GameHost::bind("127.0.0.1:0", &name, 8, &map)?
         .with_password(std::env::var("PEAKRUNNER_MATCH_PASSWORD").unwrap_or_default());
     let backend = host.local_addr(); let game = host.spawn();
     let status = game.status.clone();
@@ -156,6 +191,11 @@ mod tests {
         let mut game = peakrunner_core::sim::Match::new(peakrunner_core::terrain::MapId::Valley);
         for id in 1..=8 { game.join(id, &format!("Player{id}")).unwrap(); }
         game.phase = peakrunner_core::sim::Phase::Playing;
+        for n in 0..peakrunner_core::feed::CAPACITY {
+            peakrunner_core::feed::push(&mut game.world.feed, peakrunner_core::feed::Entry::Chat {
+                sender:format!("Player{n}"),text:(0..160).map(|i| char::from(b'!' + ((i*17+n*7)%90) as u8)).collect(),
+            });
+        }
         let mut largest = 0;
         for seq in 1..=900 {
             let commands: Vec<_> = (0..8).map(|i| Some(Command { seq, yaw:i as f32,
@@ -202,7 +242,7 @@ mod tests {
         status_conn.close(0u32.into(), b"status test complete");
         let conn = timeout(Duration::from_secs(3), client.connect(address, "localhost").unwrap()).await.unwrap().unwrap();
         let (mut send, mut recv) = conn.open_bi().await.unwrap();
-        send_control(&mut send, &ClientMsg::Hello { name: "UDP test".into(), protocol: crate::proto::PROTOCOL.into(), password: String::new() }).await.unwrap();
+        send_control(&mut send, &ClientMsg::Hello { name: "UDP test".into(), protocol: crate::proto::game_protocol(), password: String::new() }).await.unwrap();
         let welcome = timeout(Duration::from_secs(3), read_control::<ServerMsg>(&mut recv)).await.unwrap().unwrap();
         let ServerMsg::Welcome { player_id, .. } = welcome else { panic!("join rejected") };
         let mut assembly = Reassembly::default();
@@ -210,6 +250,25 @@ mod tests {
             loop { if let Some(s) = assembly.accept(&conn.read_datagram().await.unwrap()).unwrap() { break s; } }
         }).await.unwrap();
         assert!(state.players.iter().any(|p| p.net_id == player_id));
+        assert!(state.pings.iter().any(|(id,_)| *id == player_id), "server RTT missing");
+        send_control(&mut send, &ClientMsg::Rename { name: "UDP Pilot 42".into() }).await.unwrap();
+        timeout(Duration::from_secs(3), async {
+            loop {
+                if let Some(s) = assembly.accept(&conn.read_datagram().await.unwrap()).unwrap() {
+                    if s.players.iter().any(|p| p.net_id == player_id && p.name == "UDP Pilot 42") { break; }
+                }
+            }
+        }).await.expect("reliable rename missing from snapshots");
+        // Multiple reliable control frames must not close the UDP session or
+        // lose framing when snapshots arrive between partial stream reads.
+        send_control(&mut send, &ClientMsg::Chat { text: "Ready for a match".into() }).await.unwrap();
+        timeout(Duration::from_secs(3), async {
+            loop {
+                if let Some(s) = assembly.accept(&conn.read_datagram().await.unwrap()).unwrap() {
+                    if s.feed.iter().any(|e| matches!(e, peakrunner_core::feed::Entry::Chat { sender, text } if sender == "UDP Pilot 42" && text == "Ready for a match")) { break; }
+                }
+            }
+        }).await.expect("reliable chat missing from authoritative snapshots");
         conn.send_datagram(vec![0u8; 300].into()).unwrap();
         timeout(Duration::from_secs(3), conn.closed()).await.expect("malformed input was not disconnected");
         server.close(0u32.into(), b"test complete"); client.close(0u32.into(), b"test complete");

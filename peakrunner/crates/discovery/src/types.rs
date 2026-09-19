@@ -25,6 +25,17 @@ pub struct MatchStatus {
     pub name: String, pub map: String, pub players: u32, pub max_players: u32,
     pub tick: u64, pub round: u32, pub phase: String, pub score: [u32; 2],
     pub time_left: f32, pub password_required: bool,
+    #[serde(default)]
+    pub game_version: String,
+    #[serde(default)]
+    pub game_protocol: String,
+    #[serde(default)]
+    pub roster: Vec<PlayerStats>,
+}
+/// Public scoreboard only: no IP addresses, private chat, positions or credentials.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct PlayerStats {
+    pub id: u32, pub name: String, pub team: String, pub frags: u32, pub deaths: u32,
 }
 #[derive(Serialize, Deserialize)]
 pub struct PublicDirectory { pub protocol: String, pub servers: Vec<ServerAdvert> }

@@ -14,8 +14,10 @@ sync when changing infrastructure. Docker Compose project: `peakrunner-public`.
   QUIC. Only operator-configured official matches are listed.
 - `play.peakrunner.net` is a DNS-only A record to the VPS, serving UDP 7777.
   It does not send gameplay through Cloudflare Tunnel.
-- Apex/www still return HTTP 503 maintenance; the entry page is separate work.
-  Old LAN-only game containers remain managed by `/data/docker-compose.yml`.
+- Apex/www serve the static gameplay website from the hardened `site` container.
+  Its `/api/*` route proxies the directory directly; downloads are mounted read-only
+  from `/data/peakrunner/downloads`. Old LAN-only game containers remain managed
+  by `/data/docker-compose.yml`.
 
 There are no published inbound ports for these dellcon services. Cloudflare routes directly to this dedicated tunnel;
 existing Caddy configuration is unchanged and remains in the homelab repository.
@@ -33,6 +35,10 @@ Do not point these HTTP routes at the legacy raw TCP game ports.
    `source/` is an ignored build context, not a source backup. The VPS server has
    its own image and source record in `../vps/`; compatible protocols are required,
    but directory and server updates can be deployed independently.
+   Rebuild the website from the archive recorded in `site-source.json` with
+   `docker build -f site/Dockerfile -t peakrunner/site:local .` and update its
+   image pin. Restore `/data/peakrunner/downloads` separately and verify files
+   against `site/public/release.json`; Git does not back up release binaries.
 2. On an administrator machine with Node 22+, recover the Cloudflare API token
    from your password manager/encrypted backup into an owner-only file **outside
    Git**. Required access: account Tunnel Edit, peakrunner.net DNS Edit and Zone
@@ -47,7 +53,8 @@ Do not point these HTTP routes at the legacy raw TCP game ports.
    stored in this directory nor printed. Conflicting DNS is never overwritten.
    Use `--apply --sync-config` to apply the reviewed ingress configuration.
 5. Verify the tunnel is healthy (`node cloudflare.mjs`), `/servers` returns the
-   live VPS listing, and apex/www return maintenance. Gameplay uses QUIC, not an
+   live VPS listing, and apex/www render the website with working downloads.
+   Check `/api/servers` and click a host to verify match details. Gameplay uses QUIC, not an
    HTTPS page. Check each connector when both hosts are active.
 6. After verifying the replacement, stop the old connector. Both machines can
    serve the same tunnel during migration; deploy matching backend services on

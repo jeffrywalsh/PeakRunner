@@ -15,6 +15,8 @@ pub struct Command {
     pub jump: bool,
     pub jet: bool,
     pub fire: bool,
+    #[serde(default)]
+    pub interact: bool,
     pub weapon: u8,
 }
 
@@ -27,7 +29,7 @@ impl Command {
     }
     fn input(self) -> Input {
         Input { move_x: self.move_x, move_z: self.move_z, jump: self.jump,
-            jet: self.jet, fire: self.fire, weapon: self.weapon, ..Input::default() }
+            jet: self.jet, fire: self.fire, interact:self.interact, weapon: self.weapon, ..Input::default() }
     }
 }
 
@@ -36,6 +38,10 @@ pub enum Phase { Waiting, Countdown, Playing, Intermission }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Snapshot {
+    /// Server transport RTT in milliseconds, keyed by connection-assigned player ID.
+    pub pings: Vec<(u32, u32)>,
+    pub feed: Vec<crate::feed::Entry>,
+    pub equipment: Vec<crate::equipment::State>,
     pub blast_serial: u64,
     pub tick: u64,
     pub round: u32,
@@ -53,6 +59,8 @@ pub struct Snapshot {
 }
 
 pub struct Match {
+    rename_next: Vec<u64>,
+    chat_next: Vec<u64>,
     pub world: World,
     pub tick: u64,
     pub round: u32,
@@ -75,10 +83,11 @@ impl Match {
         }
         world.network_inputs = vec![Input::default(); MAX_PLAYERS];
         Self { world, tick: 0, round: 0, phase: Phase::Waiting, phase_left: 0.0,
-            acks: vec![0; MAX_PLAYERS] }
+            acks: vec![0; MAX_PLAYERS], chat_next: vec![0; MAX_PLAYERS], rename_next: vec![0; MAX_PLAYERS] }
     }
 
     pub fn join(&mut self, id: u32, name: &str) -> Option<usize> {
+        let name = crate::names::validate(name)?;
         if id == 0 || self.world.players.iter().any(|p| p.net_id == id) { return None; }
         let slot = self.world.players.iter().position(|p| p.net_id == 0)?;
         let count = |team| self.world.players.iter().filter(|p| p.net_id != 0 && p.team == team).count();
@@ -90,7 +99,36 @@ impl Match {
         self.world.players[slot] = p;
         self.world.respawn(slot);
         self.acks[slot] = 0;
+        self.chat_next[slot] = 0;
+        self.rename_next[slot] = 0;
         Some(slot)
+    }
+
+    /// Slot comes from the connection, never from a client-supplied player ID.
+    pub fn rename(&mut self, slot: usize, raw: &str) -> bool {
+        let Some(name) = crate::names::validate(raw) else { return false; };
+        let Some(p) = self.world.players.get_mut(slot).filter(|p| p.net_id != 0) else { return false; };
+        if self.tick < self.rename_next[slot] { return false; }
+        if p.name == name { return true; }
+        p.name = name.into();
+        self.rename_next[slot] = self.tick.saturating_add(600);
+        true
+    }
+
+    /// Identity comes only from the authenticated connection's occupied slot.
+    pub fn chat(&mut self, slot: usize, text: &str) -> bool {
+        self.chat_channel(slot, text, false)
+    }
+
+    pub fn chat_channel(&mut self, slot: usize, text: &str, team_only: bool) -> bool {
+        let Some(p) = self.world.players.get(slot).filter(|p| p.net_id != 0) else { return false; };
+        let Some(text) = crate::feed::message(text) else { return false; };
+        if self.tick < self.chat_next[slot] { return false; }
+        self.chat_next[slot] = self.tick.saturating_add(60);
+        let entry = if team_only { crate::feed::Entry::TeamChat { sender:p.name.clone(), text, team:p.team } }
+            else { crate::feed::Entry::Chat { sender:p.name.clone(), text } };
+        crate::feed::push(&mut self.world.feed, entry);
+        true
     }
 
     pub fn leave(&mut self, slot: usize) {
@@ -137,6 +175,7 @@ impl Match {
     }
 
     fn restart(&mut self) {
+        self.world.equipment=crate::equipment::fresh(self.world.map);
         self.world.discs.clear();
         self.world.explosions.clear();
         self.world.smoke.clear();
@@ -157,6 +196,7 @@ impl Match {
     pub fn step(&mut self, commands: &[Option<Command>]) {
         self.tick += 1;
         self.world.events.clear();
+        self.world.spatial_sounds.clear();
         if self.world.players.iter().all(|p| p.net_id == 0) { return; }
         // Once per tick, after the server processes the whole departure batch.
         self.balance_teams();
@@ -208,11 +248,21 @@ impl Match {
     }
 
     pub fn snapshot(&self) -> Snapshot {
-        Snapshot { blast_serial: self.world.blast_serial, tick: self.tick, round: self.round, phase: self.phase,
+        Snapshot { pings:Vec::new(), feed:self.world.feed.iter().filter(|e| !matches!(e,crate::feed::Entry::TeamChat {..})).cloned().collect(), equipment:self.world.equipment.clone(),blast_serial: self.world.blast_serial, tick: self.tick, round: self.round, phase: self.phase,
             phase_left: self.phase_left, map: self.world.map, players: self.world.players.clone(),
             acks: self.acks.clone(), discs: self.world.discs.clone(),
             explosions: self.world.explosions.clone(), smoke: self.world.smoke.clone(),
             flags: self.world.flags.clone(), score: self.world.score, time_left: self.world.time_left }
+    }
+
+    pub fn snapshot_for(&self, slot: usize) -> Snapshot {
+        let mut state = self.snapshot();
+        let team = self.world.players.get(slot).filter(|p|p.net_id != 0).map(|p|p.team);
+        state.feed = self.world.feed.iter().filter(|e| match e {
+            crate::feed::Entry::TeamChat {team:recipient,..} => Some(*recipient) == team,
+            _ => true,
+        }).cloned().collect();
+        state
     }
 }
 
@@ -220,6 +270,9 @@ impl World {
     pub fn apply_snapshot(&mut self, snapshot: &Snapshot, id: u32) -> bool {
         let Some(slot) = snapshot.players.iter().position(|p| p.net_id == id) else { return false; };
         if self.map != snapshot.map { self.set_map(snapshot.map); }
+        if snapshot.equipment.len()!=crate::equipment::definitions(snapshot.map).len() {return false;}
+        self.equipment=snapshot.equipment.clone();
+        self.feed=snapshot.feed.clone();
         self.network_inputs.clear();
         self.blast_serial = snapshot.blast_serial;
         self.player_id = slot;
@@ -267,6 +320,85 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn team_chat_is_filtered_before_serialization_and_shares_rate_limit() {
+        let mut m = Match::new(MapId::Valley);
+        let a = m.join(1,"Alice").unwrap();
+        let enemy = m.join(2,"Enemy").unwrap();
+        let friend = m.join(3,"Friend").unwrap();
+        assert!(m.chat_channel(a,"Secret route",true));
+        assert!(!m.chat(a,"Bypass cooldown"));
+        assert_eq!(m.snapshot_for(a).feed.len(),1);
+        assert_eq!(m.snapshot_for(friend).feed.len(),1);
+        assert!(m.snapshot_for(enemy).feed.is_empty());
+        assert!(m.snapshot_for(99).feed.is_empty());
+        assert!(m.snapshot().feed.is_empty());
+        m.tick += 60;
+        assert!(!m.chat_channel(a,"\nBad",true));
+        assert!(m.chat(a,"Public hello"));
+        assert_eq!(m.snapshot_for(enemy).feed.len(),1);
+        m.world.players[friend].team = m.world.players[enemy].team;
+        assert_eq!(m.snapshot_for(friend).feed.len(),1);
+    }
+
+    #[test]
+    fn rename_is_validated_rate_limited_and_preserves_identity() {
+        let mut m = Match::new(MapId::Valley);
+        assert!(m.join(99, "Bad<script>").is_none());
+        let a = m.join(1, "Alice").unwrap();
+        let b = m.join(2, "Bob").unwrap();
+        m.world.players[a].frags = 7;
+        assert!(!m.rename(a, "\nAdmin"));
+        assert!(!m.rename(99, "Admin"));
+        assert!(m.rename(a, "  Pilot 42  "));
+        assert_eq!(m.world.players[a].name, "Pilot 42");
+        assert_eq!(m.world.players[a].net_id, 1);
+        assert_eq!(m.world.players[a].frags, 7);
+        assert_eq!(m.world.players[b].name, "Bob");
+        assert!(!m.rename(a, "Spam"));
+        m.tick += 600;
+        assert!(m.rename(a, "New Pilot"));
+        m.leave(a);
+        assert!(!m.rename(a, "Ghost"));
+        let reused = m.join(3, "Newcomer").unwrap();
+        assert!(m.rename(reused, "Fresh"));
+    }
+
+    #[test]
+    fn chat_is_authoritative_bounded_rate_limited_and_resets_when_empty() {
+        let mut m = Match::new(MapId::Valley);
+        let a = m.join(11, "Alice").unwrap();
+        let b = m.join(12, "Bob").unwrap();
+        assert!(!m.chat(7, "forged"));
+        assert!(!m.chat(a, "bad\nmessage"));
+        assert!(m.chat(a, "hello"));
+        assert!(!m.chat(a, "spam"));
+        assert!(m.chat(b, "ready"));
+        m.tick += 60;
+        assert!(m.chat(a, "go"));
+        let mut client = World::new();
+        for _ in 0..3 { assert!(client.apply_snapshot(&m.snapshot(), 11)); }
+        assert_eq!(client.feed.len(), 3, "repeated snapshots must not duplicate events");
+        assert_eq!(client.feed[0], crate::feed::Entry::Chat { sender: "Alice".into(), text: "hello".into() });
+        m.leave(a); m.leave(b);
+        assert!(m.world.feed.is_empty());
+    }
+
+    #[test]
+    fn frags_capture_names_and_weapon_once_even_after_slot_reuse() {
+        let mut m = duel();
+        m.world.players[0].name = "Alice".into();
+        m.world.players[1].name = "Bob".into();
+        m.world.kill(1, Some(0), "Disc launcher");
+        m.world.kill(1, Some(0), "Disc launcher");
+        assert_eq!(m.world.feed.len(), 1);
+        m.leave(1); m.join(3, "Charlie").unwrap();
+        assert_eq!(m.world.feed[0], crate::feed::Entry::Frag {
+            killer: "Alice".into(), victim: "Bob".into(), weapon: "Disc launcher".into() });
+        m.world.kill(1, None, "Fall");
+        assert!(m.world.feed[1].line().contains("Environment fragged Charlie · Fall"));
+    }
 
     fn duel() -> Match {
         let mut game = Match::new(MapId::Valley);

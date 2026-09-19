@@ -1,6 +1,7 @@
 // Keep production app dependencies separated; test-only peers are intentional.
 import { spawnSync } from 'node:child_process';
 const rules = {
+  'peakrunner-launcher': ['peakrunner-core', 'peakrunner-protocol', 'peakrunner-server', 'peakrunner-net', 'peakrunner-directory', 'rodio'],
   'peakrunner-directory': ['peakrunner-core', 'peakrunner-protocol', 'peakrunner-net', 'peakrunner-server', 'glam', 'eframe', 'wgpu', 'rodio', 'postcard', 'lz4_flex'],
   'peakrunner-server': ['peakrunner-net', 'peakrunner-directory', 'eframe', 'wgpu', 'rodio'],
   'peakrunner': ['peakrunner-server', 'peakrunner-directory'],

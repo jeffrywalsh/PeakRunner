@@ -1,0 +1,77 @@
+{
+  "version": "0.1.0-raindance.20260919.4",
+  "launcher_version": "0.1.0-r1",
+  "status": "published and publicly signature/hash verified",
+  "feed": "https://peakrunner.net/updates/v1",
+  "sequence": 2026091907,
+  "source": {
+    "archive": "/data/peakrunner/releases/20260919-visual4/source.tar.gz",
+    "sha256": "f8ae31fe40ef6be449eb7860dc0f239667fa39d2fde37f2316d7f0dac227ee03",
+    "kind": "working-tree snapshot; not committed or pushed"
+  },
+  "linux_source": {
+    "archive": "/data/peakrunner/releases/20260919-visual4/source.tar.gz",
+    "sha256": "f8ae31fe40ef6be449eb7860dc0f239667fa39d2fde37f2316d7f0dac227ee03",
+    "kind": "working-tree snapshot; not committed or pushed",
+    "build_base": "sha256:89ab291a5b3e681948845e7cc6e6ba4efedde8e95220e8161353e98db9d8d07e",
+    "dockerfile": "deploy/launcher-linux.Dockerfile",
+    "target": "artifacts"
+  },
+  "server_version": "0.1.0-raindance.20260919.4",
+  "server_image": "sha256:a0ff0ac83d865b92adf512db58183176900f575bbbf1e99b2810984d61503920",
+  "server_note": "Updated at user request, with explicit approval to briefly disconnect one player. Gameplay protocol unchanged. Directory and tunnel not restarted.",
+  "site_image": "sha256:45aa35b7d88a8ca45b57ae06b11a016e7cf29303b9807b4c6ca38221a19264e4",
+  "artifacts": [
+    {
+      "url": "/downloads/PeakRunnerLauncher-0.1.0-r1-macos-arm64.zip",
+      "sha256": "449f3f91fe1abc08beaaf8e4914cefe9661d051b345aea84dfb76fc98d67c39b",
+      "verification": "Install once; signed game/map updates, repair and rollback. Apple Silicon. Ad-hoc signed, not Apple notarized; may require Privacy & Security → Open Anyway."
+    },
+    {
+      "url": "/downloads/PeakRunnerLauncher-0.1.0-r1-windows-x64.zip",
+      "sha256": "a264c794d2257f81648a4b009a7adf3b70baf4f94e43bdcee5e4ea2607f07bb0",
+      "verification": "Unsigned x64 launcher with signed game updates. Launcher and Raindance rendered in Windows 11 ARM with the DirectX-capable backend. Native x64 hardware, audio and full gameplay still need testing."
+    },
+    {
+      "url": "/downloads/PeakRunnerLauncher-0.1.0-r1-linux-x64.tar.gz",
+      "sha256": "fbfa853dbb0681cb86a9d94ffbc7f534abfa1606da63c680e16f7b25b2ff3e4b",
+      "verification": "Signed updates, repair and rollback. Debian 12 / glibc 2.36+. Desktop OpenGL for launcher; Vulkan for game; ALSA, udev, X11/Wayland and libxkbcommon-x11. Software-rendered checks; audio and interactive gameplay untested."
+    },
+    {
+      "url": "/downloads/PeakRunner-0.1.0-raindance.20260919.4-macos-arm64.zip",
+      "sha256": "d43e9c78509aca6df3650e77e92deda830c0221f8f26062896db3d67d38e3e1a",
+      "verification": "Full game with embedded Raindance assets. Apple Silicon, ad-hoc signed and not notarized. No automatic updates; an alternative to the launcher. Visual update; compatible with the .20260919.3 server."
+    },
+    {
+      "url": "/downloads/PeakRunner-0.1.0-raindance.20260919.4-windows-x64.zip",
+      "sha256": "2a648f9f2c7f7ec80ba626144e24f938d633042f517c6b0be61842c85d641be9",
+      "verification": "Unsigned x64 full-game ZIP with embedded assets. Same platform-testing limitations as the launcher build. Download a new archive for future updates. Visual update; compatible with the .20260919.3 server."
+    },
+    {
+      "url": "/downloads/PeakRunner-0.1.0-raindance.20260919.4-linux-x64.tar.gz",
+      "sha256": "6d823cae109a17c7f791d1ba054411f34f57962691aedaddda5f1253c74cf833",
+      "verification": "Full-game archive with embedded assets. Debian 12 / glibc 2.36+ and the game libraries above. Software-rendering checks do not establish playable frame rates. Visual update; compatible with the .20260919.3 server."
+    }
+  ],
+  "verification": [
+    "Workspace library tests, all-target and WASM checks passed; application boundaries passed",
+    "All three public signed feeds and every blob verified; sequence 2026091907",
+    "All six public archive SHA-256 hashes verified; apex/www advertise .4",
+    "Fresh live-feed Mac installation and actual game/update-lock test passed",
+    "Mac .3-to-.4 upgrade reused all seven map files; extracted app signature passed",
+    "Linux signed install, actual game lock and forced-light native menu render passed under Xvfb/Mesa",
+    "Windows release cross-built; no new Windows runtime claim: QA VM lacked interactive session and was shut down",
+    "Two-client ten-second .4 WAN test against .3 passed: ack gap 9 ticks, snapshot gap 103ms, 196 snapshots each",
+    "Post-restart .4 server health and public directory version verified; two-client five-second WAN check passed: ack gap 7 ticks, snapshot gap 68ms, 100 snapshots each",
+    "Desktop/mobile public website renders and host details verified, six download cards, no errors or horizontal overflow"
+  ],
+  "limitations": [
+    "Not Apple notarized or Windows code signed",
+    "Windows native x64 hardware, audio, input and extended gameplay unverified",
+    "Linux audio and interactive gameplay unverified; software rendering is not a performance promise",
+    "Launcher self-update and cache garbage collection not implemented"
+  ],
+  "rollback": "/data/peakrunner/public/backups/20260919-visual4; retain old blobs/archives; recovery feed must have a higher sequence",
+  "private_key": "Retained only on administrator machine; not uploaded or committed",
+  "runbook": "docs/visual-release-20260919-4.md"
+}

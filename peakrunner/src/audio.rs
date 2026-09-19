@@ -1,3 +1,36 @@
+/// Smooth finite-range attenuation; local UI cues bypass this function.
+fn distance_gain(name: &str, distance: f32) -> f32 {
+    if !distance.is_finite() { return 0.0; }
+    let range = if name == "boom" { 180.0 } else { 120.0 };
+    let t = ((distance - 6.0) / (range - 6.0)).clamp(0.0, 1.0);
+    (1.0 - t).powi(2)
+}
+
+#[cfg(test)]
+mod spatial_tests {
+    use super::*;
+    #[test] fn capture_stings_are_distinct_bounded_and_clean() {
+        for sr in [44_100.,48_000.] {
+            let win=capture_samples(sr,true);let loss=capture_samples(sr,false);
+            assert_ne!(win,loss);
+            for samples in [&win,&loss] {
+                assert_eq!(samples.len(),(sr*2.4) as usize);
+                assert!(samples.iter().all(|s|s.is_finite() && s.abs()<0.8));
+                assert!(samples.first().unwrap().abs()<0.001 && samples.last().unwrap().abs()<0.001);
+                assert!(samples.iter().map(|s|s.abs()).fold(0.,f32::max)>0.1);
+            }
+        }
+    }
+    #[test] fn distance_is_smooth_bounded_and_silent_beyond_range() {
+        for name in ["boom", "disc", "chain", "grenade"] {
+            assert_eq!(distance_gain(name, 0.0), 1.0);
+            assert!(distance_gain(name, 30.0) > distance_gain(name, 90.0));
+            assert_eq!(distance_gain(name, 181.0), 0.0);
+            assert_eq!(distance_gain(name, f32::NAN), 0.0);
+        }
+    }
+}
+
 /// Short synthesized cues. Native uses the system output; the web build uses WebAudio.
 pub struct Audio {
     muted: bool,
@@ -5,6 +38,8 @@ pub struct Audio {
     _sink: Option<rodio::MixerDeviceSink>,
     #[cfg(not(target_arch = "wasm32"))]
     jet: Option<rodio::Player>,
+    #[cfg(not(target_arch = "wasm32"))]
+    ambient: Option<rodio::Player>,
     #[cfg(target_arch = "wasm32")]
     ctx: Option<web_sys::AudioContext>,
     #[cfg(target_arch = "wasm32")]
@@ -16,6 +51,8 @@ pub struct Audio {
 }
 
 impl Audio {
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn silent() -> Self { Self { muted: true, _sink: None, jet: None, ambient: None } }
     pub fn new() -> Self {
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -32,10 +69,20 @@ impl Audio {
                 player.set_volume(0.0);
                 Some(player)
             });
+            let ambient=peakrunner_core::map_pack::active().and_then(|pack| {
+                use rodio::Source;
+                let sink=sink.as_ref()?;
+                let bytes=pack.asset("ambient.f32").ok()?;
+                let samples:Vec<f32>=bytes.chunks_exact(4).map(|b|f32::from_le_bytes(b.try_into().unwrap())).collect();
+                let player=rodio::Player::connect_new(sink.mixer());
+                player.append(rodio::buffer::SamplesBuffer::new(ch(),rate(),samples).repeat_infinite());
+                player.set_volume(0.0);Some(player)
+            });
             Self {
                 muted: false,
                 _sink: sink,
                 jet,
+                ambient,
             }
         }
         #[cfg(target_arch = "wasm32")]
@@ -66,6 +113,7 @@ impl Audio {
         self.muted = muted;
         #[cfg(not(target_arch = "wasm32"))]
         if muted {
+            if let Some(ambient)=&self.ambient {ambient.set_volume(0.0);}
             if let Some(jet) = &self.jet {
                 jet.set_volume(0.0);
             }
@@ -80,7 +128,31 @@ impl Audio {
         self.muted
     }
 
+    pub fn set_map_ambience(&mut self,map:crate::terrain::MapId,eye:glam::Vec3,playing:bool) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(player)=&self.ambient {
+            let volume=peakrunner_core::map_pack::on(map).filter(|_|playing&&!self.muted).map_or(0.0,|pack| {
+                pack.manifest.ambient_emitters.iter().map(|e| {
+                    let distance=eye.distance(glam::Vec3::new(e[0],e[1],e[2]));
+                    e[3]*(e[4]/distance.max(e[4])).min(1.0)*(1.0-distance/e[5]).clamp(0.0,1.0)
+                }).fold(0.0_f32,f32::max)
+            });
+            player.set_volume(volume);
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _=(map,eye,playing);
+    }
+
     pub fn play(&mut self, name: &str) {
+        self.play_gain(name, 1.0);
+    }
+
+    pub fn play_at(&mut self, name: &str, distance: f32) {
+        self.play_gain(name, distance_gain(name, distance));
+    }
+
+    fn play_gain(&mut self, name: &str, gain: f32) {
+        if gain <= 0.0 { return; }
         if self.muted || name.is_empty() {
             return;
         }
@@ -88,7 +160,7 @@ impl Audio {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let Some(sink) = &self._sink else { return };
-            let samples = synth(name);
+            let samples = synth(name).into_iter().map(|s| s * gain).collect::<Vec<_>>();
             if samples.is_empty() {
                 return;
             }
@@ -96,7 +168,7 @@ impl Audio {
             sink.mixer().add(buf);
         }
         #[cfg(target_arch = "wasm32")]
-        self.play_web(name);
+        self.play_web(name, gain);
     }
 
     pub fn set_jet(&mut self, on: bool) {
@@ -155,16 +227,39 @@ fn synth(name: &str) -> Vec<f32> {
         "pain" => burst(0.12, sr, 0.2),
         "death" => tone(220.0, 0.4, sr, 0.16, -160.0),
         "flag" => mix(&[tone(520.0, 0.12, sr, 0.12, 0.0), tone(780.0, 0.16, sr, 0.1, 0.0)]),
-        "capture" => mix(&[
-            tone(392.0, 0.18, sr, 0.12, 0.0),
-            tone(523.0, 0.22, sr, 0.12, 0.0),
-            tone(659.0, 0.28, sr, 0.12, 0.0),
-        ]),
+        "capture_win" => capture_samples(sr, true),
+        "capture_loss" => capture_samples(sr, false),
         "drop" | "return" => tone(330.0, 0.1, sr, 0.12, -40.0),
         "start" => tone(196.0, 0.3, sr, 0.14, 80.0),
         "end" => tone(262.0, 0.4, sr, 0.14, -60.0),
         _ => Vec::new(),
     }
+}
+
+/// Original 2.4-second capture motif: impact, sequenced synth notes and a
+/// sustained chord. Shared PCM keeps native and browser timing identical.
+fn capture_samples(sr:f32, victory:bool)->Vec<f32> {
+    let notes = if victory { [261.63,329.63,392.0,523.25] } else { [392.0,349.23,311.13,261.63] };
+    let chord = if victory { [261.63,329.63,392.0] } else { [130.81,155.56,196.0] };
+    let duration=2.4;
+    (0..(sr*duration) as usize).map(|i| {
+        let t=i as f32/sr;
+        let mut sample=0.16*(std::f32::consts::TAU*(90.*t-22.*t*t)).sin()*(-t*13.).exp();
+        for (n,freq) in notes.iter().enumerate() {
+            let age=t-n as f32*0.22;
+            if age>=0. {
+                let env=(age/0.012).min(1.)*(-age*4.0).exp();
+                let phase=std::f32::consts::TAU*freq*age;
+                sample+=0.14*env*(phase.sin()+0.22*(phase*2.).sin());
+            }
+        }
+        if t>0.72 {
+            let age=t-0.72;
+            let env=(age/0.08).min(1.)*(-age*1.8).exp();
+            for freq in chord {sample+=0.045*env*(std::f32::consts::TAU*freq*age).sin();}
+        }
+        sample*(t/0.006).min(1.)*((duration-t)/0.12).clamp(0.,1.)
+    }).collect()
 }
 
 /// Shared native/WebAudio PCM: a short mechanical attack, resonant body and
@@ -363,18 +458,20 @@ impl Audio {
         self.master = Some(sfx);
     }
 
-    fn play_web(&mut self, name: &str) {
+    fn play_web(&mut self, name: &str, gain: f32) {
         self.ensure();
         let (Some(ctx), Some(dest)) = (&self.ctx, &self.master) else {
             return;
         };
         let now = ctx.current_time();
         match name {
-            "disc" | "disc_ready" | "boom" | "chain" | "grenade" => {
+            "disc" | "disc_ready" | "boom" | "chain" | "grenade" | "capture_win" | "capture_loss" => {
                 let rate = ctx.sample_rate();
-                let samples = if name == "boom" { explosion_samples(rate) }
+                let mut samples = if name == "capture_win" || name == "capture_loss" {capture_samples(rate,name=="capture_win")}
+                    else if name == "boom" { explosion_samples(rate) }
                     else if name == "chain" || name == "grenade" { firearm_samples(rate, name == "grenade") }
                     else { disc_samples(rate, name == "disc_ready") };
+                for sample in &mut samples { *sample *= gain; }
                 let Ok(buffer) = ctx.create_buffer(1, samples.len() as u32, rate) else { return };
                 if buffer.copy_to_channel(&samples, 0).is_err() { return; }
                 let Ok(src) = ctx.create_buffer_source() else { return };
@@ -387,11 +484,6 @@ impl Audio {
             "flag" => {
                 beep(ctx, dest, 520.0, 0.12, now, 0.0);
                 beep(ctx, dest, 780.0, 0.16, now, 0.0);
-            }
-            "capture" => {
-                beep(ctx, dest, 392.0, 0.18, now, 0.0);
-                beep(ctx, dest, 523.0, 0.22, now, 0.0);
-                beep(ctx, dest, 659.0, 0.28, now, 0.0);
             }
             "drop" | "return" => beep(ctx, dest, 330.0, 0.1, now, -40.0),
             "start" => beep(ctx, dest, 196.0, 0.3, now, 80.0),

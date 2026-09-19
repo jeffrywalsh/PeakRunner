@@ -9,7 +9,10 @@ rust-version = "1.95"
 default-run = "peakrunner"
 
 [workspace]
-members = [".", "crates/net", "crates/core", "crates/discovery", "crates/protocol", "crates/server", "crates/directory"]
+members = [".", "crates/net", "crates/core", "crates/discovery", "crates/protocol", "crates/server", "crates/directory", "crates/launcher"]
+
+[features]
+external-map = ["peakrunner-core/external-map"]
 
 [dependencies]
 bytemuck = { version = "1.25", features = ["derive"] }
@@ -29,6 +32,9 @@ peakrunner-net = { path = "crates/net" }
 env_logger = "0.11"
 gilrs = "0.11"
 rodio = { version = "0.22", default-features = false, features = ["playback"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+eframe = { version = "0.36.2", default-features = false, features = ["x11", "wayland"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
@@ -61,6 +67,7 @@ name = "peakrunner"
 path = "src/main.rs"
 
 [dev-dependencies]
+peakrunner-server = { path = "crates/server" }
 naga = { version = "30", features = ["wgsl-in"] }
 pollster = "1"
 png = "0.18"

@@ -19,6 +19,43 @@ pub struct Online {
 mod tests {
     use super::*;
     use crate::{sim::Match, terrain::MapId};
+    #[test]
+    fn capture_cues_follow_team_and_do_not_replay_or_sound_on_reset() {
+        let mut server=Match::new(MapId::Valley);
+        server.join(1,"A").unwrap();server.join(2,"B").unwrap();server.tick=1;
+        let mut world=World::new();let mut online=Online::default();
+        online.receive(&mut world,&server.snapshot(),1);
+        for (score,expected) in [([1,0],"capture_win,"),([1,1],"capture_loss,"),([0,0],"")] {
+            world.events.clear();server.tick+=3;server.world.score=score;
+            let state=server.snapshot();online.receive(&mut world,&state,1);
+            assert_eq!(world.events,expected);
+            world.events.clear();online.receive(&mut world,&state,1);
+            assert!(world.events.is_empty());
+        }
+    }
+
+    #[test]
+    fn remote_sounds_keep_positions_and_repeated_snapshots_are_silent() {
+        let mut server = Match::new(MapId::Valley);
+        server.join(1, "A").unwrap(); server.join(2, "B").unwrap();
+        server.tick = 1;
+        let mut world = World::new(); let mut online = Online::default();
+        online.receive(&mut world, &server.snapshot(), 1);
+        server.tick += 3;
+        server.world.players[1].pos = server.world.players[0].pos + glam::Vec3::X * 40.0;
+        server.world.players[1].shots += 1;
+        server.world.blast_serial += 1;
+        let position = server.world.players[1].pos;
+        server.world.explosions.push(crate::sim::Explosion { pos:position, age:0.0, max_r:9.0, kind:0 });
+        let state = server.snapshot();
+        online.receive(&mut world, &state, 1);
+        assert!(world.spatial_sounds.contains(&("boom", position)));
+        assert!(world.spatial_sounds.contains(&("disc", position)));
+        assert!(!world.events.contains("boom"));
+        world.spatial_sounds.clear();
+        online.receive(&mut world, &state, 1);
+        assert!(world.spatial_sounds.is_empty());
+    }
 
     #[test]
     fn team_transfer_discards_old_prediction_and_announces_redeployment() {
@@ -108,17 +145,28 @@ impl Online {
         self.targets = state.players.clone();
         let current = world.players[me].clone();
         if !new_round && was_online {
-            if state.blast_serial > old_blast && state.explosions.iter().any(|e| e.pos.distance(current.pos) < 150.0) {
-                world.events.push_str("boom,");
+            if state.blast_serial > old_blast {
+                let count = (state.blast_serial - old_blast).min(state.explosions.len() as u64) as usize;
+                for e in state.explosions.iter().rev().take(count) {
+                    world.spatial_sounds.push(("boom", e.pos));
+                }
             }
-            if old_score != state.score { world.events.push_str("capture,"); }
+            if old_score != state.score {
+                for team in 0..2 {
+                    // Score decreases on reset are not captures; duplicate/stale
+                    // snapshots are already rejected above.
+                    for _ in 0..state.score[team].saturating_sub(old_score[team]).min(3) {
+                        world.events.push_str(if team == current.team.idx() { "capture_win," } else { "capture_loss," });
+                    }
+                }
+            }
             else if old_flags.iter().zip(&state.flags).any(|(a, b)| a.carrier != b.carrier) {
                 world.events.push_str("flag,");
             }
             for (i, p) in state.players.iter().enumerate() {
                 if i != me && p.net_id != 0 && p.pos.distance(current.pos) < 120.0 {
                     if old.get(i).is_some_and(|o| o.net_id == p.net_id && p.shots > o.shots) {
-                        world.events.push_str(match p.weapon { 0 => "disc,", 1 => "chain,", _ => "grenade," });
+                        world.spatial_sounds.push((match p.weapon { 0 => "disc", 1 => "chain", _ => "grenade" }, p.pos));
                     }
                 }
             }
@@ -183,7 +231,8 @@ impl Online {
             let command = Command { seq: self.seq,
                 move_x: if active { input.move_x } else { 0.0 }, move_z: if active { input.move_z } else { 0.0 },
                 yaw: p.yaw.rem_euclid(std::f32::consts::TAU), pitch: p.pitch,
-                jump: active && input.jump, jet: active && input.jet, fire: active && input.fire, weapon: input.weapon };
+                jump: active && input.jump, jet: active && input.jet, fire: active && input.fire,
+                interact:active && input.interact, weapon: input.weapon };
             if self.pending.len() >= 120 || !session.send_input(command) { return false; }
             self.pending.push_back((command, Instant::now()));
             if matches!(self.phase, Phase::Playing | Phase::Waiting) { world.predict_command(command); }

@@ -1,0 +1,2 @@
+# Explicitly authorized root-equivalent administration over key-only SSH.
+peakrunner-admin ALL=(ALL:ALL) NOPASSWD: ALL

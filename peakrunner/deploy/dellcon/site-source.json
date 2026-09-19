@@ -1,0 +1,10 @@
+{
+  "tag": "peakrunner/site:20260919-visual4",
+  "image": "sha256:45aa35b7d88a8ca45b57ae06b11a016e7cf29303b9807b4c6ca38221a19264e4",
+  "source_archive": "/data/peakrunner/releases/20260919-visual4/site.tar.gz",
+  "source_sha256": "fae067a53653c6a85b79758a289520995ccff050798f3faeb142fe8e92fc802f",
+  "dockerfile": "site/Dockerfile",
+  "downloads": "/data/peakrunner/downloads",
+  "updates": "/data/peakrunner/updates/v1",
+  "note": "Working-tree release; not yet committed or pushed. Download checksums are in site/public/release.json."
+}

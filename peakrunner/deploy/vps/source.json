@@ -1,8 +1,11 @@
 {
   "repository": "git@github.com:jeffrywalsh/PeakRunner.git",
-  "revision": "417bd71bcbf2a658d97b02cd3456e72130f7036e",
+  "base_revision": "0f1ab82dfe6a4f4d5d8ec9f29359c5a8ef45e12e",
+  "source_kind": "working-tree archive; release .4 version alignment requested by user; gameplay protocol unchanged; not committed or pushed",
+  "source_archive": "/data/peakrunner/releases/20260919-visual4/source.tar.gz",
+  "source_sha256": "f8ae31fe40ef6be449eb7860dc0f239667fa39d2fde37f2316d7f0dac227ee03",
   "directory": "peakrunner",
   "dockerfile": "crates/server/Dockerfile",
   "platform": "linux/amd64",
-  "tag": "peakrunner/server:417bd71"
+  "tag": "peakrunner/server:20260919-public4"
 }

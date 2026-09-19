@@ -1,0 +1,6 @@
+# Opt-in only after preparing /data/peakrunner/updates and a matching site image.
+# docker compose -f compose.yaml -f launcher.compose.yaml ...
+services:
+  site:
+    volumes:
+      - /data/peakrunner/updates:/srv/updates:ro

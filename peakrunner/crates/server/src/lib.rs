@@ -30,6 +30,38 @@ mod tests {
         }
     }
     #[test]
+    fn team_chat_never_reaches_the_opposing_connection() {
+        let host = GameHost::bind("127.0.0.1:0", "Team chat test", 8, "Valley").unwrap();
+        let port = host.local_addr().port(); let _host = host.spawn();
+        let a = connect("127.0.0.1",port,"Alice").unwrap();
+        wait(||a.lobby().connected);
+        let enemy = connect("127.0.0.1",port,"Enemy").unwrap();
+        wait(||enemy.lobby().connected);
+        let friend = connect("127.0.0.1",port,"Friend").unwrap();
+        wait(||friend.lobby().connected);
+        assert!(a.send_team_chat("Secret route".into()));
+        wait(||friend.lobby().snapshot.as_ref().is_some_and(|s|s.feed.iter().any(|e|e.line().contains("Secret route"))));
+        let tick = friend.lobby().snapshot.unwrap().tick;
+        wait(||enemy.lobby().snapshot.as_ref().is_some_and(|s|s.tick >= tick));
+        assert!(!enemy.lobby().snapshot.unwrap().feed.iter().any(|e|e.line().contains("Secret route")));
+    }
+
+    #[test]
+    fn mismatched_map_content_is_rejected_before_a_slot_is_assigned() {
+        use std::io::{BufRead,BufReader};
+        let host=GameHost::bind("127.0.0.1:0","Content check",8,"Raindance").unwrap();
+        let addr=host.local_addr();let handle=host.spawn();
+        let mut stream=TcpStream::connect(addr).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let hello=proto::ClientMsg::Hello {name:"Wrong content".into(),password:String::new(),
+            protocol:format!("{}:different-content",proto::game_protocol())};
+        let mut bytes=serde_json::to_vec(&hello).unwrap();bytes.push(b'\n');stream.write_all(&bytes).unwrap();
+        let mut reply=String::new();BufReader::new(stream).read_line(&mut reply).unwrap();
+        assert!(matches!(serde_json::from_str::<proto::ServerMsg>(&reply).unwrap(),
+            proto::ServerMsg::Reject {message} if message.contains("map pack")));
+        assert_eq!(handle.players.load(std::sync::atomic::Ordering::Relaxed),0);
+    }
+    #[test]
     fn two_clients_share_identity_map_airborne_movement_and_disconnect() {
         let dir = serve_directory("127.0.0.1:0").unwrap();
         let host = GameHost::bind("127.0.0.1:0", "North Spine", 8, "Valley").unwrap();
@@ -44,8 +76,15 @@ mod tests {
         let b = connect("127.0.0.1", port, "Skier").unwrap();
         wait(|| a.lobby().connected && b.lobby().connected && a.lobby().players.len() == 2);
         let aid = a.lobby().player_id;
+        assert!(a.rename("  Pilot 42  ".into()));
+        wait(|| b.lobby().players.contains(&"Pilot 42".to_string()));
+        assert!(a.rename("<script>".into()));
+        assert_eq!(a.lobby().player_id, aid);
         assert_ne!(aid, b.lobby().player_id);
         assert_eq!(a.lobby().map, "Valley");
+        assert!(a.send_chat("Ready to play".into()));
+        wait(|| b.lobby().snapshot.as_ref().is_some_and(|s| s.feed.iter().any(|e|
+            matches!(e, peakrunner_core::feed::Entry::Chat { sender, text } if sender == "Pilot 42" && text == "Ready to play"))));
         let before = a.lobby().snapshot.unwrap().players.into_iter().find(|p| p.net_id == aid).unwrap();
         let started = Instant::now();
         let mut seq = 0;
@@ -148,6 +187,7 @@ mod tests {
         let mut max_bytes = 0;
         for seq in 1..=720 {
             for (i, c) in clients.iter().enumerate() {
+                if seq % 90 == 1 { assert!(c.send_chat(format!("Match comms test {i}: {}", "abcdefghij".repeat(12)))); }
                 assert!(c.send_input(Command { seq, move_z: 1.0, move_x: (i as f32 * 0.5).sin(),
                     yaw: (seq as f32 * 0.003 + i as f32).rem_euclid(std::f32::consts::TAU),
                     jump: true, jet: seq % 240 < 120, fire: true, weapon: ((seq / 120) % 3) as u8,

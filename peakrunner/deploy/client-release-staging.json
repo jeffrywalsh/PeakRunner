@@ -1,0 +1,29 @@
+{
+  "version": "0.1.0-raindance.20260919.4",
+  "status": "published at https://peakrunner.net/#downloads and through signed launcher feeds",
+  "source": {
+    "archive": "/data/peakrunner/releases/20260919-visual4/source.tar.gz",
+    "sha256": "f8ae31fe40ef6be449eb7860dc0f239667fa39d2fde37f2316d7f0dac227ee03",
+    "kind": "working-tree snapshot; not committed or pushed"
+  },
+  "directory": "local-assets/releases/0.1.0-raindance.20260919.4",
+  "requires": "Existing equipment3:blast3:chat2:names1:ping1:fov1:map1 protocol; compatible with live .20260919.3 server",
+  "launcher_record": "deploy/launcher-release.json",
+  "artifacts": [
+    {
+      "file": "PeakRunner-0.1.0-raindance.20260919.4-macos-arm64.zip",
+      "sha256": "d43e9c78509aca6df3650e77e92deda830c0221f8f26062896db3d67d38e3e1a",
+      "verification": "Full game with embedded Raindance assets. Apple Silicon, ad-hoc signed and not notarized. No automatic updates; an alternative to the launcher. Visual update; compatible with the .20260919.3 server."
+    },
+    {
+      "file": "PeakRunner-0.1.0-raindance.20260919.4-windows-x64.zip",
+      "sha256": "2a648f9f2c7f7ec80ba626144e24f938d633042f517c6b0be61842c85d641be9",
+      "verification": "Unsigned x64 full-game ZIP with embedded assets. Same platform-testing limitations as the launcher build. Download a new archive for future updates. Visual update; compatible with the .20260919.3 server."
+    },
+    {
+      "file": "PeakRunner-0.1.0-raindance.20260919.4-linux-x64.tar.gz",
+      "sha256": "6d823cae109a17c7f791d1ba054411f34f57962691aedaddda5f1253c74cf833",
+      "verification": "Full-game archive with embedded assets. Debian 12 / glibc 2.36+ and the game libraries above. Software-rendering checks do not establish playable frame rates. Visual update; compatible with the .20260919.3 server."
+    }
+  ]
+}

@@ -13,6 +13,7 @@ pub enum MeshId {
     Sphere = 2,
     Disc = 3,
     Bevel = 4,
+    Armor = 5,
 }
 
 #[derive(Clone)]
@@ -66,18 +67,19 @@ pub fn build_frame(world: &World, aspect: f32, dt: f32) -> DrawFrame {
     let vp = proj * view;
     let inv_vp = vp.inverse();
     let sun = Vec3::new(-0.35, 0.78, -0.42).normalize();
-    let fog = Vec3::new(0.55, 0.46, 0.38);
+    let fog = if peakrunner_core::map_pack::on(world.map).is_some() {Vec3::splat(0.62)} else {Vec3::new(0.55, 0.46, 0.38)};
 
     let mut lit = Vec::new();
     let mut emit = Vec::new();
 
-    lit.push(LitDraw {
+    let imported=peakrunner_core::map_pack::on(world.map).is_some();
+    if !imported {lit.push(LitDraw {
         mesh: MeshId::Terrain,
         model: Mat4::IDENTITY,
         color: Vec3::ONE,
         emit: 0.0,
         mode: if world.map == MapId::Raindance { 2.0 } else { 1.0 },
-    });
+    });}
 
     for p in &world.pillars {
         let y = crate::terrain::height_on(world.map, p.x, p.z);
@@ -91,8 +93,10 @@ pub fn build_frame(world: &World, aspect: f32, dt: f32) -> DrawFrame {
         });
     }
 
-    push_base(&mut lit, world, true);
-    push_base(&mut lit, world, false);
+    if !imported {
+        push_base(&mut lit, world, true);
+        push_base(&mut lit, world, false);
+    }
 
     for f in &world.flags {
         let color = if f.team == Team::Ember {
@@ -137,30 +141,7 @@ pub fn build_frame(world: &World, aspect: f32, dt: f32) -> DrawFrame {
             }
             continue;
         }
-        let body_c = if p.team == Team::Ember {
-            Vec3::new(0.72, 0.18, 0.14)
-        } else {
-            Vec3::new(0.16, 0.58, 0.70)
-        };
-        let rot = Mat4::from_rotation_y(p.yaw);
-        lit.push(LitDraw {
-            mesh: MeshId::Cube,
-            model: Mat4::from_translation(p.pos + Vec3::Y * 0.85)
-                * rot
-                * Mat4::from_scale(Vec3::new(0.72, 1.15, 0.58)),
-            color: body_c,
-            emit: 0.05,
-            mode: 0.0,
-        });
-        lit.push(LitDraw {
-            mesh: MeshId::Cube,
-            model: Mat4::from_translation(p.pos + Vec3::Y * 1.62)
-                * rot
-                * Mat4::from_scale(Vec3::new(0.42, 0.34, 0.42)),
-            color: Vec3::new(0.12, 0.13, 0.15),
-            emit: 0.0,
-            mode: 0.0,
-        });
+        push_runner(&mut lit, p, world.time, eye.distance_squared(p.pos) < 75.0 * 75.0);
         if p.carrying.is_some() {
             let c = if p.team == Team::Ember {
                 Vec3::new(0.24, 0.78, 0.88)
@@ -191,29 +172,45 @@ pub fn build_frame(world: &World, aspect: f32, dt: f32) -> DrawFrame {
                 emit: 0.8,
                 mode: 0.0,
             });
-            emit.push(EmitDraw {
-                mesh: MeshId::Sphere,
-                model: Mat4::from_translation(d.pos) * Mat4::from_scale(Vec3::splat(0.28)),
-                color: [0.3, 0.85, 1.0, 0.35],
-            });
-            // Connected, tapered wake. Limit it to the actual flight age so a
+            // No spherical halo: the spinning disc owns the silhouette.
+            // A fine blue wake stays behind it. Limit it to the flight age so a
             // new shot never draws a trail behind its launch point.
-            let trail_time = (5.0 - d.life).clamp(0.0, 0.04);
+            let trail_time = (5.0 - d.life).clamp(0.0, 0.08).min(6.0/d.vel.length().max(1.0));
             let forward = d.vel.normalize_or_zero();
             let mut right = forward.cross(Vec3::Y).normalize_or_zero();
             if right.length_squared() < 0.01 { right = Vec3::X; }
             let up = right.cross(forward);
-            for k in 1..=5 {
+            for k in 1..=8 {
                 if trail_time <= 0.0 { break; }
-                let t = k as f32 / 5.0;
-                let radius = 0.10 * (1.0 - t * 0.7);
-                let center = d.pos - d.vel * (trail_time * (k as f32 - 0.5) / 5.0);
-                let length = d.vel.length() * trail_time / 5.0;
+                let t = k as f32 / 8.0;
+                let radius = 0.055 * (1.0 - t * 0.7);
+                let center = d.pos - d.vel * (trail_time * (k as f32 - 0.5) / 8.0);
+                let length = d.vel.length() * trail_time / 8.0;
                 emit.push(EmitDraw {
                     mesh: MeshId::Sphere,
                     model: Mat4::from_cols((right * radius).extend(0.0), (up * radius).extend(0.0),
                         (-forward * length * 0.55).extend(0.0), center.extend(1.0)),
-                    color: [0.35, 0.75, 1.0, 0.24 * (1.0 - t * 0.8)],
+                    color: [0.45, 0.78, 1.0, 0.24 * (1.0 - t * 0.85)],
+                });
+            }
+        } else if d.kind == 3 {
+            lit.push(LitDraw {
+                mesh: MeshId::Sphere,
+                model: Mat4::from_translation(d.pos) * Mat4::from_scale(Vec3::splat(0.45)),
+                color: Vec3::new(0.75, 1.0, 0.55), emit: 1.0, mode: 0.0,
+            });
+            emit.push(EmitDraw {
+                mesh: MeshId::Sphere,
+                model: Mat4::from_translation(d.pos) * Mat4::from_scale(Vec3::splat(0.65)),
+                color: [0.3, 1.0, 0.12, 0.5],
+            });
+            for k in 1..=5 {
+                let t=k as f32/5.;
+                let center=d.pos-d.vel*(3.-d.life).clamp(0.,0.035)*t;
+                emit.push(EmitDraw {
+                    mesh: MeshId::Sphere,
+                    model: Mat4::from_translation(center)*Mat4::from_scale(Vec3::splat(0.4*(1.-t*0.75))),
+                    color: [0.35,1.0,0.1,0.3*(1.-t*0.8)],
                 });
             }
         } else if d.kind == 2 {
@@ -274,35 +271,57 @@ pub fn build_frame(world: &World, aspect: f32, dt: f32) -> DrawFrame {
         let a = (1.0 - t) * 0.85;
         if e.kind == 0 {
             let ring = (0.35 + e.max_r * t).max(0.35);
-            emit.push(EmitDraw {
-                mesh: MeshId::Sphere,
-                model: Mat4::from_translation(e.pos) * Mat4::from_scale(Vec3::splat(0.55 + t * 1.4)),
-                color: [1.0, 0.92, 0.75, a],
-            });
+            flame_burst(&mut emit,e.pos,e.age,true);
             emit.push(EmitDraw {
                 mesh: MeshId::Disc,
                 model: Mat4::from_translation(e.pos + Vec3::Y * 0.2)
                     * Mat4::from_scale(Vec3::new(ring, 0.12, ring)),
-                color: [1.0, 0.42, 0.08, a * 0.9],
+                color: [0.12, 0.55, 1.0, a * 0.18],
             });
-            emit.push(EmitDraw {
-                mesh: MeshId::Sphere,
-                model: Mat4::from_translation(e.pos) * Mat4::from_scale(Vec3::splat(e.max_r * (0.25 + 0.75 * t))),
-                color: [1.0, 0.35, 0.08, a * 0.28],
-            });
+        } else if e.kind == 2 {
+            flame_burst(&mut emit,e.pos,e.age,false);
         } else {
             let r = e.max_r * (0.2 + t * 0.9);
             emit.push(EmitDraw {
                 mesh: MeshId::Sphere,
                 model: Mat4::from_translation(e.pos) * Mat4::from_scale(Vec3::splat(r)),
-                color: [1.0, 0.55, 0.18, a],
+                color: if e.kind==3 {[0.35,1.0,0.12,a*0.6]} else {[1.0, 0.55, 0.18, a]},
             });
         }
     }
 
+    for (d,s) in peakrunner_core::equipment::definitions(world.map).iter().zip(&world.equipment) {
+        let color=if s.health<=0. {Vec3::new(0.45,0.08,0.03)}
+            else if !s.powered {Vec3::new(0.65,0.34,0.04)} else {Vec3::new(0.16,0.9,0.6)};
+        let lamp_height=match d.kind {
+            peakrunner_core::equipment::Kind::Repair=>-0.4,
+            peakrunner_core::equipment::Kind::Inventory=>3.0,
+            peakrunner_core::equipment::Kind::Generator=>3.2,
+            peakrunner_core::equipment::Kind::Sensor=>2.0,
+            peakrunner_core::equipment::Kind::Turret=>0.7,
+        };
+        lit.push(LitDraw {mesh:MeshId::Cube,
+            model:Mat4::from_translation(d.pos()+Vec3::Y*lamp_height)*Mat4::from_scale(Vec3::new(0.24,0.12,0.24)),
+            color,emit:if s.powered {1.0} else {0.1},mode:0.0});
+        if d.kind==peakrunner_core::equipment::Kind::Turret {
+            let rotation=glam::Quat::from_rotation_arc(Vec3::NEG_Z,s.aim.normalize_or_zero());
+            let plasma=d.weapon==peakrunner_core::equipment::TurretWeapon::Plasma;
+            for x in if plasma {&[0.][..]} else {&[-0.65,0.65][..]} {
+                lit.push(LitDraw {mesh:MeshId::Cube,
+                    model:Mat4::from_translation(d.pos())*Mat4::from_quat(rotation)
+                        *Mat4::from_translation(Vec3::new(*x,0.0,-1.8))*Mat4::from_scale(if plasma {Vec3::new(1.,1.,2.8)} else {Vec3::new(0.35,0.35,3.4)}),
+                    color:Vec3::new(0.16,0.21,0.24),emit:0.0,mode:0.0});
+            }
+            if plasma && s.powered {
+                emit.push(EmitDraw {mesh:MeshId::Sphere,
+                    model:Mat4::from_translation(d.pos()+s.aim*3.2)*Mat4::from_scale(Vec3::splat(0.38)),
+                    color:[0.35,1.,0.12,0.6]});
+            }
+        }
+    }
     let viewmodel = viewmodel_draws(world);
 
-    let fog_density = 0.0072 * (256.0 / size);
+    let fog_density = if imported {0.0012} else {0.0072 * (256.0 / size)};
     DrawFrame {
         eye,
         sun,
@@ -323,6 +342,36 @@ pub fn build_frame(world: &World, aspect: f32, dt: f32) -> DrawFrame {
 }
 
 /// Fly edge-first, like the chambered round, with spin around the disc normal.
+fn flame_burst(emit:&mut Vec<EmitDraw>,pos:Vec3,age:f32,blue:bool) {
+    let t=(age/0.55).clamp(0.,1.);let fade=(1.-t).powi(2);
+    let extent=if blue {2.2} else {3.2};
+    // Separate soft-edged tongues of fire, not one large explosion sphere.
+    // The existing negative-alpha shader mode softens each lobe's silhouette.
+    for i in 0..7 {
+        let angle=i as f32*2.399+pos.x*0.13+pos.z*0.07;
+        let axis=Vec3::new(angle.cos(),0.25+(i%3) as f32*0.35,angle.sin()).normalize();
+        let center=pos+axis*extent*(0.15+t*1.2)+Vec3::Y*t*t*2.;
+        let size=(0.55+(i%3) as f32*0.14)*(0.6+(t*5.).min(1.))*(1.-t*0.6);
+        let model=Mat4::from_translation(center)*Mat4::from_rotation_z(angle*0.2)
+            *Mat4::from_scale(Vec3::new(size,size*(1.5+t),size));
+        emit.push(EmitDraw {mesh:MeshId::Sphere,model,
+            color:if blue {[0.04,0.22,1.,-fade*0.65]} else {[1.,0.07,0.005,-fade*0.7]}});
+        emit.push(EmitDraw {mesh:MeshId::Sphere,model:model*Mat4::from_scale(Vec3::splat(0.58)),
+            color:if blue {[0.35,0.85,1.,-fade*0.9]} else {[1.,0.75,0.04,-fade*0.95]}});
+    }
+    emit.push(EmitDraw {mesh:MeshId::Sphere,
+        model:Mat4::from_translation(pos)*Mat4::from_scale(Vec3::splat(0.65+t)),
+        color:if blue {[0.7,0.95,1.,-fade]} else {[1.,0.95,0.4,-fade]}});
+    for i in 0..5 {
+        let angle=i as f32*2.399;
+        let direction=Vec3::new(angle.cos(),0.4+(i%2) as f32*0.5,angle.sin()).normalize();
+        let center=pos+direction*(0.3+t*extent*3.)-Vec3::Y*t*t;
+        emit.push(EmitDraw {mesh:MeshId::Sphere,
+            model:Mat4::from_translation(center)*Mat4::from_scale(Vec3::new(0.045,0.16,0.045)),
+            color:if blue {[0.3,0.75,1.,fade]} else {[1.,0.4,0.02,fade]}});
+    }
+}
+
 fn spinning_disc(pos: Vec3, vel: Vec3, spin: f32, radius: f32, thick: f32) -> Mat4 {
     let mut axis = vel.normalize_or_zero();
     if axis.length_squared() < 0.01 {
@@ -419,6 +468,104 @@ fn disc_launcher(base: Mat4, time: f32, cooldown: f32) -> Vec<LitDraw> {
         });
     }
     draws
+}
+
+/// Original modular armor. Local -Z is forward, +Y is up; render-only posing
+/// never changes the authoritative capsule, aim or movement.
+fn push_runner(lit: &mut Vec<LitDraw>, p: &crate::sim::Player, time: f32, detailed: bool) {
+    let team = if p.team == Team::Ember { Vec3::new(0.74,0.20,0.12) }
+        else { Vec3::new(0.12,0.51,0.65) };
+    let alloy = Vec3::new(0.48,0.55,0.61);
+    let suit = Vec3::new(0.065,0.085,0.11);
+    let trim = Vec3::new(0.18,0.23,0.29);
+    let light = Vec3::new(0.32,0.88,1.0);
+    let base = Mat4::from_translation(p.pos) * Mat4::from_rotation_y(p.yaw);
+    let speed = Vec3::new(p.vel.x,0.,p.vel.z).length();
+    let stride = if p.on_ground && !p.skiing {
+        (time * 9.0 + p.net_id as f32 * 0.7).sin() * (speed / 8.).min(1.) * 0.23
+    } else { 0.0 };
+    let crouch = if p.skiing { 0.13 } else if p.jetting { 0.06 } else { 0.0 };
+    let torso = base * Mat4::from_translation(Vec3::new(0.,-crouch,0.))
+        * Mat4::from_rotation_x(if p.skiing { -0.09 } else { 0.0 });
+    let mut part = |root: Mat4, pos: Vec3, size: Vec3, color: Vec3, glow: f32| {
+        lit.push(LitDraw { mesh:MeshId::Armor,
+            model:root * Mat4::from_translation(pos) * Mat4::from_scale(size),
+            color, emit:glow, mode:0.0 });
+    };
+    // Narrow waist, broad breastplate and a sealed, recessed visor.
+    part(torso,Vec3::new(0.,0.92,0.),Vec3::new(0.38,0.31,0.29),suit,0.);
+    part(torso,Vec3::new(0.,1.22,0.),Vec3::new(0.60,0.49,0.35),team,0.);
+    part(torso,Vec3::new(0.,1.63,0.),Vec3::new(0.37,0.37,0.37),alloy,0.);
+    part(torso,Vec3::new(0.,1.65,-0.189),Vec3::new(0.30,0.115,0.04),suit,0.);
+    part(torso,Vec3::new(0.,1.66,-0.235),Vec3::new(0.25,0.044,0.022),light,0.65);
+    if !detailed {
+        for side in [-1.,1.] {
+            part(base,Vec3::new(side*0.21,0.42,0.),Vec3::new(0.23,0.76,0.27),alloy,0.);
+            part(torso,Vec3::new(side*0.39,1.18,0.),Vec3::new(0.25,0.48,0.32),team,0.);
+        }
+        part(torso,Vec3::new(0.,1.17,0.30),Vec3::new(0.62,0.53,0.28),trim,0.);
+        return;
+    }
+    for side in [-1.,1.] {
+        // Connected two-piece legs with a planted sole, or a tucked flight pose.
+        let hip=Vec3::new(side*0.19,0.85-crouch,0.);
+        let knee=Vec3::new(side*0.21,0.46-crouch*0.5,-0.06+side*stride);
+        let ankle=Vec3::new(side*0.23,0.14,if p.jetting {0.13} else {side*stride*0.65});
+        for (a,b,width,color) in [(hip,knee,0.235,team),(knee,ankle,0.20,alloy)] {
+            let axis=b-a;
+            let root=base * Mat4::from_translation((a+b)*0.5)
+                * Mat4::from_quat(glam::Quat::from_rotation_arc(Vec3::Y,axis.normalize()));
+            part(root,Vec3::ZERO,Vec3::new(width,axis.length()+0.04,0.23),color,0.);
+        }
+        part(base,ankle+Vec3::new(0.,-0.07,-0.06),Vec3::new(0.25,0.14,0.39),trim,0.);
+        part(torso,Vec3::new(side*0.39,1.31,0.),Vec3::new(0.27,0.27,0.37),team,0.);
+        part(torso,Vec3::new(side*0.40,1.07,-0.035),Vec3::new(0.19,0.30,0.21),trim,0.);
+        // Forearms carried forward in a braced weapon stance.
+        part(torso * Mat4::from_rotation_x(-0.65),Vec3::new(side*0.36,0.89,0.42),
+            Vec3::new(0.20,0.29,0.23),alloy,0.);
+        part(torso,Vec3::new(side*0.21,1.17,0.30),Vec3::new(0.24,0.53,0.28),trim,0.);
+        if detailed {
+            part(torso,Vec3::new(side*0.21,1.40,0.32),Vec3::new(0.18,0.11,0.25),alloy,0.);
+            part(torso,Vec3::new(side*0.21,0.91,0.31),Vec3::new(0.15,0.065,0.19),
+                light,if p.jetting {1.6} else {0.15});
+            part(torso,Vec3::new(side*0.15,1.28,-0.185),Vec3::new(0.23,0.22,0.075),alloy,0.);
+            part(torso,Vec3::new(side*0.40,1.35,-0.196),Vec3::new(0.14,0.045,0.025),alloy,0.);
+            part(base,knee+Vec3::new(0.,0.,-0.125),Vec3::new(0.19,0.16,0.06),trim,0.);
+        }
+    }
+    if detailed {
+        part(torso,Vec3::new(0.,1.45,0.),Vec3::new(0.42,0.085,0.40),trim,0.);
+        part(torso,Vec3::new(0.,1.20,-0.218),Vec3::new(0.065,0.09,0.02),light,0.5);
+        part(torso,Vec3::new(0.,0.91,-0.17),Vec3::new(0.35,0.08,0.065),alloy,0.);
+        part(torso,Vec3::new(0.,1.54,-0.19),Vec3::new(0.22,0.075,0.06),trim,0.);
+    }
+    // Compact third-person weapon silhouette (not a second first-person model).
+    part(torso,Vec3::new(0.29,0.98,-0.39),Vec3::new(0.22,0.18,0.53),suit,0.);
+}
+
+#[cfg(test)]
+mod character_tests {
+    use super::*;
+    #[test]
+    fn armor_poses_are_finite_and_distant_models_are_bounded() {
+        let mut world=World::new(); world.start_match(true);
+        let mut p=world.players[0].clone();
+        p.pos=Vec3::ZERO;
+        for (ski,jet,ground) in [(false,false,true),(true,false,true),(false,true,false)] {
+            p.skiing=ski; p.jetting=jet; p.on_ground=ground;
+            p.vel=Vec3::new(9.,0.,3.);
+            for time in [0.,0.2,0.8] {
+                let mut near=Vec::new(); let mut far=Vec::new();
+                push_runner(&mut near,&p,time,true);
+                push_runner(&mut far,&p,time,false);
+                assert!(near.len()<=40 && far.len()<=10 && far.len()<near.len());
+                for draw in near.iter().chain(&far) {
+                    assert!(draw.model.is_finite() && draw.model.determinant()>0.);
+                    assert!(draw.color.is_finite());
+                }
+            }
+        }
+    }
 }
 
 fn push_jet(emit: &mut Vec<EmitDraw>, pos: Vec3, team: Team) {

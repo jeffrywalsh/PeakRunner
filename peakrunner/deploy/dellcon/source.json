@@ -1,8 +1,11 @@
 {
   "repository": "git@github.com:jeffrywalsh/PeakRunner.git",
-  "revision": "417bd71bcbf2a658d97b02cd3456e72130f7036e",
+  "base_revision": "0f1ab82dfe6a4f4d5d8ec9f29359c5a8ef45e12e",
+  "source_kind": "working-tree archive; includes public roster/version endpoint",
+  "source_archive": "/data/peakrunner/releases/20260919-raindance-web/source.tar.gz",
+  "source_sha256": "f7ac3c318d7082433b341cea65ffa028e885eb10a72b63c4256899cefb8ccc4e",
   "directory": "peakrunner",
   "dockerfile": "crates/directory/Dockerfile",
   "platform": "linux/amd64",
-  "tag": "peakrunner/directory:417bd71"
+  "tag": "peakrunner/directory:20260919-raindance-web"
 }

@@ -57,10 +57,6 @@ pub const VM_ANCHOR_DISC: Vec3 = Vec3::new(0.40, -0.30, -0.70);
 pub const VM_ANCHOR_BOLT: Vec3 = Vec3::new(0.32, -0.28, -0.62);
 pub const VM_MUZZLE_DISC: Vec3 = Vec3::new(0.0, 0.075, -0.79);
 pub const VM_MUZZLE_BOLT: Vec3 = Vec3::new(0.0, 0.02, -0.59);
-/// Classic `damageRadius`.
-const DISC_RADIUS: f32 = 7.5;
-/// Classic `kickBackStrength` 2000 on a 90 kg body, at the center of the blast.
-const DISC_KICK: f32 = 2000.0 / 90.0;
 const BOLT_SPEED: f32 = 420.0;
 pub fn weapon_reload(kind: u8) -> f32 {
     match kind { 0 => DISC_RELOAD, 1 => 0.075, _ => 0.85 }
@@ -109,6 +105,7 @@ pub struct Input {
     pub jump: bool,
     pub jet: bool,
     pub fire: bool,
+    pub interact: bool,
     pub weapon: u8,
     pub look_stick_x: f32,
     pub look_stick_y: f32,
@@ -125,6 +122,7 @@ impl Default for Input {
             jump: false,
             jet: false,
             fire: false,
+            interact: false,
             weapon: 0,
             look_stick_x: 0.0,
             look_stick_y: 0.0,
@@ -173,7 +171,7 @@ pub struct Disc {
     pub team: Team,
     pub owner: usize,
     pub life: f32,
-    pub kind: u8, // 0 disc, 1 bullet, 2 grenade
+    pub kind: u8, // 0 disc, 1 bullet, 2 grenade, 3 turret plasma (not a player weapon slot)
     pub spin: f32,
 }
 
@@ -201,6 +199,8 @@ pub struct Flag {
 }
 
 pub struct World {
+    pub feed: Vec<crate::feed::Entry>,
+    pub equipment: Vec<crate::equipment::State>,
     pub players: Vec<Player>,
     pub discs: Vec<Disc>,
     pub explosions: Vec<Explosion>,
@@ -222,6 +222,7 @@ pub struct World {
     pub kills: u32,
     pub deaths: u32,
     pub events: String,
+    pub spatial_sounds: Vec<(&'static str, Vec3)>,
     pub time: f32,
     pub map: MapId,
     pub net_camera_offset: Vec3,
@@ -240,7 +241,10 @@ impl Rng {
 }
 
 pub fn camera_fov(horiz_speed: f32) -> f32 {
-    76.0 + (horiz_speed * 0.14).min(17.0)
+    // Walking/short strafe taps never change the lens. Ease into the skiing
+    // boost with zero slope at both ends, keeping camera and muzzle in sync.
+    let t = ((horiz_speed - 20.0) / 100.0).clamp(0.0, 1.0);
+    76.0 + 12.0 * t * t * (3.0 - 2.0 * t)
 }
 
 /// Camera-space muzzle, widened to the world field of view so it sits on the gun.
@@ -283,6 +287,7 @@ impl World {
         let ember_h = height(EMBER_HOME.x, EMBER_HOME.z);
         let glac_h = height(GLACIER_HOME.x, GLACIER_HOME.z);
         Self {
+            equipment: Vec::new(),
             players: Vec::new(),
             discs: Vec::new(),
             explosions: Vec::new(),
@@ -319,12 +324,14 @@ impl World {
             kills: 0,
             deaths: 0,
             events: String::new(),
+            spatial_sounds: Vec::new(),
             time: 0.0,
             map: MapId::Valley,
             net_camera_offset: Vec3::ZERO,
             blast_serial: 0,
             network_inputs: Vec::new(),
             predicting: false,
+            feed: Vec::new(),
             rng: 0xC0FFEE,
         }
     }
@@ -338,6 +345,7 @@ impl World {
 
     pub fn set_map(&mut self, id: MapId) {
         self.map = id;
+        self.equipment=crate::equipment::fresh(id);
         self.pillars = crate::terrain::pillars_on(id);
         if self.players.is_empty() {
             self.place_flags();
@@ -365,6 +373,8 @@ impl World {
     }
 
     pub fn start_match(&mut self, ember: bool) {
+        self.feed.clear();
+        self.equipment=crate::equipment::fresh(self.map);
         self.network_inputs.clear();
         self.net_camera_offset = Vec3::ZERO;
         let team = if ember { Team::Ember } else { Team::Glacier };
@@ -392,6 +402,8 @@ impl World {
 
     /// A joined rift: you on the snow, no local bots. Other skiers come from the server.
     pub fn start_rift(&mut self, ember: bool) {
+        self.feed.clear();
+        self.equipment=crate::equipment::fresh(self.map);
         let team = if ember { Team::Ember } else { Team::Glacier };
         self.players.clear();
         self.discs.clear();
@@ -454,6 +466,11 @@ impl World {
             carrier: None,
             drop_timer: 0.0,
         };
+        if let Some(pack)=crate::map_pack::on(self.map) {
+            for (flag,source) in self.flags.iter_mut().zip(pack.manifest.flags) {
+                flag.pos=Vec3::from_array(source);flag.home=flag.pos;
+            }
+        }
     }
 
     pub fn add_look(&mut self, dx: f32, dy: f32) {
@@ -506,6 +523,7 @@ impl World {
 
     pub fn tick(&mut self, dt: f32) {
         self.events.clear();
+        self.spatial_sounds.clear();
         self.flyby += dt;
         self.time += dt;
         self.hitmarker = (self.hitmarker - dt * 3.5).max(0.0);
@@ -553,8 +571,83 @@ impl World {
         self.think_bots(dt);
         self.step_players(dt);
         self.step_discs(dt);
+        self.step_equipment(dt);
         self.step_flags(dt);
         self.step_explosions(dt);
+    }
+
+    fn step_equipment(&mut self, dt:f32) {
+        use crate::equipment::{self,Kind};
+        if self.predicting {return;}
+        let defs=equipment::definitions(self.map);
+        equipment::power(defs,&mut self.equipment);
+        let sensed:Vec<_>=defs.iter().zip(&self.equipment)
+            .filter(|(d,s)|d.kind==Kind::Sensor && s.powered).map(|(d,_)|d.team).collect();
+        for (i,(d,s)) in defs.iter().zip(&mut self.equipment).enumerate() {
+            s.cooldown=(s.cooldown-dt).max(0.);s.contacts=0;
+            for (pid,p) in self.players.iter_mut().enumerate() {
+                // Do not cast map-wide service rays for distant players. These
+                // proximity rejects are also part of the server trust boundary.
+                if !p.alive || p.team.idx()!=d.team as usize
+                    || p.pos.distance_squared(d.pos())>(d.radius+1.5).powi(2) {continue;}
+                let input=if self.network_inputs.is_empty() {
+                    if pid==self.player_id {self.input.interact} else {false}
+                } else {self.network_inputs.get(pid).is_some_and(|c|c.interact)};
+                let end=d.pos();let start=p.pos+Vec3::Y*0.7;
+                let delta=end-start;
+                // Station interaction points are in free space; repairable
+                // solids use their near surface. Buildings still occlude use.
+                let trim=if matches!(d.kind,Kind::Generator|Kind::Turret|Kind::Sensor) {d.radius} else {0.};
+                let end=end-delta.normalize_or_zero()*trim.min(delta.length());
+                if obstacle_hit(self.map,&self.pillars,start,end,0.).is_none() {
+                    equipment::service(d,s,p,input,dt);
+                }
+            }
+            if !s.powered || !matches!(d.kind,Kind::Sensor|Kind::Turret) {continue;}
+            let range=if d.kind==Kind::Sensor {260.} else if sensed.contains(&d.team) {150.} else {80.};
+            let target=self.players.iter().filter(|p|p.alive && p.team.idx()!=d.team as usize)
+                .filter_map(|p| {
+                    let target=p.pos+Vec3::Y*0.8;let delta=target-d.pos();
+                    if delta.length()>range {return None;}
+                    let start=d.pos()+delta.normalize_or_zero()*(d.radius+0.6);
+                    obstacle_hit(self.map,&self.pillars,start,target,0.).is_none().then_some((delta.length(),target,p.vel))
+                }).min_by(|a,b|a.0.total_cmp(&b.0));
+            if let Some((_,target,velocity))=target {
+                let plasma=d.weapon==equipment::TurretWeapon::Plasma;
+                let speed=if plasma {80.} else {BOLT_SPEED};
+                let life=if plasma {3.} else {1.};
+                let aim_target=if d.kind==Kind::Turret && plasma {
+                    equipment::intercept_time(target-d.pos(),velocity,speed,d.radius+0.6,life)
+                        .map_or(target,|t|target+velocity*t)
+                } else {target};
+                s.contacts=1;s.aim=(aim_target-d.pos()).normalize_or_zero();
+                if d.kind==Kind::Turret && s.cooldown<=0. && self.discs.len()<256 {
+                    let muzzle=d.pos()+s.aim*(d.radius+0.6);
+                    if obstacle_hit(self.map,&self.pillars,muzzle,aim_target,0.).is_some() {continue;}
+                    self.discs.push(Disc {pos:muzzle,vel:s.aim*speed,
+                        team:if d.team==0 {Team::Ember} else {Team::Glacier},owner:MAX_PLAYERS,
+                        life,kind:if plasma {3} else {1},spin:i as f32});
+                    s.cooldown=if plasma {1.2} else {0.22};
+                }
+            }
+        }
+        equipment::power(defs,&mut self.equipment);
+    }
+
+    pub fn equipment_prompt(&self)->Option<String> {
+        use crate::equipment::Kind;
+        let p=self.players.get(self.player_id)?;
+        if !p.alive {return None;}
+        crate::equipment::definitions(self.map).iter().zip(&self.equipment)
+            .filter(|(d,_)|d.team as usize==p.team.idx() && p.pos.distance(d.pos())<d.radius+1.5)
+            .min_by(|(a,_),(b,_)|p.pos.distance_squared(a.pos()).total_cmp(&p.pos.distance_squared(b.pos())))
+            .map(|(d,s)| {
+                if s.health<d.max_health() {format!("Hold E: repair {:?} · {:.0}%",d.kind,100.*s.health/d.max_health())}
+                else if !s.powered {"Power offline — repair generator".into()}
+                else if d.kind==Kind::Inventory {"Hold E: refit · 1/2/3: weapon".into()}
+                else if d.kind==Kind::Repair {"Repair pad: restoring health / energy".into()}
+                else {format!("{:?} ONLINE",d.kind)}
+            })
     }
 
     fn think_bots(&mut self, dt: f32) {
@@ -692,15 +785,15 @@ impl World {
 
                 p.vel.y -= gravity_for_speed(Vec2::new(p.vel.x, p.vel.z).length()) * dt;
 
-                let h = crate::terrain::height_on(map, p.pos.x, p.pos.z);
-                let nrm = crate::terrain::normal_on(map, p.pos.x, p.pos.z);
+                let (h,face) = crate::terrain::support_on(map,p.pos);
+                let nrm = if crate::map_pack::on(map).is_some() {face} else {crate::terrain::normal_on(map, p.pos.x, p.pos.z)};
                 let ground_y = h + PLAYER_RADIUS;
                 let was_ground = p.on_ground;
                 // Contact depends on motion relative to the slope, not world Y:
                 // a skier climbing a ramp can have positive Y velocity.
-                let contact_normal = ski_normal(map, p.pos.x, p.pos.z);
+                let ground_normal = contact_normal(map,p.pos);
                 p.on_ground = p.pos.y <= ground_y + 0.12
-                    && p.vel.dot(contact_normal) <= 0.5;
+                    && p.vel.dot(ground_normal) <= 0.5;
                 if p.on_ground {
                     p.coyote = 0.14;
                 } else {
@@ -798,9 +891,9 @@ impl World {
 
                 let impact_speed = move_over_terrain(map, p, jump_held, dt);
                 if p.skiing {
-                    let ground_y = crate::terrain::height_on(map, p.pos.x, p.pos.z) + PLAYER_RADIUS;
+                    let ground_y = crate::terrain::support_on(map,p.pos).0 + PLAYER_RADIUS;
                     let drop = p.pos.y - ground_y;
-                    let nrm = ski_normal(map, p.pos.x, p.pos.z);
+                    let nrm = contact_normal(map,p.pos);
                     // Catch a nearby descending surface, never pull an outgoing
                     // velocity down to a crest. Ramps must launch the player.
                     if drop <= 0.0 || (drop < 0.15 && p.vel.dot(nrm) <= 0.0) {
@@ -854,7 +947,7 @@ impl World {
             }
 
             if !self.predicting && self.players[i].health <= 0.0 && self.players[i].alive {
-                self.kill(i, None);
+                self.kill(i, None, "Fall");
             }
         }
     }
@@ -969,6 +1062,8 @@ impl World {
         if i == self.player_id {
             self.trauma = (self.trauma + if kind == 1 { 0.015 } else { 0.08 }).min(1.0);
             self.push_event(match kind { 0 => "disc", 1 => "chain", _ => "grenade" });
+        } else if self.network_inputs.is_empty() {
+            self.spatial_sounds.push((match kind { 0 => "disc", 1 => "chain", _ => "grenade" }, origin));
         }
     }
 
@@ -980,9 +1075,10 @@ impl World {
         self.smoke.retain(|p| p.age < 0.5);
         let n_sub = 4;
         let sdt = dt / n_sub as f32;
-        let mut explode: Vec<(Vec3, usize, u8, Team)> = Vec::new();
+        let mut explode: Vec<(Vec3, usize, u8, Team, Option<usize>)> = Vec::new();
         let mut keep = Vec::new();
         let mut bullet_hits = Vec::new();
+        let mut equipment_hits = Vec::new();
 
         let map = self.map;
         let far = self.map_size() - 1.0;
@@ -992,7 +1088,7 @@ impl World {
             }
             d.life -= dt;
             if d.life <= 0.0 {
-                if d.kind != 1 { explode.push((d.pos, d.owner, d.kind, d.team)); }
+                if d.kind != 1 { explode.push((d.pos, d.owner, d.kind, d.team, None)); }
                 continue;
             }
             let mut dead = false;
@@ -1001,7 +1097,7 @@ impl World {
                 let grav = if d.kind == 2 { 1.0 } else { 0.0 };
                 d.vel.y -= GRAVITY * grav * sdt;
                 let next = d.pos + d.vel * sdt;
-                let mut hit = obstacle_hit(map, &self.pillars, d.pos, next, 0.12);
+                let mut hit = obstacle_hit(map, &self.pillars, d.pos, next, if d.kind==3 {0.45} else {0.12});
                 // Keep the actual boundary impact height, rather than moving
                 // an airborne explosion down onto the terrain.
                 for (a, b) in [(d.pos.x, next.x), (d.pos.z, next.z)] {
@@ -1013,6 +1109,13 @@ impl World {
                     }
                 }
                 let mut victim = None;
+                let mut equipment_victim=None;
+                for (idx,(obj,state)) in crate::equipment::definitions(map).iter().zip(&self.equipment).enumerate() {
+                    if obj.team as usize==d.team.idx() || state.health<=0. {continue;}
+                    if let Some(t)=segment_sphere(d.pos,next,obj.pos(),obj.radius+if d.kind==3 {0.45} else {0.}) {
+                        if hit.is_none_or(|old|t<old) {hit=Some(t);equipment_victim=Some(idx);}
+                    }
+                }
                 for (idx, pl) in self.players.iter().enumerate() {
                     if !pl.alive || pl.team == d.team {
                         continue;
@@ -1022,6 +1125,7 @@ impl World {
                         if hit.is_none_or(|old| t < old) {
                             hit = Some(t);
                             victim = Some(idx);
+                            equipment_victim=None;
                         }
                     }
                 }
@@ -1031,13 +1135,15 @@ impl World {
                         // Brief launch safety lets close surfaces bounce the
                         // shell. Armed shells detonate on their next contact.
                         if d.life <= 1.65 {
-                            explode.push((contact, d.owner, d.kind, d.team));
+                            explode.push((contact, d.owner, d.kind, d.team, victim));
                             dead = true;
                             break;
                         }
                         let normal = if let Some(idx) = victim {
                             (contact - (self.players[idx].pos + Vec3::Y * 0.9)).normalize_or_zero()
-                        } else { grenade_contact_normal(map, &self.pillars, contact, far) };
+                        } else if let Some(idx)=equipment_victim {
+                            (contact-crate::equipment::definitions(map)[idx].pos()).normalize_or_zero()
+                        } else { grenade_contact_normal(map, &self.pillars, contact, far, d.vel) };
                         let inward = d.vel.dot(normal);
                         if inward < 0.0 { d.vel -= normal * inward * 1.5; }
                         d.vel *= 0.82;
@@ -1045,8 +1151,9 @@ impl World {
                         continue;
                     }
                     if d.kind == 1 {
+                        if let Some(idx)=equipment_victim {equipment_hits.push(idx);}
                         if let Some(idx) = victim { bullet_hits.push((idx, d.owner)); }
-                    } else { explode.push((contact, d.owner, d.kind, d.team)); }
+                    } else { explode.push((contact, d.owner, d.kind, d.team, victim)); }
                     dead = true;
                     break;
                 }
@@ -1057,6 +1164,7 @@ impl World {
             }
         }
         self.discs = keep;
+        for idx in equipment_hits {self.equipment[idx].health=(self.equipment[idx].health-8.).max(0.);}
         for (idx, owner) in bullet_hits {
             if !self.players[idx].alive { continue; }
             self.players[idx].health -= 8.0;
@@ -1064,36 +1172,59 @@ impl World {
             if owner == self.player_id { self.hitmarker = 1.0; self.push_event("hit"); }
             if idx == self.player_id { self.damage_flash = 0.35; self.push_event("pain"); }
             if self.players[idx].health <= 0.0 {
-                self.kill(idx, Some(owner));
+                self.kill(idx, Some(owner), if owner < self.players.len() { "Chaingun" } else { "Bullet turret" });
                 if owner == self.player_id { self.kills += 1; self.msg("FRAG", 1.1); }
             }
         }
-        for (pos, owner, kind, team) in explode {
-            self.explode(pos, owner, kind, team);
+        for (pos, owner, kind, team, direct) in explode {
+            self.explode_direct(pos, owner, kind, team, direct);
         }
     }
 
+    #[cfg(test)]
     fn explode(&mut self, pos: Vec3, owner: usize, kind: u8, team: Team) {
+        self.explode_direct(pos,owner,kind,team,None);
+    }
+
+    fn explode_direct(&mut self, pos: Vec3, owner: usize, kind: u8, team: Team, direct:Option<usize>) {
         self.blast_serial += 1;
-        let max_r = if kind == 0 { DISC_RADIUS } else { 9.0 };
+        let profile=crate::combat::player_weapon_blast(kind);
+        let max_r = profile.map_or(if kind==3 {6.} else {9.},|p|p.radius);
         self.explosions.push(Explosion {
             pos,
             age: 0.0,
             max_r,
             kind,
         });
-        self.push_event("boom");
-        let dmg_core = if kind == 0 { 52.0 } else { 68.0 };
+        self.spatial_sounds.push(("boom", pos));
+        let dmg_core = if kind == 0 { 52.0 } else if kind==3 {43.} else { 68.0 };
+        for (d,s) in crate::equipment::definitions(self.map).iter().zip(&mut self.equipment) {
+            if d.team as usize==team.idx() || s.health<=0. {continue;}
+            let delta=d.pos()-pos;let distance=(delta.length()-d.radius).max(0.);
+            if distance>max_r {continue;}
+            let end=d.pos()-delta.normalize_or_zero()*d.radius.min(delta.length());
+            if obstacle_hit(self.map,&self.pillars,pos,end,0.).is_some_and(|t|t<0.995) {continue;}
+            let damage=profile.map_or((dmg_core+12.)*(1.-distance/max_r),|p|p.damage(distance));
+            s.health=(s.health-damage).max(0.);
+        }
         let mut killed_by_player = false;
         let pid = self.player_id;
         for i in 0..self.players.len() {
             if !self.players[i].alive {
                 continue;
             }
-            let d = self.players[i].pos.distance(pos);
+            let origin_distance = self.players[i].pos.distance(pos);
+            // Damage reaches the body, not just a point at the player's feet.
+            // A confirmed impact touches its victim: full splash once, never
+            // an additional direct-damage bonus. Other targets still fall off.
+            let d = if profile.is_some() {
+                if direct==Some(i) {0.} else {player_blast_distance(pos,self.players[i].pos)}
+            } else {origin_distance};
             if d > max_r {
                 continue;
             }
+            // Impulse falls to zero at the blast edge, independently of T2's
+            // nonzero edge damage. Use body contact distance, not the feet.
             let fall = (1.0 - d / max_r).clamp(0.0, 1.0);
             let same = self.players[i].team == team;
             if same && i != owner {
@@ -1104,13 +1235,13 @@ impl World {
             if obstacle_hit(self.map, &self.pillars, pos + Vec3::Y * 0.02, body, 0.0)
                 .is_some_and(|t| t < 0.995) { continue; }
             let mul = if i == owner { 0.4 } else { 1.0 };
-            // Preserve point-blank damage, but taper to zero at the radius;
-            // the old constant 12 caused a hard damage jump at its edge.
-            let dmg = (12.0 * fall + dmg_core * fall * fall) * mul;
+            let dmg = if let Some(profile)=profile {profile.damage(d)*mul}
+                else if kind==3 && direct==Some(i) {55.}
+                else {(12.0 * fall + dmg_core * fall * fall) * mul};
             self.players[i].health -= dmg;
             // Kick from the blast, not from the chest, so a disc at your feet throws you up.
-            let away = (body - pos).normalize_or_zero();
-            let kick = if kind == 0 { DISC_KICK } else { 6.0 };
+            let away = (body - pos).try_normalize().unwrap_or(Vec3::Y);
+            let kick = profile.map_or(if kind==3 {3.5} else {6.},|p|p.impulse/player_mass(&self.players[i]));
             let push = away * kick * fall;
             self.players[i].vel += push;
             if push.y > 4.0 {
@@ -1134,7 +1265,7 @@ impl World {
                 if owner == pid && i != pid {
                     killed_by_player = true;
                 }
-                self.kill(i, Some(owner));
+                self.kill(i, Some(owner), match kind { 0 => "Disc launcher", 2 => "Grenade launcher", 3 => "Plasma turret", _ => "Explosion" });
             }
         }
         if killed_by_player {
@@ -1146,11 +1277,17 @@ impl World {
         }
     }
 
-    fn kill(&mut self, i: usize, killer: Option<usize>) {
+    fn kill(&mut self, i: usize, killer: Option<usize>, weapon: &str) {
         if !self.players[i].alive {
             return;
         }
         self.players[i].alive = false;
+        let killer = killer.filter(|&k| k < self.players.len());
+        let entry = crate::feed::Entry::Frag {
+            killer: killer.map(|k| self.display_name(k)).unwrap_or_else(|| if weapon == "Fall" { "Environment".into() } else { "Turret".into() }),
+            victim: self.display_name(i), weapon: weapon.into(),
+        };
+        crate::feed::push(&mut self.feed, entry);
         self.players[i].losses += 1;
         if let Some(k) = killer.filter(|&k| k != i && k < self.players.len()
             && self.players[k].team != self.players[i].team) {
@@ -1177,12 +1314,19 @@ impl World {
         });
     }
 
+    pub fn display_name(&self, i: usize) -> String {
+        let p = &self.players[i];
+        if !p.name.is_empty() { p.name.clone() }
+        else if i == self.player_id { "You".into() }
+        else { format!("Bot {}", i + 1) }
+    }
+
     fn respawn(&mut self, i: usize) {
         let ember = self.players[i].team == Team::Ember;
         let mut pos = self.stand(ember);
         pos.x += (self.rng() - 0.5) * 8.0;
         pos.z += (self.rng() - 0.5) * 6.0;
-        pos.y = self.ground(pos.x, pos.z) + 1.2;
+        pos.y = crate::terrain::support_on(self.map,pos).0 + 1.2;
         let p = &mut self.players[i];
         p.pos = pos;
         p.vel = Vec3::ZERO;
@@ -1204,7 +1348,7 @@ impl World {
     }
 
     fn drop_flag(&mut self, team: Team, pos: Vec3) {
-        let y = self.ground(pos.x, pos.z) + 0.4;
+        let y = crate::terrain::support_on(self.map,pos).0 + 0.4;
         let f = &mut self.flags[team.idx()];
         f.carrier = None;
         f.pos = Vec3::new(pos.x, y, pos.z);
@@ -1235,7 +1379,7 @@ impl World {
             if self.flags[fi].carrier.is_none() && self.flags[fi].drop_timer > 0.0 {
                 self.flags[fi].drop_timer -= dt;
                 let pos = self.flags[fi].pos;
-                let y = self.ground(pos.x, pos.z) + 0.4;
+                let y = crate::terrain::support_on(self.map,pos+Vec3::Y*PLAYER_RADIUS).0 + 0.4;
                 self.flags[fi].pos.y = y;
                 if self.flags[fi].drop_timer <= 0.0 {
                     self.return_flag(fi);
@@ -1308,7 +1452,7 @@ impl World {
             self.return_flag(ft.idx());
         }
         self.score[team.idx()] += 1;
-        self.push_event("capture");
+        self.push_event(if team == self.players[self.player_id].team { "capture_win" } else { "capture_loss" });
         self.trauma = 0.55;
         if i == self.player_id {
             self.msg("CAPTURE", 3.2);
@@ -1374,7 +1518,8 @@ impl World {
             let span = (self.map_size() * 0.22).clamp(52.0, 380.0);
             let eye = Vec3::new(
                 c + (t * 0.18).sin() * span * 0.6,
-                self.ground(c, c) + 28.0,
+                crate::terrain::overview_height(self.map).max(self.pillars.iter()
+                    .map(|p|self.ground(p.x,p.z)+p.h+28.).fold(f32::NEG_INFINITY,f32::max)),
                 c + (t * 0.18).cos() * span,
             );
             let target = Vec3::new(c, self.ground(c, c) + 8.0, c);
@@ -1395,7 +1540,13 @@ impl World {
         } else {
             0.0
         };
-        let eye = p.pos + Vec3::Y * EYE + off + Vec3::Y * bob + self.net_camera_offset;
+        let anchor = p.pos + Vec3::Y * EYE;
+        let desired = anchor + off + Vec3::Y * bob + self.net_camera_offset;
+        // Visual reconciliation and shake must not move the near plane through
+        // a wall even when the authoritative collision body is safely inside.
+        let eye = crate::map_pack::on(self.map)
+            .and_then(|pack|pack.sweep(anchor,desired,0.35))
+            .map_or(desired,|(t,_)|anchor.lerp(desired,(t-0.001).max(0.)));
         let dir = look_dir(p.yaw, p.pitch);
         let fov = camera_fov(spd);
         (eye, dir, fov)
@@ -1461,7 +1612,7 @@ impl World {
                 f.team.idx()
             ));
         }
-        let msg = self.message.replace('"', "");
+        let msg = self.equipment_prompt().unwrap_or_else(||self.message.clone()).replace('"', "");
         format!(
             "{{\"health\":{:.1},\"energy\":{:.1},\"speed\":{:.1},\"yaw\":{:.4},\"pitch\":{:.4},\"px\":{:.2},\"py\":{:.2},\"pz\":{:.2},\"ember\":{},\"glacier\":{},\"time\":{:.1},\"state\":{},\"weapon\":{},\"flag\":{},\"ownFlag\":{},\"hit\":{:.2},\"flash\":{:.2},\"msg\":\"{}\",\"kills\":{},\"deaths\":{},\"winner\":{},\"team\":{},\"onGround\":{},\"ski\":{},\"jet\":{},\"alive\":{},\"cd\":{:.2},\"events\":\"{}\",\"blips\":\"{}\",\"mapSize\":{:.0}}}",
             health,
@@ -1500,6 +1651,17 @@ impl World {
 
 #[cfg(test)]
 mod controls {
+    #[test]
+    fn walking_fov_is_fixed_and_skiing_curve_is_gentle() {
+        for speed in [0.,0.1,1.,5.,10.,15.,20.] {assert_eq!(super::camera_fov(speed),76.);}
+        let mut last=76.;
+        for speed in 21..=200 {
+            let fov=super::camera_fov(speed as f32);
+            assert!(fov>=last && fov<=88.);
+            assert!(fov-last<0.2);
+            last=fov;
+        }
+    }
     use super::*;
 
     fn solo_airborne() -> World {
@@ -1543,7 +1705,7 @@ mod controls {
         for map in [MapId::Valley, MapId::Raindance] {
             let mut world = solo_airborne();
             world.set_map(map);
-            let home = crate::terrain::info(map).ember;
+            let home = crate::terrain::spawn_on(map,true);
             let ground = crate::terrain::height_on(map, home.x, home.z);
             world.discs.push(Disc { pos: Vec3::new(home.x, ground + 0.25, home.z),
                 vel: Vec3::new(0.0, -30.0, 0.0), team: Team::Ember,
@@ -1620,7 +1782,7 @@ mod controls {
         for map in [MapId::Valley, MapId::Raindance] {
             let mut world = solo_airborne();
             world.set_map(map);
-            let home = crate::terrain::info(map).ember;
+            let home = crate::terrain::spawn_on(map,true);
             let floor = crate::terrain::height_on(map, home.x, home.z) + PLAYER_RADIUS;
             world.players[0].pos = Vec3::new(home.x, floor + 0.25, home.z);
             world.players[0].vel = Vec3::new(50.0, -80.0, 0.0);
@@ -1683,12 +1845,15 @@ mod controls {
     }
 
     #[test]
-    fn splash_damage_tapers_to_zero_at_the_edge() {
+    fn t2_splash_retains_edge_damage_but_stops_outside_radius() {
         let mut world = solo_airborne();
-        let blast = world.players[0].pos + Vec3::X * (DISC_RADIUS - 0.01);
+        let blast = world.players[0].pos + Vec3::X * (crate::combat::DISC.radius + PLAYER_RADIUS - 0.01);
         world.explode(blast, usize::MAX, 0, Team::Glacier);
         let damage = 100.0 - world.players[0].health;
-        assert!(damage > 0.0 && damage < 0.05, "edge damage should be negligible, got {damage}");
+        assert!(damage > 9. && damage < 9.3, "T2 edge damage, got {damage}");
+        let health=world.players[0].health;
+        world.explode(blast+Vec3::X*0.02,usize::MAX,0,Team::Glacier);
+        assert_eq!(world.players[0].health,health);
     }
 
     #[test]
@@ -2395,6 +2560,9 @@ fn segment_box(start: Vec3, end: Vec3, low: Vec3, high: Vec3) -> Option<f32> {
 
 fn obstacle_hit(map: MapId, pillars: &[Pillar], start: Vec3, end: Vec3, radius: f32) -> Option<f32> {
     let mut hit = crate::terrain::segment_hit(map, start, end, radius);
+    if let Some((t,_))=crate::map_pack::on(map).and_then(|p|p.sweep(start,end,radius)) {
+        hit=Some(hit.map_or(t,|old|old.min(t)));
+    }
     for pillar in pillars {
         let y = crate::terrain::height_on(map, pillar.x, pillar.z);
         // Match the rendered square column, not an unrelated circular volume.
@@ -2416,6 +2584,7 @@ fn player_mass(_p: &Player) -> f32 {
 /// Sweep across the rendered ground in short steps, resolving contacts in the
 /// same tick as movement. This changes collision, not gravity/thrust/steering.
 fn move_over_terrain(map: MapId, p: &mut Player, ski_held: bool, dt: f32) -> f32 {
+    if let Some(pack)=crate::map_pack::on(map) {return move_in_imported_map(map,pack,p,ski_held,dt);}
     let steps = ((p.vel.length() * dt / 0.75).ceil() as usize).clamp(1, 64);
     let sub_dt = dt / steps as f32;
     let mut impact = 0.0_f32;
@@ -2447,6 +2616,41 @@ fn move_over_terrain(map: MapId, p: &mut Player, ski_held: bool, dt: f32) -> f32
         } else {
             p.pos = end;
         }
+    }
+    impact
+}
+
+fn contact_normal(map:MapId,pos:Vec3)->Vec3 {
+    if let Some(pack)=crate::map_pack::on(map) {
+        if let Some((h,n))=pack.floor(pos-Vec3::Y*PLAYER_RADIUS) {
+            if h>=crate::terrain::height_on(map,pos.x,pos.z) || pack.hole(pos.x,pos.z) {return n;}
+        }
+    }
+    ski_normal(map,pos.x,pos.z)
+}
+
+fn move_in_imported_map(map:MapId,pack:&crate::map_pack::MapPack,p:&mut Player,ski_held:bool,dt:f32)->f32 {
+    let mut impact=0.0_f32;
+    let mut remaining=dt;
+    // Continuous sweeps, with up to six sliding contacts per simulation tick.
+    for _ in 0..6 {
+        let start=p.pos;let end=start+p.vel*remaining;
+        let mut hit=crate::terrain::segment_hit(map,start,end,PLAYER_RADIUS)
+            .map(|t|(t,crate::terrain::surface_on(map,start.lerp(end,t).x,start.lerp(end,t).z).1));
+        // Overlapping spheres cover the full body, including the eye and a
+        // head/near-plane margin. The old stack ended below the camera.
+        for offset in [Vec3::ZERO,Vec3::Y*0.5,Vec3::Y,Vec3::Y*EYE] {
+            if let Some(h)=pack.sweep(start+offset,end+offset,PLAYER_RADIUS) {
+                if hit.is_none_or(|old|h.0<old.0) {hit=Some(h);}
+            }
+        }
+        let Some((t,n))=hit else {p.pos=end;break;};
+        p.pos=start.lerp(end,t)+n*0.001;
+        let vn=p.vel.dot(n);
+        if vn<0.0 {impact=impact.max(-vn);p.vel-=n*vn;}
+        if n.y>0.25 {p.on_ground=true;p.skiing=ski_held&&!p.jetting;}
+        remaining*=1.0-t;
+        if remaining<0.00001 {break;}
     }
     impact
 }
@@ -2495,11 +2699,260 @@ fn ski_normal(map: MapId, x: f32, z: f32) -> Vec3 {
     Vec3::new(hl - hr, 2.0 * e, hd - hu).normalize_or_zero()
 }
 
+#[cfg(test)]
+mod equipment_tests {
+    use super::*;
+    use crate::equipment::{self,Kind};
+    #[test]
+    fn entire_menu_orbit_clears_terrain_and_solid_scenery() {
+        for map in [MapId::Valley, MapId::Raindance] {
+            let mut w=World::new(); w.set_map(map);
+            for step in 0..720 {
+                w.flyby=step as f32 * std::f32::consts::TAU / 720. / 0.18;
+                let (eye,dir,_)=w.camera();
+                assert!(eye.is_finite() && dir.is_normalized());
+                assert!(eye.y >= w.ground(eye.x,eye.z)+27.9);
+                if let Some(pack)=crate::map_pack::on(map) { assert!(eye.y >= pack.highest_solid()+27.9); }
+            }
+        }
+    }
+    #[test]
+    fn player_blasts_push_outward_and_lift_with_distance_falloff() {
+        for kind in [0,2] {
+            let profile=crate::combat::player_weapon_blast(kind).unwrap();
+            let mut w=world(); w.players.truncate(1);
+            let pos=Vec3::new(1000.,300.,1000.);
+            w.players[0].pos=pos; w.players[0].vel=Vec3::ZERO;
+            w.players[0].on_ground=true; w.players[0].skiing=true;
+            w.explode(pos-Vec3::Y*PLAYER_RADIUS,0,kind,Team::Ember);
+            assert!((w.players[0].vel.y-profile.impulse/90.).abs()<0.001);
+            assert!(!w.players[0].on_ground && !w.players[0].skiing);
+            w.players[0].vel=Vec3::ZERO; w.players[0].health=100.;
+            w.explode(pos-Vec3::X*(profile.radius*0.5+PLAYER_RADIUS),0,kind,Team::Ember);
+            assert!((w.players[0].vel.length()-profile.impulse/90.*0.5).abs()<0.001);
+            assert!(w.players[0].vel.x>0.);
+        }
+    }
+    fn world()->World {
+        let mut w=World::new();w.set_map(MapId::Raindance);w.start_rift(true);w
+    }
+    #[test]
+    fn disc_and_grenade_impacts_apply_one_blast_and_kill_in_two() {
+        for kind in [0,2] {
+            let profile=crate::combat::player_weapon_blast(kind).unwrap();
+            let mut w=world();w.players.truncate(1);
+            w.players[0].pos=Vec3::new(1000.,300.,1000.);
+            w.players[0].team=Team::Glacier;w.players[0].health=100.;
+            let mut nearby=w.players[0].clone();nearby.pos.z+=4.;w.players.push(nearby);
+            let mut distant=w.players[0].clone();distant.pos.z+=16.;w.players.push(distant);
+            for shot in 0..2 {
+                w.discs.push(Disc {pos:w.players[0].pos+Vec3::new(-5.,0.9,0.),vel:Vec3::X*80.,
+                    owner:MAX_PLAYERS,team:Team::Ember,kind,life:1.5,spin:0.});
+                for _ in 0..8 {w.step_discs(STEP);}
+                assert!(w.discs.is_empty());
+                if shot==0 {
+                    assert!((w.players[0].health-(100.-profile.max_damage)).abs()<0.001,
+                        "kind {kind}: {:?}",w.players[0].health);
+                    assert!(w.players[0].alive);
+                    assert_eq!(w.explosions.len(),1);
+                    assert_eq!(w.explosions[0].max_r,profile.radius);
+                    let expected=profile.damage(player_blast_distance(w.explosions[0].pos,w.players[1].pos));
+                    assert!((w.players[1].health-(100.-expected)).abs()<0.001);
+                    assert!(expected>0. && expected<profile.max_damage);
+                    assert_eq!(w.players[2].health,100.);
+                }
+            }
+            assert!(!w.players[0].alive,"two direct hits must kill for kind {kind}");
+        }
+    }
+    #[test]
+    fn grenade_has_wider_splash_and_cover_blocks_both_weapons() {
+        for kind in [0,2] {
+            let mut w=world();w.players.truncate(1);w.players[0].team=Team::Glacier;
+            w.players[0].pos=Vec3::new(1012.,300.,1000.);
+            w.explode(Vec3::new(1000.,300.7,1000.),MAX_PLAYERS,kind,Team::Ember);
+            if kind==0 {assert_eq!(w.players[0].health,100.);}
+            else {assert!(w.players[0].health<80. && w.players[0].health>70.);}
+            w.players[0].health=100.;w.players[0].pos=Vec3::new(829.,110.,1400.);
+            w.explode(Vec3::new(832.5,110.7,1400.),MAX_PLAYERS,kind,Team::Ember);
+            assert_eq!(w.players[0].health,100.,"base wall must shield kind {kind}");
+        }
+    }
+    #[test]
+    fn explosive_self_damage_stays_reduced_and_team_damage_stays_off() {
+        for kind in [0,2] {
+            let mut w=world();w.players.truncate(1);w.players[0].pos=Vec3::new(1000.,300.,1000.);
+            let mut enemy=w.players[0].clone();enemy.team=Team::Glacier;w.players.push(enemy);
+            w.players.push(w.players[0].clone());
+            w.explode(w.players[0].pos+Vec3::Y*0.7,0,kind,Team::Ember);
+            let peak=crate::combat::player_weapon_blast(kind).unwrap().max_damage;
+            assert!((w.players[0].health-(100.-peak*0.4)).abs()<0.001);
+            assert!((w.players[1].health-(100.-peak)).abs()<0.001);
+            assert_eq!(w.players[2].health,100.);
+            assert_eq!(w.players[2].vel,Vec3::ZERO);
+        }
+    }
+    #[test]
+    fn equipment_uses_the_same_explosive_curve() {
+        for kind in [0,2] {
+            let mut w=world();let defs=equipment::definitions(w.map);
+            let i=defs.iter().position(|d|d.kind==Kind::Sensor && d.team==0).unwrap();
+            let d=&defs[i];let blast=d.pos()+Vec3::Y*(d.radius+2.);
+            let profile=crate::combat::player_weapon_blast(kind).unwrap();
+            w.explode(blast,MAX_PLAYERS,kind,Team::Glacier);
+            assert!((w.equipment[i].health-(d.max_health()-profile.damage(2.))).abs()<0.001);
+        }
+    }
+    #[test]
+    fn full_head_stops_at_ceiling_even_at_high_speed() {
+        let mut w=world();
+        let pack=crate::map_pack::on(w.map).unwrap();
+        let p=&mut w.players[0];
+        p.pos=Vec3::new(822.,115.,1400.);p.vel=Vec3::Y*150.;
+        move_in_imported_map(w.map,pack,p,false,0.1);
+        assert!(p.pos.y>117. && p.pos.y+EYE+PLAYER_RADIUS<=119.401,"head {:?}",p.pos);
+        assert!(p.vel.y.abs()<0.001);
+        // Keep pressing into the ceiling without creeping through it.
+        for _ in 0..60 {p.vel=Vec3::Y*10.;move_in_imported_map(w.map,pack,p,false,STEP);}
+        assert!(p.pos.y+EYE+PLAYER_RADIUS<=119.401);
+    }
+    #[test]
+    fn camera_offsets_cannot_cross_ceiling_or_wall() {
+        let mut w=world();w.trauma=1.;
+        w.players[0].pos=Vec3::new(822.,117.,1400.);
+        w.net_camera_offset=Vec3::Y*8.;
+        let (eye,_,_)=w.camera();
+        assert!(eye.y<119.1 && eye.y>118.5,"ceiling camera {eye:?}");
+        w.players[0].pos=Vec3::new(828.,110.,1400.);
+        w.net_camera_offset=Vec3::X*10.;
+        let (eye,_,_)=w.camera();
+        assert!(eye.x<830. && eye.x>828.,"wall camera {eye:?}");
+    }
+    #[test]
+    fn plasma_direct_hits_kill_in_two_with_splash_and_small_push() {
+        let mut w=world();w.players.truncate(1);
+        w.players[0].pos=Vec3::new(1000.,300.,1000.);
+        w.players[0].team=Team::Glacier;w.players[0].health=100.;w.players[0].vel=Vec3::ZERO;
+        let mut nearby=w.players[0].clone();nearby.pos.z+=3.;w.players.push(nearby);
+        let mut distant=w.players[0].clone();distant.pos.z+=10.;w.players.push(distant);
+        for shot in 0..2 {
+            w.discs.push(Disc {pos:w.players[0].pos+Vec3::new(-5.,0.9,0.),vel:Vec3::X*80.,
+                owner:MAX_PLAYERS,team:Team::Ember,kind:3,life:3.,spin:0.});
+            for _ in 0..8 {w.step_discs(STEP);}
+            assert!(w.discs.is_empty());
+            if shot==0 {
+                assert_eq!(w.players[0].health,45.);assert!(w.players[0].alive);
+                assert!(w.players[0].vel.length()>0. && w.players[0].vel.length()<=3.5);
+                assert!(w.players[1].health>45. && w.players[1].health<100.);
+                assert_eq!(w.players[2].health,100.);
+            }
+        }
+        assert!(!w.players[0].alive);
+    }
+    #[test]
+    fn plasma_splash_respects_base_walls_and_friendly_teams() {
+        let mut w=world();w.players.truncate(1);
+        w.players[0].pos=Vec3::new(829.,110.,1400.);w.players[0].team=Team::Glacier;
+        w.explode(Vec3::new(832.5,110.7,1400.),MAX_PLAYERS,3,Team::Ember);
+        assert_eq!(w.players[0].health,100.);
+        w.players[0].pos=Vec3::new(1000.,300.,1000.);w.players[0].team=Team::Ember;
+        w.explode(w.players[0].pos,MAX_PLAYERS,3,Team::Ember);
+        assert_eq!(w.players[0].health,100.);
+    }
+    #[test]
+    fn base_turrets_fire_plasma_and_towers_keep_bullets() {
+        let mut w=world();let defs=equipment::definitions(w.map);
+        assert_eq!(defs.iter().filter(|d|d.kind==Kind::Turret && d.weapon==equipment::TurretWeapon::Plasma).count(),4);
+        assert_eq!(defs.iter().filter(|d|d.kind==Kind::Turret && d.weapon==equipment::TurretWeapon::Bullet).count(),2);
+        let i=defs.iter().position(|d|d.weapon==equipment::TurretWeapon::Plasma).unwrap();
+        w.players[0].team=Team::Glacier;w.players[0].pos=defs[i].pos()+Vec3::Y*30.;
+        w.players[0].vel=Vec3::X*25.;
+        w.step_equipment(STEP);
+        assert!(w.discs.iter().any(|d|d.kind==3 && d.owner==MAX_PLAYERS));
+        assert!(w.equipment[i].aim.x>0.1,"plasma turret did not lead sideways motion");
+        assert!(w.equipment[i].cooldown>1.);
+    }
+    #[test]
+    fn inventory_requires_use_team_distance_and_power() {
+        let mut w=world();let defs=equipment::definitions(w.map);
+        let Some(i)=defs.iter().position(|d|d.kind==Kind::Inventory && d.team==0) else {return;};
+        w.players[0].pos=defs[i].pos();w.players[0].health=25.;w.players[0].energy=10.;
+        w.step_equipment(STEP);assert_eq!(w.players[0].health,25.);
+        w.input.interact=true;w.step_equipment(STEP);assert!(w.players[0].health>25.);
+        w.players[0].team=Team::Glacier;let before=w.players[0].health;
+        w.step_equipment(STEP);assert_eq!(w.players[0].health,before);
+        w.players[0].team=Team::Ember;w.players[0].pos+=Vec3::X*30.;
+        w.step_equipment(STEP);assert_eq!(w.players[0].health,before);
+        w.players[0].pos=defs[i].pos();
+        for (d,s) in defs.iter().zip(&mut w.equipment) {if d.kind==Kind::Generator && d.team==0 {s.health=0.;}}
+        w.step_equipment(STEP);assert_eq!(w.players[0].health,before);assert!(!w.equipment[i].powered);
+    }
+    #[test]
+    fn generators_take_bullet_damage_and_can_be_repaired() {
+        let mut w=world();let defs=equipment::definitions(w.map);
+        let Some(i)=defs.iter().position(|d|d.kind==Kind::Generator && d.team==0) else {return;};
+        let pos=defs[i].pos();w.players[0].pos=pos+Vec3::X*12.;w.players[0].team=Team::Glacier;
+        w.discs.push(Disc {pos:pos+Vec3::X*9.,vel:-Vec3::X*BOLT_SPEED,owner:0,team:Team::Glacier,kind:1,life:1.,spin:0.});
+        w.step_discs(STEP);assert!(w.equipment[i].health<defs[i].max_health());
+        w.equipment[i].health=0.;w.players[0].team=Team::Ember;
+        w.players[0].pos=pos+Vec3::X*3.5;w.input.interact=true;
+        let energy=w.players[0].energy;
+        w.step_equipment(STEP);assert!(w.equipment[i].health>0.);assert!(w.equipment[i].powered);
+        assert!(w.players[0].energy<energy);
+    }
+    #[test]
+    fn equipment_snapshots_and_empty_server_reset() {
+        let mut m=Match::new(MapId::Raindance);let Some(s)=m.join(31,"tester") else {panic!()};
+        if m.world.equipment.is_empty(){return;}
+        m.world.equipment[0].health=12.;let snap=m.snapshot();
+        let mut client=world();assert!(client.apply_snapshot(&snap,31));assert_eq!(client.equipment[0].health,12.);
+        m.leave(s);assert_eq!(m.world.equipment[0].health,equipment::definitions(m.world.map)[0].max_health());
+    }
+    #[test]
+    fn original_base_walk_routes_enter_service_hall_and_reach_roof() {
+        if equipment::definitions(MapId::Raindance).is_empty(){return;}
+        for (x,roof) in [(800.,false),(822.,true)] {
+            let mut w=world();w.players[0].team=Team::Glacier;
+            w.players[0].pos=Vec3::new(x,112.+PLAYER_RADIUS,1340.);
+            w.players[0].yaw=std::f32::consts::PI;w.players[0].on_ground=true;
+            w.input.move_z=1.;
+            for _ in 0..255 {w.physics_step();}
+            let p=&w.players[0];
+            assert!(p.alive && p.pos.is_finite(),"route must stay playable");
+            assert!(p.pos.z>1374.,"route blocked at {:?}",p.pos);
+            if roof {assert!(p.pos.y>120.,"roof route: {:?}",p.pos);}
+            else {assert!(p.pos.y<110. && p.pos.y>101.,"lower hall: {:?}",p.pos);}
+        }
+    }
+    #[test]
+    fn powered_turrets_engage_enemies_and_stop_when_power_is_lost() {
+        let mut w=world();let defs=equipment::definitions(w.map);
+        let Some(i)=defs.iter().rposition(|d|d.kind==Kind::Turret && d.team==0) else {return;};
+        w.players[0].team=Team::Glacier;
+        w.players[0].pos=defs[i].pos()+Vec3::new(45.,-0.8,0.);
+        w.step_equipment(STEP);
+        assert!(w.discs.iter().any(|d|d.owner==MAX_PLAYERS && d.team==Team::Ember));
+        w.discs.clear();
+        for (d,s) in defs.iter().zip(&mut w.equipment) {if d.kind==Kind::Generator && d.team==0 {s.health=0.;}}
+        for _ in 0..60 {w.step_equipment(STEP);}
+        assert!(!w.discs.iter().any(|d|d.team==Team::Ember));
+    }
+}
+
+fn player_blast_distance(blast:Vec3,player:Vec3)->f32 {
+    let spine=Vec3::new(player.x,blast.y.clamp(player.y,player.y+EYE),player.z);
+    (blast.distance(spine)-PLAYER_RADIUS).max(0.)
+}
+
 fn landing_damage(impact_speed: f32) -> f32 {
     (((impact_speed - 18.0).max(0.0) * 1.4).min(22.0) * 0.5).floor()
 }
 
-fn grenade_contact_normal(map: MapId, pillars: &[Pillar], p: Vec3, far: f32) -> Vec3 {
+fn grenade_contact_normal(map: MapId, pillars: &[Pillar], p: Vec3, far: f32, incoming:Vec3) -> Vec3 {
+    if let Some(pack)=crate::map_pack::on(map) {
+        let direction=incoming.normalize_or_zero();
+        if let Some((_,n))=pack.sweep(p-direction*0.3,p+direction*0.3,0.12) {return n;}
+    }
     if p.x <= 1.001 { return Vec3::X; }
     if p.x >= far - 0.001 { return -Vec3::X; }
     if p.z <= 1.001 { return Vec3::Z; }
@@ -2536,7 +2989,7 @@ fn jet_falloff(speed: f32) -> f32 {
 fn ride_ski(map: MapId, p: &mut Player, wish: Vec3, dt: f32) {
     // Gravity was already applied straight down. On frictionless snow that
     // into-ground part becomes slide. Descending multiplies that slide.
-    let n = ski_normal(map, p.pos.x, p.pos.z);
+    let n = contact_normal(map,p.pos);
     let vn = p.vel.dot(n);
     if vn < 0.0 {
         p.vel -= n * vn;

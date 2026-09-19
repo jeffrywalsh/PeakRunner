@@ -16,6 +16,7 @@ const GLACIER: Color32 = Color32::from_rgb(62, 200, 224);
 const FG: Color32 = Color32::from_rgb(231, 238, 246);
 const MUTED: Color32 = Color32::from_rgb(154, 168, 184);
 const BG: Color32 = Color32::from_rgb(8, 13, 20);
+const SECONDARY_BUTTON_BG: Color32 = Color32::from_rgb(22, 28, 38);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -68,6 +69,11 @@ struct Pad {
 }
 
 pub struct PeakRunnerApp {
+    chat_team: bool,
+    chat_open: bool,
+    chat_text: String,
+    chat_error: String,
+    chat_next: f64,
     world: World,
     audio: Audio,
     mode: Mode,
@@ -81,6 +87,7 @@ pub struct PeakRunnerApp {
     touch_jump: bool,
     touch_jet: bool,
     touch_fire: bool,
+    touch_interact: bool,
     touch_swap: bool,
     look_pending: egui::Vec2,
     /// The click that started the match is still down. Don't treat it as fire.
@@ -92,11 +99,32 @@ pub struct PeakRunnerApp {
 }
 
 impl PeakRunnerApp {
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn comms_fixture() -> Self {
+        let mut world = World::new(); world.start_rift(true);
+        world.feed = vec![
+            peakrunner_core::feed::Entry::Chat { sender: "Ridge".into(), text: "Two incoming at the west entrance.".into() },
+            peakrunner_core::feed::Entry::Frag { killer: "Ridge".into(), victim: "Echo".into(), weapon: "Disc launcher".into() },
+            peakrunner_core::feed::Entry::Frag { killer: "Nova".into(), victim: "Ridge".into(), weapon: "Grenade launcher".into() },
+            peakrunner_core::feed::Entry::Chat { sender: "Echo".into(), text: "On my way. Cover the flag!".into() },
+        ];
+        Self { chat_team:false, world, audio: Audio::silent(), mode: Mode::Play, ember: true, map: MapId::Valley,
+            hud: None, frame_aspect: 1.6, stick: [0.;2], touch: false, grabbed: false,
+            touch_jump: false, touch_jet: false, touch_fire: false, touch_interact: false,
+            touch_swap: false, look_pending: Vec2::ZERO, wait_fire_release: false,
+            pads: None, net: NetUi::new(), chat_open: true, chat_text: "Nice shot!".into(), chat_error: String::new(), chat_next: 0.0 }
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn capture_comms(&mut self, ctx: &egui::Context) { style_ui(ctx); self.chat_ui(ctx); }
+
     pub fn new(cc: &eframe::CreationContext<'_>) -> Result<Self, String> {
         scene::install(cc)?;
         style_ui(&cc.egui_ctx);
         #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
         let mut app = Self {
+            chat_team: false,
+            chat_open: false, chat_text: String::new(), chat_error: String::new(), chat_next: 0.0,
             world: {
                 let mut world = World::new();
                 world.set_map(MapId::Raindance);
@@ -114,6 +142,7 @@ impl PeakRunnerApp {
             touch_jump: false,
             touch_jet: false,
             touch_fire: false,
+            touch_interact: false,
             touch_swap: false,
             look_pending: egui::Vec2::ZERO,
             wait_fire_release: false,
@@ -147,8 +176,27 @@ impl PeakRunnerApp {
             self.touch = true;
         }
         self.world.events.clear();
+        self.world.spatial_sounds.clear();
         self.poll_net(ctx);
 
+        let was_chat = self.chat_open;
+        if self.mode != Mode::Play { self.chat_open = false; }
+        if self.mode == Mode::Play && !self.chat_open {
+            let public = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::T));
+            let team = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Y));
+            if public || team {
+                self.chat_open = true;
+                self.chat_team = team;
+                self.chat_error.clear();
+                // Do not insert the opening hotkey's text event into the message.
+                ctx.input_mut(|i| i.events.retain(|e| !matches!(e,egui::Event::Text(_))));
+            }
+        }
+        if self.chat_open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            self.chat_open = false;
+            self.wait_fire_release = true;
+        }
+        let gameplay_input = self.mode == Mode::Play && !self.chat_open && !was_chat && ctx.input(|i| i.focused);
         let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         if escape && self.mode == Mode::Play {
             self.pause(ctx);
@@ -157,17 +205,17 @@ impl PeakRunnerApp {
         }
 
         if self.look_pending != egui::Vec2::ZERO {
-            self.world.add_look(self.look_pending.x, self.look_pending.y);
+            if gameplay_input { self.world.add_look(self.look_pending.x, self.look_pending.y); }
             self.look_pending = egui::Vec2::ZERO;
         }
-        let mouse = mouse::sample(ctx, self.mode == Mode::Play);
-        if self.mode == Mode::Play {
+        let mouse = mouse::sample(ctx, gameplay_input);
+        if gameplay_input {
             self.grab(ctx, true);
             self.world.add_look(mouse.dx, mouse.dy);
         } else {
             self.grab(ctx, false);
         }
-        if self.touch_swap {
+        if self.touch_swap && gameplay_input {
             self.world.input.weapon = (self.world.input.weapon + 1) % 3;
             self.touch_swap = false;
         }
@@ -176,6 +224,7 @@ impl PeakRunnerApp {
         let mut mx = self.stick[0] + pad.x;
         let mut mz = self.stick[1] + pad.z;
         ctx.input(|i| {
+            if !gameplay_input { return; }
             if i.key_down(egui::Key::A) || i.key_down(egui::Key::ArrowLeft) {
                 mx -= 1.0;
             }
@@ -212,13 +261,21 @@ impl PeakRunnerApp {
         self.world.input.jump = jump;
         self.world.input.jet = jet && self.mode == Mode::Play;
         self.world.input.fire = fire;
+        self.world.input.interact = self.mode==Mode::Play && (ctx.input(|i|i.key_down(egui::Key::E)) || self.touch_interact);
         self.world.input.look_stick_x = pad.lx;
         self.world.input.look_stick_y = pad.ly;
+        if !gameplay_input {
+            let weapon = self.world.input.weapon;
+            self.world.input = crate::sim::Input::default();
+            self.world.input.weapon = weapon;
+            self.touch_swap = false;
+            self.stick = [0.0; 2];
+        }
 
         if self.online() {
             #[cfg(not(target_arch = "wasm32"))]
             if let Some(session) = &self.net.session {
-                let active = self.mode == Mode::Play && ctx.input(|i| i.focused);
+                let active = gameplay_input;
                 if !self.net.predictor.advance(&mut self.world, dt, active, session) {
                     self.net.lobby.error = Some("Connection stalled; leave and rejoin the match.".into());
                     self.net.session.take();
@@ -232,6 +289,10 @@ impl PeakRunnerApp {
             self.world.tick(dt.min(0.1).max(0.0));
         }
         let raw = self.world.hud_json();
+        let listener = self.world.camera().0;
+        for (name, position) in self.world.spatial_sounds.drain(..) {
+            self.audio.play_at(name, position.distance(listener));
+        }
         if let Ok(hud) = serde_json::from_str::<Hud>(&raw) {
             if !hud.events.is_empty() {
                 for event in hud.events.split(',') {
@@ -239,6 +300,7 @@ impl PeakRunnerApp {
                 }
             }
             self.audio.set_jet(hud.jet == 1 && self.mode == Mode::Play);
+            self.audio.set_map_ambience(self.world.map,self.world.player_pos(),self.mode==Mode::Play);
             if hud.state == 3 && self.mode == Mode::Play {
                 self.mode = Mode::End;
                 self.grab(ctx, false);
@@ -279,7 +341,7 @@ impl PeakRunnerApp {
     }
 
     fn grab(&mut self, ctx: &egui::Context, lock: bool) {
-        self.grabbed = lock && self.mode == Mode::Play;
+        self.grabbed = lock && self.mode == Mode::Play && !self.chat_open;
         ctx.send_viewport_cmd(egui::ViewportCommand::CursorGrab(if self.grabbed {
             egui::CursorGrab::Locked
         } else {
@@ -419,6 +481,7 @@ impl eframe::App for PeakRunnerApp {
         match self.mode {
             Mode::Menu => self.menu_ui(ui),
             Mode::Play => {
+                crate::flag_hud::draw(ui, &self.world);
                 #[cfg(not(target_arch = "wasm32"))]
                 if self.net.dropped_in {
                     rift_roster(ui, &self.net.lobby);
@@ -434,6 +497,13 @@ impl eframe::App for PeakRunnerApp {
                     }
                     self.look_pending += look;
                 }
+                self.touch_interact=false;
+                if self.touch && self.world.equipment_prompt().is_some() {
+                    let center=ui.max_rect().center_bottom()+Vec2::new(0.0,-180.0);
+                    self.touch_interact=ui.put(egui::Rect::from_center_size(center,Vec2::new(112.0,48.0)),
+                        egui::Button::new("Use / repair").sense(egui::Sense::click_and_drag())).is_pointer_button_down_on();
+                }
+                self.chat_ui(ui.ctx());
             }
             Mode::Pause => self.pause_ui(ui),
             Mode::End => self.end_ui(ui),
@@ -441,7 +511,7 @@ impl eframe::App for PeakRunnerApp {
             Mode::Lobby => self.lobby_ui(ui),
         }
         #[cfg(not(target_arch = "wasm32"))]
-        if self.online() && (ui.input(|i| i.key_down(egui::Key::Tab)) || self.mode == Mode::End) {
+        if self.online() && !self.chat_open && (ui.input(|i| i.key_down(egui::Key::Tab)) || self.mode == Mode::End) {
             self.scoreboard_ui(ui);
         }
     }
@@ -452,6 +522,75 @@ impl eframe::App for PeakRunnerApp {
 }
 
 impl PeakRunnerApp {
+    fn chat_ui(&mut self, ctx: &egui::Context) {
+        if !self.chat_open { ctx.memory_mut(|m|m.surrender_focus(egui::Id::new("chat_input"))); }
+        let width = (ctx.content_rect().width() - 32.0).min(440.0).max(160.0);
+        let bottom = if self.touch { 224.0 } else { 112.0 };
+        let mut submit = false;
+        egui::Area::new(egui::Id::new("match_comms"))
+            .fade_in(false)
+            .anchor(Align2::LEFT_BOTTOM, [16.0, -bottom])
+            .order(egui::Order::Foreground).show(ctx, |ui| {
+                egui::Frame::new().fill(Color32::from_rgba_unmultiplied(BG.r(),BG.g(),BG.b(),230)).corner_radius(6).inner_margin(10).show(ui, |ui| {
+                    ui.set_width(width - 20.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("MATCH COMMS").size(11.0).color(MUTED));
+                        if !self.chat_open { ui.label(RichText::new("Public · T   Team · Y").size(11.0).color(MUTED)); }
+                        if !self.chat_open && self.touch && ui.add_sized([80.0,44.0],egui::Button::new("Chat")).clicked() {
+                            self.chat_open = true;
+                            self.chat_team = false;
+                            self.chat_error.clear();
+                        }
+                    });
+                    egui::ScrollArea::vertical().id_salt("match_feed").max_height(if self.chat_open {160.0} else {92.0})
+                        .stick_to_bottom(true).show(ui, |ui| {
+                            let skip = if self.chat_open { 0 } else { self.world.feed.len().saturating_sub(4) };
+                            for entry in self.world.feed.iter().skip(skip) {
+                                let frag = matches!(entry, peakrunner_core::feed::Entry::Frag {..});
+                                let prefix = if frag { "FRAG  " } else { "CHAT  " };
+                                ui.add(egui::Label::new(RichText::new(format!("{prefix}{}", entry.line()))
+                                    .color(if frag { FG } else { GLACIER }).size(12.0)).wrap());
+                            }
+                        });
+                    if self.chat_open {
+                        ui.separator();
+                        let response = ui.add(egui::TextEdit::singleline(&mut self.chat_text)
+                            .id(egui::Id::new("chat_input")).hint_text(if self.chat_team {"Message your team…"} else {"Message everyone…"}).char_limit(160).desired_width(f32::INFINITY));
+                        response.request_focus();
+                        submit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                        ui.horizontal(|ui| {
+                            let h=if self.touch {44.0} else {26.0};
+                            submit |= ui.add_sized([56.0,h],egui::Button::new("Send")).clicked();
+                            if ui.add_sized([100.0,h],egui::Button::new("Cancel · Esc")).clicked() { self.chat_open = false; self.wait_fire_release=true; }
+                            ui.label(RichText::new(if self.chat_team {"Team only"} else {"All players"}).size(11.0).color(MUTED));
+                        });
+                        if !self.chat_error.is_empty() { ui.colored_label(EMBER, &self.chat_error); }
+                    }
+                });
+            });
+        if submit {
+            let now = ctx.input(|i| i.time);
+            if let Some(text) = peakrunner_core::feed::message(&self.chat_text) {
+                if now < self.chat_next { self.chat_error = "Wait a moment before sending again.".into(); return; }
+                let mut sent = false;
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(session) = &self.net.session { sent = if self.chat_team { session.send_team_chat(text.clone()) } else {session.send_chat(text.clone())}; }
+                if !self.online() {
+                    let sender = self.world.display_name(self.world.player_id);
+                    let entry = if self.chat_team { peakrunner_core::feed::Entry::TeamChat { sender,text,team:self.world.players[self.world.player_id].team } }
+                        else { peakrunner_core::feed::Entry::Chat { sender,text } };
+                    peakrunner_core::feed::push(&mut self.world.feed, entry);
+                    sent = true;
+                }
+                if sent {
+                    self.chat_next = now + 1.1;
+                    self.chat_text.clear(); self.chat_error.clear(); self.chat_open = false;
+                    self.wait_fire_release = true;
+                } else { self.chat_error = "Message not queued. Try again.".into(); }
+            } else { self.chat_error = "Use 1–160 characters (240 UTF-8 bytes), without control characters.".into(); }
+        }
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn scoreboard_ui(&self, ui: &egui::Ui) {
         let Some(snapshot) = &self.net.lobby.snapshot else { return; };
@@ -460,21 +599,25 @@ impl PeakRunnerApp {
             .show(ui.ctx(), |ui| {
                 egui::Frame::new().fill(Color32::from_rgba_unmultiplied(12, 18, 28, 242))
                     .corner_radius(8.0).inner_margin(16.0).show(ui, |ui| {
-                        ui.set_width(300.0);
+                        ui.set_width(360.0);
                         ui.label(RichText::new("MATCH ROSTER").color(GLACIER).size(13.0));
                         ui.label(RichText::new(format!("{} · input ack {:.0} ms", self.net.lobby.map,
                             self.net.predictor.latency_ms)).color(MUTED));
                         egui::Grid::new("match-scores").striped(true).show(ui, |ui| {
-                            ui.label("Player"); ui.label("Team"); ui.label("K / D"); ui.end_row();
+                            ui.label("Player"); ui.label("Team"); ui.label("K / D"); ui.label("Ping"); ui.end_row();
                             for p in snapshot.players.iter().filter(|p| p.net_id != 0) {
                                 let team = if p.team == crate::sim::Team::Ember { "Ember" } else { "Glacier" };
                                 let color = if p.team == crate::sim::Team::Ember { EMBER } else { GLACIER };
                                 let you = if p.net_id == self.net.lobby.player_id { " · you" } else { "" };
                                 ui.label(RichText::new(format!("{} #{}{you}", p.name, p.net_id)).color(FG));
                                 ui.label(RichText::new(team).color(color));
-                                ui.label(format!("{} / {}", p.frags, p.losses)); ui.end_row();
+                                ui.label(format!("{} / {}", p.frags, p.losses));
+                                ui.label(snapshot.pings.iter().find(|(id,_)| *id == p.net_id)
+                                    .map_or_else(|| "—".into(), |(_,ms)| format!("{ms} ms")));
+                                ui.end_row();
                             }
                         });
+                        ui.label(RichText::new("Ping = server RTT · — unavailable on local TCP").size(11.0).color(MUTED));
                     });
             });
     }
@@ -516,7 +659,7 @@ impl PeakRunnerApp {
                 if ui.add(egui::Button::new(RichText::new("Start match").size(20.0).color(BG)).fill(FG).min_size(Vec2::new(180.0, 44.0))).clicked() {
                     self.start(ui.ctx());
                 }
-                if ui.add(egui::Button::new(RichText::new("Find match").size(18.0).color(FG)).min_size(Vec2::new(180.0, 40.0))).clicked() {
+                if ui.add(secondary_button("Find match").min_size(Vec2::new(180.0, 40.0))).clicked() {
                     self.open_browser();
                 }
                 ui.add_space(16.0);
@@ -544,6 +687,27 @@ impl PeakRunnerApp {
                         ui.label(RichText::new(if self.online() { "Match menu" } else { "Paused" }).size(28.0).color(FG).strong());
                         if self.online() { ui.label(RichText::new("The match continues while this menu is open.").color(MUTED)); }
                         ui.add_space(12.0);
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if self.online() {
+                            ui.label(RichText::new("Your name").color(MUTED));
+                            ui.add(egui::TextEdit::singleline(&mut self.net.name).char_limit(24));
+                            let valid = peakrunner_core::names::validate(&self.net.name).is_some();
+                            ui.label(RichText::new(peakrunner_core::names::HELP).size(11.0).color(MUTED));
+                            let ready = self.net.rename_sent.is_none_or(|sent| sent.elapsed().as_secs() >= 11);
+                            if ui.add_enabled(valid && ready, egui::Button::new("Apply name")).clicked() {
+                                if let Some(session) = &self.net.session {
+                                    if session.rename(self.net.name.clone()) { self.net.rename_sent = Some(std::time::Instant::now()); }
+                                }
+                            }
+                            if let Some(session) = &self.net.session {
+                                let lobby = session.lobby();
+                                if let Some(p) = lobby.snapshot.as_ref().and_then(|s| s.players.iter().find(|p| p.net_id == lobby.player_id)) {
+                                    ui.label(RichText::new(format!("Current: {}", p.name)).color(FG));
+                                }
+                            }
+                            ui.label(RichText::new(if ready { "One change every 10 seconds." } else { "Name requested. Please wait before changing again." }).size(11.0).color(MUTED));
+                            ui.add_space(8.0);
+                        }
                         if big(ui, "Resume", true) {
                             self.resume(ui.ctx());
                         }
@@ -670,7 +834,7 @@ fn play_hud(
             rect.center_top() + Vec2::new(0.0, 92.0),
             Align2::CENTER_TOP,
             &hud.msg,
-            FontId::proportional(26.0),
+            FontId::proportional(((rect.width()-32.0)/(hud.msg.chars().count().max(1) as f32*0.6)).clamp(14.0,26.0)),
             FG,
         );
     }
@@ -951,7 +1115,8 @@ impl PeakRunnerApp {
         ui.label(RichText::new("Directory").size(12.0).color(MUTED));
         ui.text_edit_singleline(&mut self.net.directory);
         ui.label(RichText::new("Your name").size(12.0).color(MUTED));
-        ui.text_edit_singleline(&mut self.net.name);
+        ui.add(egui::TextEdit::singleline(&mut self.net.name).char_limit(24));
+        ui.label(RichText::new(peakrunner_core::names::HELP).size(11.0).color(MUTED));
         ui.label(RichText::new("Match password (optional)").size(12.0).color(MUTED));
         ui.add(egui::TextEdit::singleline(&mut self.net.password).password(true));
         ui.label(RichText::new("Direct server address").size(12.0).color(MUTED));
@@ -1003,6 +1168,10 @@ impl PeakRunnerApp {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn join_server(&mut self, host: &str, port: u16) {
+        if peakrunner_core::names::validate(&self.net.name).is_none() {
+            self.net.listing = Listing::Failed(format!("Your name: {}", peakrunner_core::names::HELP));
+            return;
+        }
         match peakrunner_net::connect_private(host, port, &self.net.name, &self.net.password) {
             Ok(session) => {
                 self.net.direct = if host.contains("://") { host.into() } else { format!("{host}:{port}") };
@@ -1076,6 +1245,7 @@ impl PeakRunnerApp {
 
 #[cfg(not(target_arch = "wasm32"))]
 struct NetUi {
+    rename_sent: Option<std::time::Instant>,
     password: String,
     direct: String,
     predictor: crate::online::Online,
@@ -1091,6 +1261,7 @@ struct NetUi {
 #[cfg(not(target_arch = "wasm32"))]
 impl NetUi {
     fn disconnect(&mut self) {
+        self.rename_sent = None;
         if let Some(session) = self.session.take() { session.leave(); }
         self.lobby = Default::default();
         self.predictor = Default::default();
@@ -1099,6 +1270,7 @@ impl NetUi {
 
     fn new() -> Self {
         Self {
+            rename_sent: None,
             password: String::new(),
             direct: "quic://play.peakrunner.net:7777".into(),
             predictor: Default::default(),
@@ -1147,11 +1319,15 @@ fn hint(ui: &mut egui::Ui, k: &str, v: &str) {
     });
 }
 
+fn secondary_button(label: &str) -> egui::Button<'_> {
+    egui::Button::new(RichText::new(label).size(18.0).color(FG)).fill(SECONDARY_BUTTON_BG)
+}
+
 fn big(ui: &mut egui::Ui, label: &str, primary: bool) -> bool {
     let button = if primary {
         egui::Button::new(RichText::new(label).color(BG)).fill(FG)
     } else {
-        egui::Button::new(RichText::new(label).color(FG))
+        secondary_button(label)
     };
     ui.add_sized(Vec2::new(280.0, 40.0), button).clicked()
 }
@@ -1159,6 +1335,52 @@ fn big(ui: &mut egui::Ui, label: &str, primary: bool) -> bool {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod exit_tests {
     use super::*;
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }
+    }
+    fn frame(app: &mut PeakRunnerApp, ctx: &egui::Context, events: Vec<egui::Event>, time: f64) {
+        let mut output = ctx.run_ui(egui::RawInput { events, time:Some(time), focused:true,
+            screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,Vec2::new(1280.,800.))), ..Default::default() }, |ui| {
+            app.step(ui.ctx(), 0.0); app.chat_ui(ui.ctx());
+        });
+        output.textures_delta.clear();
+    }
+    #[test]
+    fn typing_chat_blocks_gameplay_and_enter_sends_escape_cancels() {
+        let mut app=PeakRunnerApp::comms_fixture(); let ctx=egui::Context::default();
+        app.chat_open=false; app.chat_text.clear();
+        frame(&mut app,&ctx,vec![key(egui::Key::Enter),key(egui::Key::Space)],0.);
+        assert!(!app.chat_open,"gameplay keys and Enter must not open chat");
+        frame(&mut app,&ctx,vec![key(egui::Key::T),egui::Event::Text("t".into())],1.);
+        assert!(app.chat_open);
+        assert!(!app.chat_team); assert!(app.chat_text.is_empty());
+        frame(&mut app,&ctx,vec![key(egui::Key::W),key(egui::Key::Space),key(egui::Key::Num3),egui::Event::Text("hello".into())],2.);
+        assert_eq!(app.world.input.move_z,0.); assert!(!app.world.input.fire && !app.world.input.jump);
+        assert_eq!(app.world.input.weapon,0); assert!(!app.grabbed);
+        assert_eq!(app.chat_text,"hello");
+        frame(&mut app,&ctx,vec![key(egui::Key::Enter)],3.);
+        assert!(!app.chat_open,"Enter must submit the message");
+        assert!(app.world.feed.last().unwrap().line().ends_with(": hello"));
+        frame(&mut app,&ctx,vec![key(egui::Key::Y)],4.);
+        assert!(app.chat_open);
+        assert!(app.chat_team);
+        frame(&mut app,&ctx,vec![key(egui::Key::Escape)],5.);
+        assert!(!app.chat_open && app.mode==Mode::Play,"Escape closes chat, not the match");
+    }
+
+    #[test]
+    fn shift_space_and_keyboard_focus_do_not_open_chat() {
+        let mut app=PeakRunnerApp::comms_fixture(); let ctx=egui::Context::default();
+        app.chat_open=false;
+        let shifted_space=egui::Event::Key {key:egui::Key::Space,physical_key:Some(egui::Key::Space),
+            pressed:true,repeat:false,modifiers:egui::Modifiers::SHIFT};
+        frame(&mut app,&ctx,vec![key(egui::Key::Tab)],1.);
+        frame(&mut app,&ctx,vec![shifted_space],2.);
+        assert!(!app.chat_open);
+        frame(&mut app,&ctx,vec![key(egui::Key::Enter)],3.);
+        assert!(!app.chat_open);
+    }
 
     #[test]
     fn leaving_clears_the_snapshot_that_could_reenter_the_match() {
@@ -1182,12 +1404,43 @@ mod exit_tests {
 }
 
 fn style_ui(ctx: &egui::Context) {
+    // OS light-mode notifications must not select an unstyled light palette
+    // underneath the game's explicitly light labels.
+    ctx.set_theme(egui::ThemePreference::Dark);
     let mut visuals = egui::Visuals::dark();
     visuals.panel_fill = Color32::TRANSPARENT;
     visuals.window_fill = Color32::from_rgba_unmultiplied(12, 18, 28, 230);
     visuals.override_text_color = Some(FG);
-    visuals.widgets.inactive.bg_fill = Color32::from_rgb(22, 28, 38);
+    visuals.widgets.inactive.bg_fill = SECONDARY_BUTTON_BG;
     visuals.widgets.hovered.bg_fill = Color32::from_rgb(36, 44, 58);
     visuals.widgets.active.bg_fill = EMBER;
-    ctx.set_visuals(visuals);
+    ctx.set_visuals_of(egui::Theme::Dark, visuals);
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::*;
+
+    #[test]
+    fn system_light_mode_cannot_replace_the_game_palette() {
+        let ctx=egui::Context::default();
+        ctx.set_theme(egui::ThemePreference::System);
+        ctx.run_ui(egui::RawInput { system_theme:Some(egui::Theme::Light), ..Default::default() }, |_| {}).textures_delta.clear();
+        style_ui(&ctx);
+        for theme in [egui::Theme::Light,egui::Theme::Dark,egui::Theme::Light] {
+            ctx.run_ui(egui::RawInput { system_theme:Some(theme), ..Default::default() }, |_| {}).textures_delta.clear();
+            assert_eq!(ctx.theme(),egui::Theme::Dark);
+            assert_eq!(ctx.global_style().visuals.override_text_color,Some(FG));
+            assert_eq!(ctx.global_style().visuals.widgets.inactive.bg_fill,SECONDARY_BUTTON_BG);
+        }
+    }
+
+    #[test]
+    fn secondary_button_label_has_readable_contrast() {
+        fn luminance(c:Color32)->f32 {
+            let linear=|v:u8| {let s=v as f32/255.;if s<=0.04045 {s/12.92}else{((s+0.055)/1.055).powf(2.4)}};
+            0.2126*linear(c.r())+0.7152*linear(c.g())+0.0722*linear(c.b())
+        }
+        assert!((luminance(FG)+0.05)/(luminance(SECONDARY_BUTTON_BG)+0.05)>=4.5);
+    }
 }

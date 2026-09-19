@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, mpsc::{self, SyncSender}, atomic::{AtomicBool, Order
 use std::thread;
 use std::time::{Duration, Instant};
 use peakrunner_core::sim::{Command, Snapshot};
-use crate::{directory, proto::{ClientMsg, ServerAdvert, ServerMsg, PROTOCOL}, transport::Transport};
+use crate::{directory, proto::{ClientMsg, ServerAdvert, ServerMsg}, transport::Transport};
 
 #[derive(Clone, Debug, Default)]
 pub struct Lobby {
@@ -11,13 +11,16 @@ pub struct Lobby {
     pub players: Vec<String>, pub snapshot: Option<Snapshot>, pub error: Option<String>,
 }
 pub struct Session {
-    lobby: Arc<Mutex<Lobby>>, outbound: SyncSender<Command>, stop: Arc<AtomicBool>,
+    lobby: Arc<Mutex<Lobby>>, outbound: SyncSender<ClientMsg>, stop: Arc<AtomicBool>,
 }
 impl Drop for Session { fn drop(&mut self) { self.stop.store(true, Ordering::Relaxed); } }
 impl Session {
     pub fn lobby(&self) -> Lobby { self.lobby.lock().expect("lobby").clone() }
     pub fn leave(self) { self.stop.store(true, Ordering::Relaxed); }
-    pub fn send_input(&self, command: Command) -> bool { self.outbound.try_send(command).is_ok() }
+    pub fn send_input(&self, command: Command) -> bool { self.outbound.try_send(ClientMsg::Input { command }).is_ok() }
+    pub fn send_chat(&self, text: String) -> bool { self.outbound.try_send(ClientMsg::Chat { text }).is_ok() }
+    pub fn send_team_chat(&self, text: String) -> bool { self.outbound.try_send(ClientMsg::TeamChat { text }).is_ok() }
+    pub fn rename(&self, name: String) -> bool { self.outbound.try_send(ClientMsg::Rename { name }).is_ok() }
 }
 pub fn browse(addr: &str) -> io::Result<Vec<ServerAdvert>> {
     if addr.starts_with("https://") { return peakrunner_discovery::http::browse_https(addr); }
@@ -35,7 +38,7 @@ pub fn connect_private(host: &str, port: u16, name: &str, password: &str) -> io:
         Ok(ip) => std::net::SocketAddr::new(ip, port).to_string(),
         Err(_) => format!("{host}:{port}"),
     }};
-    let hello = ClientMsg::Hello { name: name.into(), protocol: PROTOCOL.into(), password: password.into() };
+    let hello = ClientMsg::Hello { name: name.into(), protocol: crate::proto::game_protocol(), password: password.into() };
     thread::Builder::new().name("peakrunner-session".into()).spawn(move || {
         let result = (|| -> io::Result<()> {
             if address.starts_with("quic://") {
@@ -49,7 +52,7 @@ pub fn connect_private(host: &str, port: u16, name: &str, password: &str) -> io:
                 if flag.load(Ordering::Relaxed) { let _ = wire.send(&ClientMsg::Leave); return Ok(()); }
                 for _ in 0..8 {
                     match rx.try_recv() {
-                        Ok(command) => wire.send(&ClientMsg::Input { command })?,
+                        Ok(message) => wire.send(&message)?,
                         Err(mpsc::TryRecvError::Empty) => break,
                         Err(mpsc::TryRecvError::Disconnected) => return Ok(()),
                     }

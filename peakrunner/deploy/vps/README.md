@@ -1,15 +1,18 @@
 # Direct UDP match host
 
-The existing ColoCrossing host is `root@198.12.80.145` (`dorkenheimer.com`):
+The existing ColoCrossing host is `peakrunner-admin@198.12.80.145` (`dorkenheimer.com`):
 Ubuntu 24.04, one shared vCPU, 961 MiB RAM, 20 GiB disk. This is a candidate
 for one eight-player match, not a measured capacity guarantee.
 
 Verified preparation: OS package updates installed; Docker and Compose installed;
 key-based SSH verified after applying `00-peakrunner-hardening.conf`; password
-and keyboard-interactive SSH disabled; UFW permits TCP 22 and UDP 7777 only.
+and keyboard-interactive SSH disabled; direct root SSH is disabled. The dedicated
+`peakrunner-admin` account uses the existing authorized keys and explicitly
+approved `NOPASSWD: ALL` sudo. Use `sudo -n` for privileged operations, including
+Docker. UFW permits TCP 22 and UDP 7777 only.
 Reboot completed and kernel `6.8.0-139-generic` verified; SSH, Docker and firewall
 survived the restart, and no further reboot is required. The eight-player
-`North Spine` match is deployed as `peakrunner-match-match-1`.
+`Springdale Central` match is deployed as `peakrunner-match-match-1`.
 
 ## Deployment and verification
 
@@ -35,8 +38,8 @@ survived the restart, and no further reboot is required. The eight-player
    proof of competitive feel or maximum capacity. CPU samples reached ~87% of
    the single vCPU, so leave the match capped at eight for human capability tests.
 7. `play.peakrunner.net` is DNS-only A → `198.12.80.145`; the HTTPS directory
-   remains on dellcon. Apex/www remain on the tunnel's maintenance response until
-   the separate entry-page work is done. Old DNS answers may linger for their TTL.
+   remains on dellcon. Apex/www serve the game website and versioned downloads
+   through the tunnel. The website proxies live listings from the directory.
 
 See [OPERATIONS.md](OPERATIONS.md) for rebuild, restore and renewal procedures.
 

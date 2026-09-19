@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU32, Ordering}};
 use std::thread;
 use std::time::{Duration, Instant};
 use peakrunner_core::{sim::{Command, Match, MAX_PLAYERS, STEP}, terrain::MapId};
-use crate::proto::{ClientMsg, ServerMsg, PROTOCOL};
+use crate::proto::{ClientMsg, ServerMsg};
 use crate::wire::{Framed, private_bind, invalid};
 
 pub struct GameHost {
@@ -88,12 +88,10 @@ impl GameHost {
                         if peer.tokens < 0.0 { return Err(invalid("message rate exceeded")); }
                         match msg {
                             ClientMsg::Hello { name, protocol, password } if peer.slot.is_none() => {
-                                let name = name.trim();
-                                if protocol != PROTOCOL { return Err(invalid("incompatible game version")); }
+                                let name = peakrunner_core::names::validate(&name)
+                                    .ok_or_else(|| invalid(peakrunner_core::names::HELP))?;
+                                if protocol != crate::proto::game_protocol() { return Err(invalid("incompatible game version or map pack; client and server must use identical map content")); }
                                 if password != self.password { return Err(invalid("incorrect match password")); }
-                                if name.is_empty() || name.len() > 24 || name.chars().any(char::is_control) {
-                                    return Err(invalid("name must be 1–24 bytes without control characters"));
-                                }
                                 if game.world.players.iter().filter(|p| p.net_id != 0).count() >= self.max_players {
                                     return Err(invalid("match is full"));
                                 }
@@ -112,6 +110,9 @@ impl GameHost {
                                 peer.last = now;
                                 peer.queue.push_back(command);
                             }
+                            ClientMsg::Chat { text } if peer.slot.is_some() => { game.chat(peer.slot.unwrap(), &text); }
+                            ClientMsg::TeamChat { text } if peer.slot.is_some() => { game.chat_channel(peer.slot.unwrap(), &text, true); }
+                            ClientMsg::Rename { name } if peer.slot.is_some() => { game.rename(peer.slot.unwrap(), &name); }
                             ClientMsg::Leave => return Err(invalid("left match")),
                             _ => return Err(invalid("unexpected message")),
                         }
@@ -141,9 +142,9 @@ impl GameHost {
                 log::info!("match_phase round={} phase={:?} score={:?}", game.round, game.phase, game.world.score);
             }
             if game.tick % 3 == 0 {
-                let msg = ServerMsg::Snapshot { state: game.snapshot() };
                 peers.retain_mut(|peer| {
                     if peer.slot.is_none() { return true; }
+                    let msg = ServerMsg::Snapshot { state: game.snapshot_for(peer.slot.unwrap()) };
                     if peer.wire.send(&msg).is_err() {
                         game.leave(peer.slot.unwrap()); false
                     } else { true }
@@ -157,6 +158,11 @@ impl GameHost {
                     tick: game.tick, round: game.round, phase: format!("{:?}", game.phase),
                     score: game.world.score, time_left: game.world.time_left,
                     password_required: !self.password.is_empty(),
+                    game_version: crate::proto::GAME_VERSION.into(),
+                    game_protocol: crate::proto::game_protocol(),
+                    roster: game.world.players.iter().filter(|p|p.net_id != 0).map(|p|peakrunner_discovery::PlayerStats {
+                        id:p.net_id, name:p.name.clone(), team:format!("{:?}",p.team), frags:p.frags, deaths:p.losses,
+                    }).collect(),
                 };
             }
         }

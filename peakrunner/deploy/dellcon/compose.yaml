@@ -1,10 +1,33 @@
 name: peakrunner-public
 services:
+  site:
+    image: sha256:45aa35b7d88a8ca45b57ae06b11a016e7cf29303b9807b4c6ca38221a19264e4
+    restart: unless-stopped
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    volumes:
+      - /data/peakrunner/downloads:/srv/downloads:ro
+      - /data/peakrunner/updates:/srv/updates:ro
+    tmpfs: [/config, /data]
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:8080/]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+    networks: [public]
   directory:
     build:
       context: ./source
       dockerfile: crates/directory/Dockerfile
-    image: sha256:87dc479c3dcaf46b78bfc6f48addf35410cd1ce920faa7050856d6c2c37837f2
+    image: sha256:9f657f1829db1a8bebceb914b6e6d00ca11594f8317f7450b1f2afb0e69aecc9
     command: [peakrunner-directory]
     environment:
       PEAKRUNNER_HTTP_BIND: 0.0.0.0:8080

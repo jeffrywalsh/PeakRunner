@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PeakRunner — Own the ridgeline</title>
+  <meta name="description" content="Ski the highlands. Burn skyward. Land the disc. Download the PeakRunner playtest and find a live match.">
+  <meta property="og:title" content="PeakRunner — Own the ridgeline"><meta property="og:description" content="High-speed, jet-powered capture the flag. Explore Raindance and join the playtest.">
+  <meta property="og:type" content="website"><meta property="og:url" content="https://peakrunner.net/"><meta property="og:image" content="https://peakrunner.net/assets/gameplay.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#servers">Skip to live servers</a>
+  <header class="wrap nav"><a class="wordmark" href="/" aria-label="PeakRunner home">PEAK<span>RUNNER</span><i aria-hidden="true"></i></a><nav aria-label="Main navigation"><a href="#servers">Servers</a><a href="#raindance">The map</a><a class="button small" href="#downloads">Downloads</a></nav></header>
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="wrap hero-copy"><p class="eyebrow">INDEPENDENT ARENA FPS / PUBLIC PLAYTEST</p><h1 id="hero-title">OWN THE<br><em>RIDGELINE.</em></h1><p class="lede">Ski the highlands. Burn skyward.<br>Land the disc before they land the flag.</p><div class="actions"><a class="button primary" href="#downloads">Get the playtest <span aria-hidden="true">↗</span></a><a class="button" href="#servers">Find a match</a></div><p class="hero-note">Jet-powered capture the flag. Original maps and assets.</p></div>
+      <div class="wrap hero-caption"><span>RAINDANCE / 2 KM HIGHLANDS</span><span>ACTUAL IN-GAME CAPTURE</span></div>
+    </section>
+    <div class="network-bar"><div class="wrap network-inner"><span><i class="status-dot" aria-hidden="true"></i> NETWORK STATUS</span><strong id="network-status" role="status">Connecting to directory…</strong><span>ENCRYPTED UDP · DEDICATED SERVER</span></div></div>
+    <section class="wrap section" id="servers" aria-labelledby="servers-title">
+      <div class="section-heading"><div><p class="eyebrow">01 / THE NETWORK</p><h2 id="servers-title">Your next match.</h2></div><div class="refresh-block"><span id="updated">Live data, refreshed every 5 seconds</span><button id="refresh" class="button small">Refresh</button></div></div>
+      <p class="section-intro">Choose a host to see the roster, match score and running game version. Stats are for the current match, not lifetime rankings.</p>
+      <div id="server-list" class="server-list" aria-live="polite"><p class="empty">Fetching live hosts…</p></div>
+      <p class="subtle">Official hosts are listed automatically. No account required. Copy a host address into the game's direct-connect field to join.</p>
+    </section>
+    <section class="map-section" id="raindance" aria-labelledby="map-title"><div class="wrap map-grid"><div class="map-image"><img src="/assets/raindance.png" alt="Raindance's grassy ridges, river ravine and bridge, captured in PeakRunner" loading="lazy" width="1280" height="800"><span class="image-label">FIELD NOTES / RAINDANCE</span></div><div class="map-copy"><p class="eyebrow">02 / KNOW THE GROUND</p><h2 id="map-title">Raindance.<br>Built for momentum.</h2><p>A river cuts through the highlands. Two powered bases hold the flags. Pick your line across the ravine—or use the ridges to take the long way, fast.</p><dl class="map-specs"><div><dt>Landscape</dt><dd>2 km highlands</dd></div><div><dt>Objective</dt><dd>Capture the flag</dd></div><div><dt>Defences</dt><dd>Plasma turrets</dd></div><div><dt>Map kit</dt><dd>Original, editable assets</dd></div></dl><a href="#downloads" class="text-link">Explore the current build ↗</a></div></div></section>
+    <section class="wrap section" id="downloads" aria-labelledby="downloads-title">
+      <div class="section-heading"><div><p class="eyebrow">03 / DROP IN</p><h2 id="downloads-title">Gear up.</h2></div><span class="release-label" id="release-version">Loading release…</span></div>
+      <p class="section-intro">Install the launcher once. Get signed game and map updates, download only changed files, and repair or roll back when needed. Standalone playtest downloads remain available below.</p>
+      <div class="download-grid" id="downloads-list"><p class="empty">Checking available downloads…</p></div>
+      <details class="install-help"><summary>First launch &amp; joining a match</summary><ol>
+        <li>Mac: unzip and open PeakRunner Launcher.app. Apple Silicon only. This playtest is not notarized; macOS may require approval in Privacy &amp; Security after the first launch attempt. Only approve a download you trust.</li>
+        <li>Windows: extract the ZIP and open PeakRunnerLauncher.exe. This unsigned x64 playtest has launch/render checks in Windows 11 ARM, not a full native x64 hardware certification.</li>
+        <li>Linux: extract the .tar.gz and run peakrunner-launcher. Use a desktop session on Debian 12 or a compatible glibc 2.36+ distribution, with OpenGL for the launcher, Vulkan for the game, and the libraries listed on the download card.</li>
+        <li>In the launcher, choose Install game, then Play. Updates wait until the game closes. Repair restores damaged files; Rollback restores the previous install, which may not match the live server. Launcher upgrades themselves still require a download. Standalone packages open directly without the launcher.</li>
+        <li>Choose Find match, set your name, then select Springdale Central. You can also copy its address from the live host details and use direct connect.</li>
+        <li>WASD moves, Space skis/jumps, right mouse jets, and left mouse fires. Use 1–3 for weapons and E for equipment. T opens public chat, Y opens team chat, Enter sends and Escape cancels.</li>
+        <li>During a match, Escape opens the menu where you can change your name: 1–24 letters, numbers or spaces.</li>
+      </ol><p>Native game required for multiplayer; this website is the match browser, not a browser version of the game. The server requires this release; older clients must update.</p></details>
+    </section>
+    <section class="wrap playbook"><div><span class="index">01</span><h3>Keep your speed.</h3><p>Find a downhill line and ski. Let the terrain do the work.</p></div><div><span class="index">02</span><h3>Spend your energy.</h3><p>Jet over a ridge, clear a base, or turn a fall into an escape.</p></div><div><span class="index">03</span><h3>Lead the shot.</h3><p>Discs, bullets and grenades. Different arcs. One moving target.</p></div></section>
+  </main>
+  <footer class="wrap"><a class="wordmark" href="/">PEAK<span>RUNNER</span></a><p>Independent playtest · Original game assets · Not affiliated with the Tribes franchise</p><a href="https://dir.peakrunner.net/servers">Directory API ↗</a></footer>
+  <dialog id="host-dialog" aria-labelledby="host-title"><div class="dialog-heading"><div><p class="eyebrow">LIVE HOST / MATCH DETAILS</p><h2 id="host-title">Server details</h2></div><button class="button small" id="close-dialog" aria-label="Close server details">Close ✕</button></div><div id="host-details"></div></dialog>
+</body>
+</html>

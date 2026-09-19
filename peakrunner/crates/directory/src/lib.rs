@@ -1,7 +1,7 @@
 //! Standalone discovery service. No simulation, gameplay protocol, or client dependency.
 pub mod lan;
 use std::{io, sync::{Arc, Mutex}, time::{Duration, Instant}};
-use axum::{Router, Json, extract::State, http::{StatusCode, header}, response::{IntoResponse, Response}, routing::get};
+use axum::{Router, Json, extract::{State,Path}, http::{StatusCode, header}, response::{IntoResponse, Response}, routing::get};
 use peakrunner_discovery::{MatchStatus, ServerAdvert, PublicDirectory, PROTOCOL, quic::{endpoint_url, query_status}};
 
 #[derive(Clone)]
@@ -29,6 +29,20 @@ async fn listing(State(directory): State<Directory>) -> Response {
     response
 }
 
+async fn details(Path(id): Path<String>, State(directory): State<Directory>) -> Response {
+    let mut response = if id != "dellcon-north-spine" {
+        StatusCode::NOT_FOUND.into_response()
+    } else {
+        match live(&directory) {
+            Some(status) => Json(status).into_response(),
+            None => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+        }
+    };
+    response.headers_mut().insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+    response.headers_mut().insert(header::X_CONTENT_TYPE_OPTIONS, "nosniff".parse().unwrap());
+    response
+}
+
 pub async fn serve(bind: &str, backend: String, advertised: String) -> io::Result<()> {
     endpoint_url(&advertised)?;
     endpoint_url(&backend)?;
@@ -44,6 +58,7 @@ pub async fn serve(bind: &str, backend: String, advertised: String) -> io::Resul
         }
     });
     let app = Router::new().route("/", get(listing)).route("/servers", get(listing))
+        .route("/servers/{id}", get(details))
         .route("/healthz", get(health)).with_state(directory);
     log::info!("Directory listening on {}", listener.local_addr()?);
     let result = axum::serve(listener, app).with_graceful_shutdown(async {
@@ -71,8 +86,11 @@ mod tests {
         let catalog: PublicDirectory = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(catalog.servers.len(), 1);
         assert_eq!(catalog.servers[0].map, "Raindance");
+        assert_eq!(details(Path("unknown".into()),State(d.clone())).await.status(),StatusCode::NOT_FOUND);
+        assert_eq!(details(Path("dellcon-north-spine".into()),State(d.clone())).await.status(),StatusCode::OK);
         d.status.lock().unwrap().as_mut().unwrap().1 = Instant::now() - Duration::from_secs(13);
         assert!(live(&d).is_none());
+        assert_eq!(details(Path("dellcon-north-spine".into()),State(d.clone())).await.status(),StatusCode::SERVICE_UNAVAILABLE);
         let bytes = axum::body::to_bytes(listing(State(d)).await.into_body(), 4096).await.unwrap();
         assert!(serde_json::from_slice::<PublicDirectory>(&bytes).unwrap().servers.is_empty());
     }

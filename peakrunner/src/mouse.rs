@@ -15,6 +15,15 @@ pub struct MouseSample {
     pub jet: bool,
 }
 
+// Unit tests use injected events, not global OS button state. CoreGraphics can
+// block when parallel test threads query it without a native application loop.
+#[cfg(all(test, target_os = "macos"))]
+pub fn sample(ctx: &egui::Context, playing: bool) -> MouseSample {
+    ctx.input(|i| MouseSample { dx:0.0, dy:0.0,
+        fire:playing && i.pointer.primary_down(), jet:playing && i.pointer.secondary_down() })
+}
+
+#[cfg(not(all(test, target_os = "macos")))]
 pub fn sample(ctx: &egui::Context, playing: bool) -> MouseSample {
     #[cfg(target_os = "macos")]
     {
@@ -62,7 +71,7 @@ fn web_delta() -> egui::Vec2 {
     wasm_take_delta()
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(test)))]
 fn mac_delta() -> (f32, f32) {
     let mut dx = 0i32;
     let mut dy = 0i32;
@@ -72,17 +81,17 @@ fn mac_delta() -> (f32, f32) {
     (dx as f32, dy as f32)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(test)))]
 fn mac_left_down() -> bool {
     unsafe { CGEventSourceButtonState(1, 0) }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(test)))]
 fn mac_right_down() -> bool {
     unsafe { CGEventSourceButtonState(1, 1) }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(test)))]
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
     fn CGGetLastMouseDelta(dx: *mut i32, dy: *mut i32);

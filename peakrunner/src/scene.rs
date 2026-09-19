@@ -14,6 +14,10 @@ const WORLD_SIZE: u64 = 304;
 const SKY_SIZE: u64 = 96;
 const EMIT_SIZE: u64 = 80;
 
+fn precipitation_count(map: MapId, available: usize) -> usize {
+    match map { MapId::Valley => available, MapId::Raindance => 0 }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct WorldUniform {
@@ -60,6 +64,7 @@ struct Mesh {
 }
 
 pub struct SceneGpu {
+    imported: Option<crate::map_scene::MapGpu>,
     world_pipe: wgpu::RenderPipeline,
     emit_pipe: wgpu::RenderPipeline,
     sky_pipe: wgpu::RenderPipeline,
@@ -68,7 +73,7 @@ pub struct SceneGpu {
     sky_layout: wgpu::BindGroupLayout,
     emit_layout: wgpu::BindGroupLayout,
     blit_layout: wgpu::BindGroupLayout,
-    meshes: [Mesh; 5],
+    meshes: [Mesh; 6],
     sampler: wgpu::Sampler,
     uniform: wgpu::Buffer,
     uniform_slots: u32,
@@ -141,6 +146,7 @@ impl SceneGpu {
             upload(device, "sphere", &sphere_mesh(10, 16)),
             upload(device, "disc", &disc_mesh()),
             upload(device, "beveled housing", &bevel_mesh()),
+            upload(device, "chamfered armor", &armor_mesh()),
         ];
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("scene"),
@@ -176,6 +182,7 @@ impl SceneGpu {
         }
 
         Self {
+            imported: crate::map_scene::MapGpu::new(device),
             world_pipe,
             emit_pipe,
             sky_pipe,
@@ -219,6 +226,9 @@ impl SceneGpu {
         frame: &DrawFrame,
     ) {
         self.upload_grass(queue);
+        if frame.map == MapId::Raindance {
+            if let Some(map)=&mut self.imported {map.update(queue,frame);}
+        }
         if self.terrain_map != frame.map {
             self.meshes[0] = upload(device, "terrain", &terrain::sample_mesh_of(frame.map));
             self.terrain_map = frame.map;
@@ -240,9 +250,11 @@ impl SceneGpu {
         let mut snow_draws = Vec::with_capacity(self.snow.len());
         let eye = frame.eye;
         let dt = frame.dt;
-        for s in &mut self.snow {
-            if frame.map == MapId::Raindance { break; }
-            s.y -= 4.2 * dt;
+        let precipitation_count = precipitation_count(frame.map, self.snow.len());
+        // Raindance precipitation is off, for both gameplay and the flyby.
+        // Do not reinterpret the sparse Valley snow pool as patchy rain.
+        for s in self.snow.iter_mut().take(precipitation_count) {
+            s.y -= 4.2*dt;
             s.x += 0.4 * dt;
             let w = eye + *s;
             if w.y < terrain::height_on(frame.map, w.x, w.z) + 0.4 || (w - eye).length() > 24.0 {
@@ -346,6 +358,10 @@ impl SceneGpu {
         pass.set_pipeline(&self.sky_pipe);
         pass.set_bind_group(1, &self.sky_bg, &[sky_off]);
         pass.draw(0..3, 0..1);
+
+        if frame.map == MapId::Raindance {
+            if let Some(map)=&self.imported {map.draw(&mut pass);}
+        }
 
         pass.set_pipeline(&self.world_pipe);
         let lit_count = frame.lit.len();
@@ -1059,6 +1075,37 @@ fn bevel_mesh() -> (Vec<f32>, Vec<u16>) {
     (vertices, indices)
 }
 
+/// Shared original armor primitive: inset end caps and bevels on all axes.
+/// Flat face normals keep the low-poly silhouette crisp without block edges.
+fn armor_mesh() -> (Vec<f32>, Vec<u16>) {
+    let outline=[(-0.32,-0.5),(0.32,-0.5),(0.5,-0.32),(0.5,0.32),
+        (0.32,0.5),(-0.32,0.5),(-0.5,0.32),(-0.5,-0.32)];
+    let rings=[(-0.5,0.76),(-0.32,1.0),(0.32,1.0),(0.5,0.76)];
+    let mut vertices=Vec::new(); let mut indices=Vec::new();
+    let mut face=|points:&[Vec3]| {
+        let n=(points[1]-points[0]).cross(points[2]-points[0]).normalize();
+        let base=(vertices.len()/6) as u16;
+        for p in points {vertices.extend_from_slice(&[p.x,p.y,p.z,n.x,n.y,n.z]);}
+        for i in 1..points.len()-1 {indices.extend_from_slice(&[base,base+i as u16,base+i as u16+1]);}
+    };
+    for pair in rings.windows(2) {
+        for i in 0..8 {
+            let (x,y)=outline[i]; let (u,v)=outline[(i+1)%8];
+            let (z,a)=pair[0]; let (zz,b)=pair[1];
+            face(&[Vec3::new(x*a,y*a,z),Vec3::new(u*a,v*a,z),
+                Vec3::new(u*b,v*b,zz),Vec3::new(x*b,y*b,zz)]);
+        }
+    }
+    for sign in [-1.,1.] {
+        let points:Vec<Vec3>=(0..8).map(|i| {
+            let (x,y)=outline[if sign<0. {7-i} else {i}];
+            Vec3::new(x*0.76,y*0.76,sign*0.5)
+        }).collect();
+        face(&points);
+    }
+    (vertices,indices)
+}
+
 fn disc_mesh() -> (Vec<f32>, Vec<u16>) {
     let n = 24u16;
     let mut v = vec![0.0, 0.5, 0.0, 0.0, 1.0, 0.0];
@@ -1171,6 +1218,13 @@ const _: () = assert!(std::mem::size_of::<EmitUniform>() == EMIT_SIZE as usize);
 
 #[cfg(test)]
 mod shader_check {
+    #[test]
+    fn raindance_rain_is_off_and_valley_snow_is_preserved() {
+        for count in [0, 128, 1024] {
+            assert_eq!(super::precipitation_count(super::MapId::Raindance, count), 0);
+            assert_eq!(super::precipitation_count(super::MapId::Valley, count), count);
+        }
+    }
     /// Real GPU render of the production scene, without opening a game window.
     /// Run with --ignored --nocapture; captures are for visual review, not golden tests.
     #[test]
@@ -1190,11 +1244,29 @@ mod shader_check {
             world.players.truncate(1);
             world.players[0].yaw = std::f32::consts::PI;
             world.players[0].pitch = -0.12;
+            if let Ok(camera)=std::env::var("PEAKRUNNER_CAPTURE_CAMERA") {
+                let v:Vec<f32>=camera.split(',').map(|s|s.parse().expect("camera number")).collect();
+                assert_eq!(v.len(),5);
+                world.players[0].pos=Vec3::new(v[0],v[1],v[2]);
+                world.players[0].yaw=v[3];world.players[0].pitch=v[4];
+            }
             let label = std::env::var("PEAKRUNNER_CAPTURE_LABEL").unwrap_or_else(|_| "current".into());
             std::fs::create_dir_all("screenshots").unwrap();
             for (name, width, height, cooldown) in [
+                ("characters", 1280u32, 800u32, 0.0),
+                ("characters-flight", 1280, 800, 0.0),
                 ("desktop", 1280u32, 800u32, 0.0),
                 ("portrait", 390, 844, 0.0),
+                ("chat", 1280, 800, 0.0),
+                ("chat-portrait", 390, 844, 0.0),
+                ("menu-start", 1280, 800, 0.0),
+                ("menu-quarter", 1280, 800, 0.0),
+                ("menu-half", 1280, 800, 0.0),
+                ("plasma", 1280, 800, 0.0),
+                ("plasma-portrait", 390, 844, 0.0),
+                ("disc-blast", 1280, 800, 0.0),
+                ("grenade-blast", 1280, 800, 0.0),
+                ("grenade-blast-portrait", 390, 844, 0.0),
                 ("firing", 1280, 800, 0.98),
                 ("reload-open", 1280, 800, 0.72),
                 ("reload-feed", 1280, 800, 0.25),
@@ -1207,8 +1279,28 @@ mod shader_check {
                 ("chaingun-shot", 1280, 800, 0.0),
                 ("grenade-shot", 1280, 800, 0.0),
             ] {
+                if std::env::var_os("QA_CHARACTERS").is_some() && !name.starts_with("characters") { continue; }
+                world.players.truncate(1);
+                world.state=crate::sim::MatchState::Playing;
+                if name.starts_with("menu") {
+                    world.state=crate::sim::MatchState::Flyby;
+                    world.flyby=if name.ends_with("half") {17.45} else if name.ends_with("quarter") {8.73} else {0.};
+                }
                 world.players[0].cooldown = cooldown;
                 world.discs.clear();
+                world.explosions.clear();
+                if name.contains("blast") {
+                    let kind=if name.starts_with("grenade") {2} else {0};
+                    let profile=peakrunner_core::combat::player_weapon_blast(kind).unwrap();
+                    let (eye,dir,_)=world.camera();
+                    world.explosions.push(crate::sim::Explosion {pos:eye+dir*22.-Vec3::Y*5.,
+                        age:0.16,kind,max_r:profile.radius});
+                }
+                if name.starts_with("plasma") {
+                    let (eye,dir,_)=world.camera();
+                    world.discs.push(crate::sim::Disc {pos:eye+dir*7.,vel:-dir*80.,
+                        owner:usize::MAX,team:crate::sim::Team::Ember,kind:3,life:2.9,spin:0.});
+                }
                 world.players[0].weapon = if name.starts_with("chaingun") { 1 }
                     else if name.starts_with("grenade") { 2 } else { 0 };
                 world.input.weapon = world.players[0].weapon;
@@ -1225,9 +1317,52 @@ mod shader_check {
                     }
                     assert!(!world.discs.is_empty(), "capture a real fired round");
                 }
-                let frame = crate::drawlist::build_frame(&world, width as f32 / height as f32, 0.0);
+                if name.starts_with("characters") {
+                    let origin=world.players[0].pos;
+                    for i in 0..3 {
+                        let mut p=world.players[0].clone();
+                        p.pos=origin+Vec3::new((i as f32-1.)*1.7,0.,0.);
+                        p.yaw=[0.35,-0.6,2.8][i];
+                        p.team=if i==1 {crate::sim::Team::Glacier} else {crate::sim::Team::Ember};
+                        p.jetting=name.ends_with("flight"); p.skiing=i==1;
+                        p.on_ground=!p.jetting;
+                        world.players.push(p);
+                    }
+                }
+                let mut frame = crate::drawlist::build_frame(&world, width as f32 / height as f32, 0.0);
+                if name.starts_with("characters") {
+                    let target=world.players[0].pos+Vec3::Y*0.95;
+                    frame.eye=target+Vec3::new(0.,0.5,-5.3);
+                    frame.view=Mat4::look_at_rh(frame.eye,target,Vec3::Y);
+                    frame.proj=crate::drawlist::clip_correct(Mat4::perspective_rh(49f32.to_radians(),width as f32/height as f32,0.1,2500.));
+                    frame.inv_vp=(frame.proj*frame.view).inverse();
+                    frame.viewmodel.clear();
+                }
                 let mut encoder = device.create_command_encoder(&Default::default());
                 scene.render(&device, &queue, &mut encoder, width, height, &frame);
+                if name.starts_with("chat") {
+                    let ctx=egui::Context::default();
+                    let mut app=crate::app::PeakRunnerApp::comms_fixture();
+                    let mut renderer=eframe::egui_wgpu::Renderer::new(&device,wgpu::TextureFormat::Rgba8Unorm,Default::default());
+                    // Areas need a sizing pass before their first visible frame.
+                    for _ in 0..2 {
+                        let mut output=ctx.run_ui(egui::RawInput { screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(width as f32,height as f32))), ..Default::default() }, |ui|app.capture_comms(ui.ctx()));
+                        for (id,deltas) in &output.textures_delta.set {for delta in deltas {renderer.update_texture(&device,&queue,*id,delta);}}
+                        output.textures_delta.clear();
+                        let jobs=ctx.tessellate(output.shapes,1.0);
+                        let screen=eframe::egui_wgpu::ScreenDescriptor {size_in_pixels:[width,height],pixels_per_point:1.0};
+                        let commands=renderer.update_buffers(&device,&queue,&mut encoder,&jobs,&screen);
+                        assert!(commands.is_empty());
+                        let view=scene.color.create_view(&Default::default());
+                        let pass=encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label:Some("chat capture"),color_attachments:&[Some(wgpu::RenderPassColorAttachment {
+                                view:&view,resolve_target:None,depth_slice:None,
+                                ops:wgpu::Operations {load:wgpu::LoadOp::Load,store:wgpu::StoreOp::Store}
+                            })],depth_stencil_attachment:None,timestamp_writes:None,occlusion_query_set:None,multiview_mask:None,
+                        });
+                        renderer.render(&mut pass.forget_lifetime(),&jobs,&screen);
+                    }
+                }
                 let stride = (width * 4).div_ceil(256) * 256;
                 let buffer = device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("capture"), size: (stride * height) as u64,
@@ -1262,13 +1397,26 @@ mod shader_check {
 
     #[test]
     fn shaders_validate() {
-        let module = naga::front::wgsl::parse_str(include_str!("shaders.wgsl"))
+        for source in [include_str!("shaders.wgsl"), include_str!("map.wgsl")] {
+        let module = naga::front::wgsl::parse_str(source)
             .expect("wgsl parse");
         let mut validator = naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),
         );
         validator.validate(&module).expect("wgsl validate");
+        }
+    }
+
+    #[test]
+    fn armor_mesh_has_outward_unit_normals_and_valid_indices() {
+        let (vertices,indices)=super::armor_mesh();
+        assert!(indices.iter().all(|&i|(i as usize)<vertices.len()/6));
+        for v in vertices.chunks_exact(6) {
+            let p=glam::Vec3::from_slice(&v[..3]);
+            let n=glam::Vec3::from_slice(&v[3..]);
+            assert!((n.length()-1.).abs()<0.001 && p.dot(n)>0.);
+        }
     }
 
     #[test]

@@ -1,6 +1,5 @@
 //! Client-only encrypted UDP session.
 use std::{collections::VecDeque, io, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}, mpsc}, time::{Duration, Instant}};
-use peakrunner_core::sim::Command;
 use quinn::Connection;
 use tokio::time::timeout;
 use crate::{client::Lobby, proto::{ClientMsg, ServerMsg}};
@@ -22,14 +21,14 @@ fn apply(lobby: &Arc<Mutex<Lobby>>, message: ServerMsg) -> io::Result<()> {
     }
     Ok(())
 }
-pub(crate) async fn run_client(address: &str, hello: ClientMsg, outbound: mpsc::Receiver<Command>,
+pub(crate) async fn run_client(address: &str, hello: ClientMsg, outbound: mpsc::Receiver<ClientMsg>,
     lobby: Arc<Mutex<Lobby>>, stop: Arc<AtomicBool>) -> io::Result<()> {
     let (endpoint, conn) = connect_endpoint(address).await?;
     let result = client_connection(&conn, hello, outbound, lobby, stop).await;
     conn.close(0u32.into(), b"client left"); endpoint.wait_idle().await;
     result
 }
-async fn client_connection(conn: &Connection, hello: ClientMsg, outbound: mpsc::Receiver<Command>,
+async fn client_connection(conn: &Connection, hello: ClientMsg, outbound: mpsc::Receiver<ClientMsg>,
     lobby: Arc<Mutex<Lobby>>, stop: Arc<AtomicBool>) -> io::Result<()> {
     let (mut send, mut recv) = conn.open_bi().await.map_err(io::Error::other)?;
     timeout(Duration::from_secs(3), send_control(&mut send, &hello)).await.map_err(io::Error::other)??;
@@ -54,10 +53,11 @@ async fn client_connection(conn: &Connection, hello: ClientMsg, outbound: mpsc::
                 if last_snapshot.elapsed() > Duration::from_secs(5) { return Err(invalid("server snapshots timed out")); }
                 for _ in 0..8 {
                     match outbound.try_recv() {
-                        Ok(command) => {
+                        Ok(ClientMsg::Input { command }) => {
                             history.push_back(command); while history.len() > 3 { history.pop_front(); }
                             conn.send_datagram(inputs(&history).into()).map_err(io::Error::other)?;
                         }
+                        Ok(message) => timeout(Duration::from_secs(1), send_control(&mut send, &message)).await.map_err(io::Error::other)??,
                         Err(mpsc::TryRecvError::Empty) => break,
                         Err(mpsc::TryRecvError::Disconnected) => return Ok(()),
                     }

@@ -1,8 +1,10 @@
 // Administrator-side only. The broad token is never sent to the VPS.
 import fs from 'node:fs';
 import {spawnSync} from 'node:child_process';
-const host = 'root@198.12.80.145';
-const ssh = (command, input) => spawnSync('ssh', ['-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',host,command], {input, encoding:'utf8', timeout:180000});
+const host = 'peakrunner-admin@198.12.80.145';
+// Fixed administrator-owned commands only; quote as one remote shell argument.
+const quote = s => "'" + s.replaceAll("'", "'\\''") + "'";
+const ssh = (command, input) => spawnSync('ssh', ['-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',host,'sudo -n /bin/sh -c '+quote(command)], {input, encoding:'utf8', timeout:180000});
 async function main() {
   if (!process.env.CF_API_TOKEN_FILE) throw Error('Set CF_API_TOKEN_FILE.');
   const source = fs.readFileSync(process.env.CF_API_TOKEN_FILE, 'utf8').trim();

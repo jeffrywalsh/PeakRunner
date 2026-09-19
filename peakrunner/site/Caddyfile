@@ -1,0 +1,34 @@
+{
+    admin off
+    auto_https off
+}
+:8080 {
+    root * /srv
+    encode zstd gzip
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy strict-origin-when-cross-origin
+        X-Frame-Options DENY
+        Content-Security-Policy "default-src 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'"
+    }
+    handle_path /api/* {
+        reverse_proxy directory:8080
+        header Cache-Control no-store
+    }
+    handle /updates/v1/blobs/* {
+        header Cache-Control "public, max-age=31536000, immutable"
+        file_server
+    }
+    handle /updates/* {
+        header Cache-Control no-store
+        file_server
+    }
+    handle /downloads/* {
+        header Cache-Control "public, max-age=86400"
+        file_server
+    }
+    handle {
+        header Cache-Control no-cache
+        file_server
+    }
+}

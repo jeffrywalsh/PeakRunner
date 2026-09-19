@@ -129,7 +129,7 @@ pub fn pillars() -> Vec<Pillar> {
 }
 
 /// Which ground the match is on. Valley is the small rift. Raindance is the
-/// Tribes 2 terrain: 256 samples, 8 m apart, heights in meters as raw/32.
+/// Original highland terrain: 256 samples, 8 m apart, heights as raw/32.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum MapId {
     Valley,
@@ -165,7 +165,8 @@ const RAIN_STEP: f32 = 8.0;
 /// 255 steps of 8 m. The Tribes file stores 256 corners.
 const RAIN_SIZE: f32 = 2040.0;
 
-static RAIN: &[u8] = include_bytes!("../../../assets/raindance.h16");
+// Authored procedural heightfield; no extracted source-game data in the build.
+static RAIN: &[u8] = include_bytes!("../../../assets/maps/raindance/height.bin");
 
 pub fn maps() -> [MapInfo; 2] {
     [
@@ -181,12 +182,11 @@ pub fn maps() -> [MapInfo; 2] {
         MapInfo {
             id: MapId::Raindance,
             name: "Raindance",
-            note: "2 km. Ravine between the bases, from the Tribes 2 terrain.",
+            note: "2 km. Original rainy highlands, ravine crossing and powered bases.",
             size: RAIN_SIZE,
-            // Flag stands, shifted from Tribes coordinates (origin -1024,-1024).
-            // Ember is the low-Z stand so the existing facing still looks across.
-            ember: Vec3::new(1083.51, 0.0, 469.52),
-            glacier: Vec3::new(741.18, 0.0, 1248.84),
+            // Original base centers; map packs supply exact flag deck positions.
+            ember: Vec3::new(1160.0, 0.0, 480.0),
+            glacier: Vec3::new(800.0, 0.0, 1400.0),
             res: RAIN_N,
         },
     ]
@@ -220,7 +220,12 @@ pub fn surface_on(id: MapId, x: f32, z: f32) -> (f32, Vec3) {
     let a = source_height(id, x0, z0);
     let b = source_height(id, x0 + cell, z0);
     let c = source_height(id, x0, z0 + cell);
-    let (y, dx, dz) = if tx + tz <= 1.0 {
+    let original_diagonal = crate::map_pack::on(id).is_some() && ((ix ^ iz) & 1) == 0;
+    let (y, dx, dz) = if original_diagonal {
+        let d = source_height(id, x0 + cell, z0 + cell);
+        if tx < tz { (a+(d-c)*tx+(c-a)*tz, d-c, c-a) }
+        else { (a+(b-a)*tx+(d-b)*tz, b-a, d-b) }
+    } else if tx + tz <= 1.0 {
         (a + (b - a) * tx + (c - a) * tz, b - a, c - a)
     } else {
         let d = source_height(id, x0 + cell, z0 + cell);
@@ -240,7 +245,7 @@ pub fn segment_hit(id: MapId, start: Vec3, end: Vec3, clearance: f32) -> Option<
     let spec = info(id);
     let cell = spec.size / (spec.res - 1) as f32;
     let mut cuts = vec![0.0, 1.0];
-    for (a, b) in [(start.x, end.x), (start.z, end.z), (start.x + start.z, end.x + end.z)] {
+    for (a, b) in [(start.x, end.x), (start.z, end.z), (start.x + start.z, end.x + end.z), (start.x-start.z,end.x-end.z)] {
         if (b - a).abs() < 1e-6 { continue; }
         let lo = (a.min(b) / cell).floor() as i32 + 1;
         let hi = (a.max(b) / cell).ceil() as i32;
@@ -255,17 +260,17 @@ pub fn segment_hit(id: MapId, start: Vec3, end: Vec3, clearance: f32) -> Option<
         let p = start.lerp(end, t);
         p.y - height_on(id, p.x, p.z) - clearance
     };
-    let mut previous_t = 0.0;
-    let mut previous_gap = gap(0.0);
-    if previous_gap < -0.0001 { return Some(0.0); }
-    for t in cuts.into_iter().skip(1) {
+    for window in cuts.windows(2) {
+        let previous_t=window[0];let t=window[1];
+        let middle=start.lerp(end,(previous_t+t)*0.5);
+        if crate::map_pack::on(id).is_some_and(|p|p.hole(middle.x,middle.z)) {continue;}
+        let previous_gap=gap(previous_t);
+        if previous_gap < -0.0001 {return Some(previous_t);}
         let next_gap = gap(t);
         if next_gap < -0.0001 || (next_gap <= 0.0 && previous_gap > 0.0001) {
             let fraction = (previous_gap / (previous_gap - next_gap)).clamp(0.0, 1.0);
             return Some(previous_t + (t - previous_t) * fraction);
         }
-        previous_t = t;
-        previous_gap = next_gap;
     }
     None
 }
@@ -280,11 +285,29 @@ pub fn normal_on(id: MapId, x: f32, z: f32) -> Vec3 {
 }
 
 pub fn spawn_on(id: MapId, ember: bool) -> Vec3 {
+    if let Some(pack)=crate::map_pack::on(id) {
+        let center=Vec3::from_array(pack.manifest.spawns[usize::from(!ember)]);
+        // A SpawnSphere is a search region, not a spawn point. Its center can
+        // be inside a wall. Pick a clear outdoor candidate within its 80m radius.
+        for radius in [24.0,40.0,60.0,76.0] {
+            for i in 0..16 {
+                let angle=i as f32*std::f32::consts::TAU/16.0;
+                let mut p=center+Vec3::new(angle.cos()*radius,0.0,angle.sin()*radius);
+                if pack.hole(p.x,p.z) {continue;}
+                p.y=height_on(id,p.x,p.z)+1.2;
+                if pack.sweep(p-Vec3::Y*0.3,p+Vec3::Y*100.0,PLAYER_RADIUS).is_none()
+                    && [Vec3::X,-Vec3::X,Vec3::Z,-Vec3::Z].into_iter().all(|axis|
+                        pack.sweep(p,p+axis*5.0,PLAYER_RADIUS).is_none()) {return p;}
+            }
+        }
+        panic!("Imported map has no clear spawn inside its source spawn sphere");
+    }
     let home = if ember { info(id).ember } else { info(id).glacier };
     Vec3::new(home.x, height_on(id, home.x, home.z) + 1.2, home.z)
 }
 
 pub fn pillars_on(id: MapId) -> Vec<Pillar> {
+    if crate::map_pack::on(id).is_some() {return Vec::new();}
     if id == MapId::Valley {
         return pillars();
     }
@@ -312,12 +335,46 @@ pub fn sample_mesh_of(id: MapId) -> (Vec<f32>, Vec<u16>) {
     let mut idx = Vec::with_capacity((res - 1) * (res - 1) * 6);
     for iz in 0..res - 1 {
         for ix in 0..res - 1 {
+            if crate::map_pack::on(id).is_some_and(|p|p.hole(ix as f32*8.0,iz as f32*8.0)) {continue;}
             let i = (iz * res + ix) as u16;
             let r = res as u16;
-            idx.extend_from_slice(&[i, i + r, i + 1, i + 1, i + r, i + r + 1]);
+            if crate::map_pack::on(id).is_some() && ((ix ^ iz)&1)==0 {
+                idx.extend_from_slice(&[i,i+r,i+r+1,i,i+r+1,i+1]);
+            } else {idx.extend_from_slice(&[i, i + r, i + 1, i + 1, i + r, i + r + 1]);}
         }
     }
     (verts, idx)
+}
+
+/// Cached safe altitude for the menu orbit, above terrain and solid scenery.
+pub fn overview_height(id:MapId)->f32 {
+    // A level orbit above every rendered terrain vertex and solid structure:
+    // no dives through hills and no abrupt vertical corrections over roofs.
+    // Map packs are immutable for the process lifetime, so cache the scan.
+    static VALLEY:std::sync::OnceLock<f32>=std::sync::OnceLock::new();
+    static RAIN:std::sync::OnceLock<f32>=std::sync::OnceLock::new();
+    let cache=match id {MapId::Valley=>&VALLEY,MapId::Raindance=>&RAIN};
+    *cache.get_or_init(|| {
+        let map=info(id);let step=map.size/(map.res-1) as f32;
+        let mut top=f32::NEG_INFINITY;
+        for z in 0..map.res {for x in 0..map.res {
+            top=top.max(height_on(id,x as f32*step,z as f32*step));
+        }}
+        if let Some(pack)=crate::map_pack::on(id) {top=top.max(pack.highest_solid());}
+        top+28.
+    })
+}
+
+/// Highest walkable support below the player's feet, never an overhead roof.
+pub fn support_on(id:MapId,pos:Vec3)->(f32,Vec3) {
+    let mut ground=surface_on(id,pos.x,pos.z);
+    if let Some(pack)=crate::map_pack::on(id) {
+        if pack.hole(pos.x,pos.z) {ground=(-1000.0,Vec3::Y);}
+        if let Some(floor)=pack.floor(pos-Vec3::Y*PLAYER_RADIUS) {
+            if floor.0>ground.0 {ground=floor;}
+        }
+    }
+    ground
 }
 
 fn height_rain(x: f32, z: f32) -> f32 {
@@ -332,7 +389,8 @@ fn height_rain(x: f32, z: f32) -> f32 {
     let tz = fz - z0 as f32;
     let h = |ix: usize, iz: usize| {
         let o = (iz * n + ix) * 2;
-        u16::from_le_bytes([RAIN[o], RAIN[o + 1]]) as f32 / 32.0
+        let data=crate::map_pack::on(MapId::Raindance).map_or(RAIN,|p|p.heights.as_slice());
+        u16::from_le_bytes([data[o], data[o + 1]]) as f32 / 32.0
     };
     let a = h(x0, z0) + (h(x1, z0) - h(x0, z0)) * tx;
     let b = h(x0, z1) + (h(x1, z1) - h(x0, z1)) * tx;

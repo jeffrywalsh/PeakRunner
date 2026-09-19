@@ -1,0 +1,16 @@
+Raindance — 0.1.0-raindance.20260919.4
+
+Original player armor now has shaped helmets, glowing visors, articulated limbs,
+boots and twin jetpack housings. Team-colored jet glow is preserved. Distant
+characters use simpler geometry. Movement and hitboxes are unchanged.
+Find match and secondary buttons remain readable when Windows uses light mode.
+
+Walking keeps a steady field of view; the speed effect builds smoothly while skiing.
+Flag captures play a short, team-specific musical cue.
+Plasma turrets lead moving targets and check their predicted firing path.
+
+This launcher verifies updates, downloads changed files, and supports repair and
+rollback. Map files are separate from the executable. Updates pause while playing.
+
+Compatible with the existing .20260919.3 Springdale Central server; this update
+does not change the gameplay protocol or map pack.

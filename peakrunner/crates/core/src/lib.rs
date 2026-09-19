@@ -2,3 +2,8 @@
 pub mod sim;
 pub mod terrain;
 pub mod grass;
+pub mod map_pack;
+pub mod equipment;
+pub mod combat;
+pub mod feed;
+pub mod names;

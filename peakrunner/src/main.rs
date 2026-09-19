@@ -6,11 +6,19 @@
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
     env_logger::init();
+    // Hold a separate launcher-session lock even if the launcher itself exits.
+    // Managed installs are immutable; no update may race a running managed game.
+    let _launcher_lock = if let Some(path) = std::env::var_os("PEAKRUNNER_LAUNCHER_LOCK") {
+        let file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)
+            .map_err(|e| eframe::Error::AppCreation(Box::new(e)))?;
+        file.try_lock().map_err(|e| eframe::Error::AppCreation(Box::new(std::io::Error::other(e.to_string()))))?;
+        Some(file)
+    } else { None };
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([960.0, 600.0])
-            .with_title("PeakRunner"),
+            .with_title(if std::env::var_os("PEAKRUNNER_MAP_PACK").is_some() {"PeakRunner — Raindance playtest"} else {"PeakRunner"}),
         renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };

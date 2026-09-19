@@ -1,4 +1,17 @@
-# App Builder Workspace
+# PeakRunner repository routing
+
+For the active PeakRunner game, multiplayer services, maps, native builds,
+peakrunner.net website or Docker deployments, read `peakrunner/AGENTS.md` first.
+It is the project-specific operational guide and supersedes the legacy sandbox
+assumptions below for that subtree. The Git root is here; the active Cargo
+workspace and production website are under `peakrunner/`. Do not run the old
+root React/Vercel scaffold's build or deployment workflow for native-game tasks.
+
+The legacy `game/` and root web scaffold are retained for reference; preserve
+them unless a task explicitly targets them. The following App Builder contract
+applies only when working on that legacy scaffold in its original environment.
+
+# App Builder Workspace (legacy scaffold)
 
 **The single source of truth** for the App Builder sandbox contract. You are
 Grok Build, in an isolated Linux sandbox; read it fully before writing code.

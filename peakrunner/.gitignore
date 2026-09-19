@@ -1,3 +1,12 @@
 # Local Cloudflare credentials must never be committed.
 /cf-key
 /cf-key.*
+
+# Local source-game extraction and analysis; never publish original game assets.
+/local-assets/
+/PeakRunner-Raindance.app/
+/PeakRunner-Original.app/
+/screenshots/raindance-*.png
+__pycache__/
+.DS_Store
+/screenshots/tribes1-reference.jpg
