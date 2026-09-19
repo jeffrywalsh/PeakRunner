@@ -258,6 +258,7 @@ pub async fn serve(endpoint: Endpoint, backend: SocketAddr, status: Arc<Mutex<cr
     }
 }
 async fn server_connection(conn: &Connection, backend: SocketAddr, status: Arc<Mutex<crate::public::MatchStatus>>) -> io::Result<()> {
+    let empty_datagram_space = conn.datagram_send_buffer_space();
     let (mut send, mut recv) = timeout(Duration::from_secs(3), conn.accept_bi()).await.map_err(io::Error::other)?.map_err(io::Error::other)?;
     let hello = timeout(Duration::from_secs(3), read_control::<ClientMsg>(&mut recv)).await.map_err(io::Error::other)??;
     if matches!(hello, ClientMsg::Status) {
@@ -293,6 +294,11 @@ async fn server_connection(conn: &Connection, backend: SocketAddr, status: Arc<M
                 for message in wire.receive::<ServerMsg>()? {
                     match message {
                         ServerMsg::Snapshot { state } => {
+                            // Finish the one pending snapshot instead of mixing
+                            // fragments from multiple ticks or queuing old frames.
+                            // Under congestion, skip intermediate snapshots; once
+                            // drained, send the newest state on the next 20Hz tick.
+                            if conn.datagram_send_buffer_space() < empty_datagram_space { continue; }
                             for packet in chunks(&state)? { conn.send_datagram(packet.into()).map_err(io::Error::other)?; }
                         }
                         control => timeout(Duration::from_secs(1), send_control(&mut send, &control)).await.map_err(io::Error::other)??,
