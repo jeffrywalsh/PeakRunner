@@ -23,7 +23,9 @@ exist. The QUIC gateway uses address validation, caps connections (16 global,
 8 per IP), admission bursts (12 per IP, replenishing one per three seconds),
 input packet size (256 bytes), input rate, write duration and idle duration.
 Inputs redundantly include three numbered frames. Snapshots are independently
-replaceable, bounded to 64 fragments, with at most four incomplete assemblies.
+replaceable and LZ4-compressed, bounded to 12 fragments and 64 KiB after
+decompression, with at most four incomplete assemblies. Transmit queues are
+16 KiB for snapshots and 1 KiB for inputs to avoid seconds of stale buffered state.
 Old, duplicate and incomplete snapshots never block a newer complete snapshot.
 Zero-RTT is disabled. The old WSS implementation is not the public gameplay path.
 
@@ -62,7 +64,9 @@ connection, and queue limits reject abusive peers.
 
 Sockets are nonblocking with incremental framing; partial lines survive polls.
 There are at most 16 connected/pending peers, 8 player slots, 12 queued inputs
-per peer, and 4 outgoing frames per socket. Handshakes expire after 3 seconds;
+per peer (newest sampled each tick), and 4 outgoing frames per socket. A 32-message
+burst allowance absorbs jitter, while a sustained 120/s limit rejects floods.
+Handshakes expire after 3 seconds;
 missing inputs become neutral after 250 ms and disconnect after 5 seconds.
 Snapshots cannot exceed 256 KiB. Slow consumers disconnect instead of building
 unbounded queues. Directory listings are bounded and require an owner token

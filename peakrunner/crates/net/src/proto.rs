@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use peakrunner_core::sim::{Command, Snapshot};
 
-pub const PROTOCOL: &str = "peakrunner-3";
+pub const PROTOCOL: &str = "peakrunner-4";
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ServerAdvert {
     pub id: String, pub name: String, pub host: String, pub port: u16,

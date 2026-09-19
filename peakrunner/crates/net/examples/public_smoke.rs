@@ -45,7 +45,7 @@ fn main() {
         if next > Instant::now() { std::thread::sleep(next - Instant::now()); }
     }
     assert!(playing, "match never started");
-    assert!(max_ack_gap < 120, "input acknowledgement lag exceeded two seconds");
-    assert!(max_snapshot_gap < Duration::from_secs(2), "snapshot stalls exceeded two seconds");
+    assert!(max_ack_gap < 120, "input acknowledgement lag exceeded two seconds: {max_ack_gap} ticks; snapshots={delivered:?}; max snapshot gap={max_snapshot_gap:?}");
+    assert!(max_snapshot_gap < Duration::from_secs(2), "snapshot stalls exceeded two seconds: {max_snapshot_gap:?}");
     println!("PASS: {count} clients, {seconds}s, shared active match, all weapons/movement, max ack gap {max_ack_gap} ticks, max snapshot gap {}ms, snapshots per client {:?}", max_snapshot_gap.as_millis(), delivered);
 }

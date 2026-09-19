@@ -8,10 +8,10 @@ use quinn::{Connection, Endpoint};
 use tokio::{sync::Semaphore, time::timeout};
 use crate::{client::Lobby, proto::{ClientMsg, ServerMsg}, wire::{Framed, invalid}, GameHost};
 
-const ALPN: &[u8] = b"peakrunner/3";
+const ALPN: &[u8] = b"peakrunner/4";
 const CHUNK: usize = 1050;
-const MAX_PARTS: usize = 64;
-const MAX_SNAPSHOT: usize = CHUNK * MAX_PARTS;
+const MAX_PARTS: usize = 12;
+const MAX_SNAPSHOT: usize = 64 * 1024;
 
 #[derive(Serialize, Deserialize)]
 struct Inputs { count: u8, frames: [Command; 3] }
@@ -33,6 +33,8 @@ fn decode_inputs(bytes: &[u8]) -> io::Result<Vec<Command>> {
 fn chunks(snapshot: &Snapshot) -> io::Result<Vec<Vec<u8>>> {
     let bytes = postcard::to_allocvec(snapshot).map_err(io::Error::other)?;
     if bytes.len() > MAX_SNAPSHOT { return Err(invalid("snapshot limit exceeded")); }
+    let bytes = lz4_flex::compress_prepend_size(&bytes);
+    if bytes.len() > CHUNK * MAX_PARTS { return Err(invalid("compressed snapshot limit exceeded")); }
     let count = bytes.len().div_ceil(CHUNK);
     Ok(bytes.chunks(CHUNK).enumerate().map(|(i, chunk)| {
         let mut packet = Vec::with_capacity(chunk.len() + 10);
@@ -61,7 +63,13 @@ impl Reassembly {
         if frame.parts.iter().any(Option::is_none) { return Ok(None); }
         let mut bytes = Vec::new();
         for part in &frame.parts { bytes.extend_from_slice(part.as_ref().unwrap()); }
-        let snapshot: Snapshot = postcard::from_bytes(&bytes).map_err(|_| invalid("invalid snapshot data"))?;
+        if bytes.len() < 4 { return Err(invalid("invalid compressed snapshot")); }
+        let size = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
+        if size == 0 || size > MAX_SNAPSHOT { return Err(invalid("snapshot expansion limit exceeded")); }
+        let mut decoded = vec![0; size];
+        let decoded_len = lz4_flex::decompress_into(&bytes[4..], &mut decoded).map_err(|_| invalid("invalid snapshot compression"))?;
+        if decoded_len != size { return Err(invalid("invalid expanded snapshot length")); }
+        let snapshot: Snapshot = postcard::from_bytes(&decoded).map_err(|_| invalid("invalid snapshot data"))?;
         if snapshot.tick != tick || snapshot.players.len() != MAX_PLAYERS || snapshot.acks.len() != MAX_PLAYERS {
             return Err(invalid("invalid snapshot identity"));
         }
@@ -81,7 +89,7 @@ fn transport() -> quinn::TransportConfig {
     let mut cfg = quinn::TransportConfig::default();
     cfg.max_concurrent_bidi_streams(1u32.into()).max_concurrent_uni_streams(0u32.into())
         .stream_receive_window(8192u32.into()).receive_window(16384u32.into())
-        .datagram_receive_buffer_size(Some(256 * 1024)).datagram_send_buffer_size(128 * 1024)
+        .datagram_receive_buffer_size(Some(256 * 1024)).datagram_send_buffer_size(16 * 1024)
         .max_idle_timeout(Some(Duration::from_secs(10).try_into().unwrap()))
         .keep_alive_interval(Some(Duration::from_secs(1)));
     cfg
@@ -95,7 +103,11 @@ fn client_config(extra_root: Option<rustls::pki_types::CertificateDer<'static>>)
         .map_err(io::Error::other)?.with_root_certificates(roots).with_no_client_auth();
     tls.alpn_protocols = vec![ALPN.to_vec()];
     let crypto = quinn::crypto::rustls::QuicClientConfig::try_from(tls).map_err(io::Error::other)?;
-    let mut cfg = quinn::ClientConfig::new(Arc::new(crypto)); cfg.transport_config(Arc::new(transport())); Ok(cfg)
+    // Inputs are tiny and replaceable. A snapshot-sized transmit queue can hold
+    // seconds of obsolete controls when congestion control reduces the rate.
+    let mut input_transport = transport();
+    input_transport.datagram_send_buffer_size(1024);
+    let mut cfg = quinn::ClientConfig::new(Arc::new(crypto)); cfg.transport_config(Arc::new(input_transport)); Ok(cfg)
 }
 pub fn server_config(cert: &[u8], key: &[u8]) -> io::Result<quinn::ServerConfig> {
     let certs = rustls_pemfile::certs(&mut io::Cursor::new(cert)).collect::<Result<Vec<_>, _>>()?;
@@ -320,6 +332,26 @@ async fn shutdown() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn compressed_snapshot_limits_cover_eight_player_weapon_load() {
+        let mut game = peakrunner_core::sim::Match::new(peakrunner_core::terrain::MapId::Valley);
+        for id in 1..=8 { game.join(id, &format!("Player{id}")).unwrap(); }
+        game.phase = peakrunner_core::sim::Phase::Playing;
+        let mut largest = 0;
+        for seq in 1..=900 {
+            let commands: Vec<_> = (0..8).map(|i| Some(Command { seq, yaw:i as f32,
+                fire:true, jet:true, jump:true, weapon:((seq/150)%3) as u8, ..Default::default() })).collect();
+            game.step(&commands);
+            if seq%3 == 0 {
+                let packets = chunks(&game.snapshot()).unwrap();
+                largest = largest.max(packets.len());
+                assert!(packets.iter().map(Vec::len).sum::<usize>() < 16 * 1024);
+            }
+        }
+        eprintln!("largest compressed eight-player snapshot: {largest} fragments");
+        let mut malicious = 1u64.to_le_bytes().to_vec();
+        malicious.extend_from_slice(&[0,1]); malicious.extend_from_slice(&u32::MAX.to_le_bytes());
+        assert!(Reassembly::default().accept(&malicious).is_err());
+    }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn encrypted_udp_verifies_identity_and_delivers_authoritative_snapshots() {
         let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
