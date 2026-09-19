@@ -74,7 +74,7 @@ mod tests {
     }
     #[test]
     fn identities_are_safe_and_unambiguous() {
-        for id in [crate::terrain::MapId::Valley, crate::terrain::MapId::Raindance] {
+        for id in [crate::terrain::MapId::Valley, crate::terrain::MapId::Raindance, crate::terrain::MapId::Skybreak] {
             assert_eq!(crate::terrain::MapId::parse(id.key()), Some(id));
             assert!(valid_id(id.key()));
         }

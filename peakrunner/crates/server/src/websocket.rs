@@ -97,7 +97,7 @@ async fn status(State(edge): State<Edge>) -> Response {
 pub async fn serve(bind: &str, trusted_proxy: bool) -> io::Result<()> {
     let mut edge = Edge { backend: None, trusted_proxy, slots: Arc::new(Semaphore::new(16)),
         limits: Arc::new(Mutex::new(Limits::default())), status: Arc::new(Mutex::new(None)) };
-        let host = GameHost::bind("127.0.0.1:0", "North Spine", 8, "Valley")?
+        let host = GameHost::bind("127.0.0.1:0", "Springdale Central", 8, "Raindance")?
             .with_password(std::env::var("PEAKRUNNER_MATCH_PASSWORD").unwrap_or_default());
         edge.backend = Some(host.local_addr());
         let handle = host.spawn();

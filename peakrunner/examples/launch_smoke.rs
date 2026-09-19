@@ -60,7 +60,8 @@ fn main()->eframe::Result {
     std::env::var("QA_CAPTURE_PATH").expect("set QA_CAPTURE_PATH to a PNG output path");
     env_logger::init();
     let _local = if std::env::var_os("QA_LOCAL").is_some() {
-        let host = peakrunner_server::GameHost::bind("127.0.0.1:0", "HUD QA", 8, "Raindance").unwrap();
+        let map = std::env::var("QA_MAP").unwrap_or_else(|_| "Raindance".into());
+        let host = peakrunner_server::GameHost::bind("127.0.0.1:0", "HUD QA", 8, &map).unwrap();
         std::env::set_var("PEAKRUNNER_JOIN", host.local_addr().to_string());
         Some(host.spawn())
     } else { None };

@@ -9,7 +9,8 @@ pub const GAME_VERSION: &str = "0.1.0-raindance.20260919.4";
 /// layout. Keep directory discovery independent of gameplay/map assets.
 pub fn game_protocol() -> String {
     match peakrunner_core::map_pack::active() {
-        Some(pack) => format!("{PROTOCOL}:equipment3:blast3:chat2:names1:ping1:fov1:map1:{}",pack.fingerprint),
+        Some(pack) => format!("{PROTOCOL}:equipment3:blast3:chat2:names1:ping1:fov1:maps2:{}:{}",pack.fingerprint,
+            peakrunner_core::map_pack::on(peakrunner_core::terrain::MapId::Skybreak).expect("Skybreak").fingerprint),
         None => format!("{PROTOCOL}:equipment3:blast3:chat2:names1:ping1:fov1"),
     }
 }

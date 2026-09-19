@@ -17,7 +17,9 @@ impl Rotation {
         if entries.is_empty() || entries.len() > 32 { return Err("rotation requires 1–32 entries".into()); }
         let maps = entries.into_iter().map(|e| {
             match e.mode { SupportedMode::Ctf => {} }
-            MapId::parse(&e.map).ok_or_else(|| format!("map is not installed: {}", e.map))
+            let id = MapId::parse(&e.map).ok_or_else(|| format!("map is not installed: {}", e.map))?;
+            if !cfg!(test) && id == MapId::Valley { return Err("Valley is retired; use raindance or skybreak-bastions".to_string()); }
+            Ok(id)
         }).collect::<Result<Vec<_>, _>>()?;
         Ok(Self { maps, cursor: 0 })
     }

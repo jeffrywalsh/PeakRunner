@@ -7,6 +7,8 @@ use std::{collections::{BTreeMap, HashMap}, path::{Path, PathBuf}, sync::OnceLoc
 
 #[derive(Deserialize)]
 pub struct Manifest {
+    #[serde(default)]
+    pub exact_spawns: bool,
     pub version: u32,
     pub flags: [[f32; 3]; 2],
     pub spawns: [[f32; 3]; 2],
@@ -24,6 +26,7 @@ pub struct Manifest {
 }
 
 pub struct MapPack {
+    skybreak: bool,
     pub manifest: Manifest,
     pub root: PathBuf,
     pub fingerprint: String,
@@ -31,6 +34,19 @@ pub struct MapPack {
     buckets: HashMap<(i32, i32), Vec<usize>>,
     holes: Vec<bool>,
     pub heights: Vec<u8>,
+}
+
+fn skybreak_asset(name: &str) -> Result<&'static [u8], String> {
+    Ok(match name {
+        "map.json" => include_bytes!("../../../assets/maps/skybreak-bastions/map.json"),
+        "vertices.bin" => include_bytes!("../../../assets/maps/skybreak-bastions/vertices.bin"),
+        "collision.bin" => include_bytes!("../../../assets/maps/skybreak-bastions/collision.bin"),
+        "height.bin" => include_bytes!("../../../assets/maps/skybreak-bastions/height.bin"),
+        "weights.rgba" => include_bytes!("../../../assets/maps/skybreak-bastions/weights.rgba"),
+        "textures.rgba" => include_bytes!("../../../assets/maps/skybreak-bastions/textures.rgba"),
+        "ambient.f32" => include_bytes!("../../../assets/maps/skybreak-bastions/ambient.f32"),
+        _ => return Err("Unknown Skybreak asset".into()),
+    })
 }
 
 static PACK: OnceLock<Option<MapPack>> = OnceLock::new();
@@ -57,7 +73,18 @@ pub fn active() -> Option<&'static MapPack> {
 }
 
 pub fn on(map: crate::terrain::MapId) -> Option<&'static MapPack> {
-    (map == crate::terrain::MapId::Raindance).then(active).flatten()
+    match map {
+        crate::terrain::MapId::Valley => None,
+        crate::terrain::MapId::Raindance => active(),
+        crate::terrain::MapId::Skybreak => {
+            static SKY: OnceLock<MapPack> = OnceLock::new();
+            Some(SKY.get_or_init(|| {
+                let mut pack = MapPack::from_assets(Path::new(""), &|n,_|skybreak_asset(n).map(|b|b.to_vec()))
+                    .expect("Built-in Skybreak pack failed validation");
+                pack.skybreak = true; pack
+            }))
+        }
+    }
 }
 
 impl MapPack {
@@ -156,7 +183,7 @@ impl MapPack {
             holes[i]=true;
         }
         crate::equipment::validate(&manifest.entities)?;
-        Ok(Self {manifest,root:root.into(),fingerprint:format!("{:x}",Sha256::digest(&json)),triangles,buckets,holes,heights})
+        Ok(Self {skybreak:false,manifest,root:root.into(),fingerprint:format!("{:x}",Sha256::digest(&json)),triangles,buckets,holes,heights})
     }
 
     pub fn hole(&self,x:f32,z:f32)->bool {
@@ -169,7 +196,7 @@ impl MapPack {
         // Renderer/audio reopen only listed fixed assets. Recheck the digest so
         // editing a pack after startup cannot split visible and physical worlds.
         if name.contains(['/', '\\']) || !self.manifest.files.contains_key(name) {return Err("Unknown map asset".into());}
-        if self.root.as_os_str().is_empty() {return builtin_asset(name).map(|b|b.to_vec());}
+        if self.root.as_os_str().is_empty() {return (if self.skybreak {skybreak_asset(name)} else {builtin_asset(name)}).map(|b|b.to_vec());}
         let path=self.root.join(name);
         if path.metadata().map_err(|e|e.to_string())?.len()>128_000_000 {return Err("Oversized asset".into());}
         let bytes=std::fs::read(path).map_err(|e|e.to_string())?;

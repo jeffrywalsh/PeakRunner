@@ -5,6 +5,7 @@ use crate::drawlist::DrawFrame;
 use peakrunner_core::{map_pack,terrain::{self,MapId}};
 
 pub struct MapGpu {
+    map: MapId,
     pipeline:wgpu::RenderPipeline, sky:wgpu::RenderPipeline, water:wgpu::RenderPipeline,
     group:wgpu::BindGroup, uniform:wgpu::Buffer, vertices:wgpu::Buffer,
     count:u32, water_start:u32, images:wgpu::Texture, weights:wgpu::Texture,
@@ -12,8 +13,8 @@ pub struct MapGpu {
 }
 
 impl MapGpu {
-    pub fn new(device:&wgpu::Device)->Option<Self> {
-        let pack=map_pack::active()?;
+    pub fn new(device:&wgpu::Device,map:MapId)->Option<Self> {
+        let pack=map_pack::on(map)?;
         let layout=device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label:Some("imported map"),entries:&[
                 wgpu::BindGroupLayoutEntry {binding:0,visibility:wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -56,7 +57,7 @@ impl MapGpu {
             wgpu::BindGroupEntry {binding:3,resource:wgpu::BindingResource::TextureView(&weights.create_view(&Default::default()))},
         ]});
         let mut bytes=pack.asset("vertices.bin").expect("validated map vertices");
-        let (terrain,indices)=terrain::sample_mesh_of(MapId::Raindance);
+        let (terrain,indices)=terrain::sample_mesh_of(map);
         for index in indices {
             let v=&terrain[index as usize*6..][..6];
             let vertex=[v[0],v[1],v[2],v[3],v[4],v[5],v[0]/8.0,v[2]/8.0,
@@ -72,11 +73,11 @@ impl MapGpu {
         }
         let count=(bytes.len()/48) as u32;
         let vertices=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("source map triangles"),contents:&bytes,usage:wgpu::BufferUsages::VERTEX});
-        Some(Self {pipeline,sky,water,group,uniform,vertices,count,water_start,images,weights,uploaded:false})
+        Some(Self {map,pipeline,sky,water,group,uniform,vertices,count,water_start,images,weights,uploaded:false})
     }
 
     pub fn update(&mut self,queue:&wgpu::Queue,frame:&DrawFrame) {
-        let pack=map_pack::active().unwrap();
+        let pack=map_pack::on(self.map).unwrap();
         if !self.uploaded {
             for (name,texture,layers,mips) in [("textures.rgba",&self.images,pack.manifest.texture_count,9),("weights.rgba",&self.weights,1,1)] {
                 let bytes=pack.asset(name).expect("validated texture");

@@ -29,7 +29,8 @@ struct Peer {
 }
 impl GameHost {
     pub fn bind(addr: &str, name: &str, max_players: u32, map: &str) -> io::Result<Self> {
-        let map = MapId::parse(map).ok_or_else(|| invalid("unknown map: use Valley or Raindance"))?;
+        let map = MapId::parse(map).ok_or_else(|| invalid("unknown map: use raindance or skybreak-bastions"))?;
+        if !cfg!(test) && map == MapId::Valley { return Err(invalid("Valley is retired; use raindance or skybreak-bastions")); }
         if !(2..=MAX_PLAYERS as u32).contains(&max_players) { return Err(invalid("capacity must be 2–8")); }
         if name.is_empty() || name.len() > 64 || name.chars().any(char::is_control) { return Err(invalid("invalid match name")); }
         let listener = TcpListener::bind(private_bind(addr)?)?;
@@ -164,7 +165,7 @@ impl GameHost {
             count.store(game.world.players.iter().filter(|p| p.net_id != 0).count() as u32, Ordering::Relaxed);
             if game.tick % 3 == 0 {
                 *status.lock().expect("match status") = peakrunner_discovery::MatchStatus {
-                    name: self.name.clone(), map: format!("{:?}", game.world.map),
+                    name: self.name.clone(), map: peakrunner_core::terrain::info(game.world.map).name.into(),
                     players: count.load(Ordering::Relaxed), max_players: self.max_players as u32,
                     tick: game.tick, round: game.round, phase: format!("{:?}", game.phase),
                     score: game.world.score, time_left: game.world.time_left,
@@ -185,7 +186,7 @@ pub fn run_from_args() {
     let mut bind = "127.0.0.1".to_string();
     let mut port = 7781u16;
     let mut name = "Open rift".to_string();
-    let mut map = "Valley".to_string();
+    let mut map = "Raindance".to_string();
     let mut directory: Option<String> = None;
     let mut advertise: Option<String> = None;
     let mut args = std::env::args().skip(1);

@@ -134,15 +134,16 @@ pub fn pillars() -> Vec<Pillar> {
 pub enum MapId {
     Valley,
     Raindance,
+    Skybreak,
 }
 
 impl MapId {
     /// Stable identity, independent of display labels and filesystem locations.
     pub fn key(self) -> &'static str {
-        match self { Self::Valley => "valley", Self::Raindance => "raindance" }
+        match self { Self::Valley => "valley", Self::Raindance => "raindance", Self::Skybreak => "skybreak-bastions" }
     }
     pub fn parse(key: &str) -> Option<Self> {
-        [Self::Valley, Self::Raindance].into_iter().find(|id| id.key().eq_ignore_ascii_case(key))
+        [Self::Valley, Self::Raindance, Self::Skybreak].into_iter().find(|id| id.key().eq_ignore_ascii_case(key))
     }
 }
 
@@ -162,7 +163,7 @@ const RAIN_N: usize = 256;
 /// New landscapes can supply palettes/scales here without adding grass geometry.
 pub fn surface_style(map: MapId) -> crate::grass::SurfaceStyle {
     match map {
-        MapId::Raindance => crate::grass::HIGHLAND,
+        MapId::Raindance | MapId::Skybreak => crate::grass::HIGHLAND,
         MapId::Valley => crate::grass::SurfaceStyle {
             cover: [0.66, 0.73, 0.79, 5.0],
             soil: [0.42, 0.55, 0.64, 35.0],
@@ -178,7 +179,7 @@ const RAIN_SIZE: f32 = 2040.0;
 // Authored procedural heightfield; no extracted source-game data in the build.
 static RAIN: &[u8] = include_bytes!("../../../assets/maps/raindance/height.bin");
 
-pub fn maps() -> [MapInfo; 2] {
+fn all_maps() -> [MapInfo; 3] {
     [
         MapInfo {
             id: MapId::Valley,
@@ -199,17 +200,22 @@ pub fn maps() -> [MapInfo; 2] {
             glacier: Vec3::new(800.0, 0.0, 1400.0),
             res: RAIN_N,
         },
+        MapInfo { id: MapId::Skybreak, name: "Skybreak Bastions",
+            note: "Floating fortresses. Indoor flags, jet hatches and landing wings.",
+            size: RAIN_SIZE, ember: Vec3::new(1024.,180.,704.), glacier: Vec3::new(1024.,180.,1344.), res: RAIN_N },
     ]
 }
 
+pub fn maps() -> [MapInfo; 2] { [all_maps()[1], all_maps()[2]] }
+
 pub fn info(id: MapId) -> MapInfo {
-    maps().into_iter().find(|m| m.id == id).unwrap_or(maps()[0])
+    all_maps().into_iter().find(|m| m.id == id).expect("known map")
 }
 
 fn source_height(id: MapId, x: f32, z: f32) -> f32 {
     match id {
         MapId::Valley => height(x, z),
-        MapId::Raindance => height_rain(x, z),
+        MapId::Raindance | MapId::Skybreak => height_pack(id, x, z),
     }
 }
 
@@ -297,6 +303,7 @@ pub fn normal_on(id: MapId, x: f32, z: f32) -> Vec3 {
 pub fn spawn_on(id: MapId, ember: bool) -> Vec3 {
     if let Some(pack)=crate::map_pack::on(id) {
         let center=Vec3::from_array(pack.manifest.spawns[usize::from(!ember)]);
+        if pack.manifest.exact_spawns { return center; }
         // A SpawnSphere is a search region, not a spawn point. Its center can
         // be inside a wall. Pick a clear outdoor candidate within its 80m radius.
         for radius in [24.0,40.0,60.0,76.0] {
@@ -363,7 +370,8 @@ pub fn overview_height(id:MapId)->f32 {
     // Map packs are immutable for the process lifetime, so cache the scan.
     static VALLEY:std::sync::OnceLock<f32>=std::sync::OnceLock::new();
     static RAIN:std::sync::OnceLock<f32>=std::sync::OnceLock::new();
-    let cache=match id {MapId::Valley=>&VALLEY,MapId::Raindance=>&RAIN};
+    static SKY:std::sync::OnceLock<f32>=std::sync::OnceLock::new();
+    let cache=match id {MapId::Valley=>&VALLEY,MapId::Raindance=>&RAIN,MapId::Skybreak=>&SKY};
     *cache.get_or_init(|| {
         let map=info(id);let step=map.size/(map.res-1) as f32;
         let mut top=f32::NEG_INFINITY;
@@ -387,7 +395,7 @@ pub fn support_on(id:MapId,pos:Vec3)->(f32,Vec3) {
     ground
 }
 
-fn height_rain(x: f32, z: f32) -> f32 {
+fn height_pack(id: MapId, x: f32, z: f32) -> f32 {
     let n = RAIN_N;
     let fx = (x / RAIN_STEP).clamp(0.0, (n - 1) as f32);
     let fz = (z / RAIN_STEP).clamp(0.0, (n - 1) as f32);
@@ -399,7 +407,7 @@ fn height_rain(x: f32, z: f32) -> f32 {
     let tz = fz - z0 as f32;
     let h = |ix: usize, iz: usize| {
         let o = (iz * n + ix) * 2;
-        let data=crate::map_pack::on(MapId::Raindance).map_or(RAIN,|p|p.heights.as_slice());
+        let data=crate::map_pack::on(id).map_or(RAIN,|p|p.heights.as_slice());
         u16::from_le_bytes([data[o], data[o + 1]]) as f32 / 32.0
     };
     let a = h(x0, z0) + (h(x1, z0) - h(x0, z0)) * tx;
@@ -410,6 +418,24 @@ fn height_rain(x: f32, z: f32) -> f32 {
 #[cfg(test)]
 mod map_tests {
     use super::*;
+
+    #[test]
+    fn skybreak_flags_are_inside_and_spawn_decks_are_clear() {
+        let id = MapId::Skybreak;
+        let pack = crate::map_pack::on(id).unwrap();
+        assert!(maps().iter().all(|m| m.id != MapId::Valley));
+        for team in [true, false] {
+            let spawn = spawn_on(id, team);
+            let floor = support_on(id, spawn).0;
+            assert!((spawn.y-floor-1.2).abs() < 0.05, "spawn support {floor} {spawn:?}");
+            assert!(pack.sweep(spawn, spawn+Vec3::Y*2., PLAYER_RADIUS).is_none());
+            let flag = Vec3::from_array(pack.manifest.flags[usize::from(!team)]);
+            assert!(flag.y-height_on(id,flag.x,flag.z)>30., "fortress must float");
+            assert!(pack.sweep(flag+Vec3::Y,flag+Vec3::Y*30.,0.).is_some(), "flag has solid roof");
+            assert!(pack.floor(flag).is_some(), "flag has solid deck");
+        }
+        assert_ne!(pack.fingerprint, crate::map_pack::active().unwrap().fingerprint);
+    }
 
     #[test]
     fn collision_height_and_normal_match_rendered_triangles() {

@@ -78,7 +78,7 @@ pub fn build_frame(world: &World, aspect: f32, dt: f32) -> DrawFrame {
         model: Mat4::IDENTITY,
         color: Vec3::ONE,
         emit: 0.0,
-        mode: if world.map == MapId::Raindance { 2.0 } else { 1.0 },
+        mode: if world.map != MapId::Valley { 2.0 } else { 1.0 },
     });}
 
     for p in &world.pillars {

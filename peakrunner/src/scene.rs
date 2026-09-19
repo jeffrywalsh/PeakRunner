@@ -15,7 +15,7 @@ const SKY_SIZE: u64 = 96;
 const EMIT_SIZE: u64 = 80;
 
 fn precipitation_count(map: MapId, available: usize) -> usize {
-    match map { MapId::Valley => available, MapId::Raindance => 0 }
+    match map { MapId::Valley => available, MapId::Raindance | MapId::Skybreak => 0 }
 }
 
 #[repr(C)]
@@ -182,7 +182,7 @@ impl SceneGpu {
         }
 
         Self {
-            imported: crate::map_scene::MapGpu::new(device),
+            imported: None,
             world_pipe,
             emit_pipe,
             sky_pipe,
@@ -226,13 +226,12 @@ impl SceneGpu {
         frame: &DrawFrame,
     ) {
         self.upload_grass(queue);
-        if frame.map == MapId::Raindance {
-            if let Some(map)=&mut self.imported {map.update(queue,frame);}
-        }
         if self.terrain_map != frame.map {
+            self.imported = crate::map_scene::MapGpu::new(device,frame.map);
             self.meshes[0] = upload(device, "terrain", &terrain::sample_mesh_of(frame.map));
             self.terrain_map = frame.map;
         }
+        if let Some(map)=&mut self.imported {map.update(queue,frame);}
 
         let width = width.max(1);
         let height = height.max(1);
@@ -359,7 +358,7 @@ impl SceneGpu {
         pass.set_bind_group(1, &self.sky_bg, &[sky_off]);
         pass.draw(0..3, 0..1);
 
-        if frame.map == MapId::Raindance {
+        if frame.map != MapId::Valley {
             if let Some(map)=&self.imported {map.draw(&mut pass);}
         }
 
@@ -1482,6 +1481,15 @@ mod shader_check {
             shoot(&mut scene, &world, "ahead", 1280, 800);
             world.players[0].pitch = -0.62;
             shoot(&mut scene, &world, "down", 1280, 800);
+            if std::env::var_os("QA_SKYBREAK").is_some() {
+                world.set_map(MapId::Skybreak);
+                world.start_match(true);
+                world.players.truncate(1);
+                world.players[0].pos = glam::Vec3::new(1180., 218., 900.);
+                world.players[0].yaw = 0.67;
+                world.players[0].pitch = -0.16;
+                shoot(&mut scene, &world, "skybreak-exterior", 1280, 800);
+            }
         });
     }
 }

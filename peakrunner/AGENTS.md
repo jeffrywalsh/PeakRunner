@@ -92,6 +92,18 @@ They are not in the published `.20260919.4` binaries; never store passwords.
 
 ## Gameplay and security contracts
 
+### Skybreak checkpoint
+
+The user prioritized a Broadside-inspired floating-base map and retiring Valley.
+Active development is now `map/skybreak-bastions` in the temporary worktree,
+based on multi-map checkpoint `7e714d4`; main and live .4 remain unchanged.
+See `docs/skybreak-bastions.md` on that branch. Raindance and Skybreak have
+separate packs; Valley remains only an internal test fixture. Skybreak is a first
+playable layout, NOT balance-approved or deployed. Protocol `maps2` is incompatible
+with .4. Do not merge unfinished multi-map dependencies to main or publish clients
+without coordinated server/update packaging. Next: traversal/CTF and map-switch
+QA, then finish selected-map admission and signed multi-pack launcher support.
+
 - Multiplayer map rotation and modes are SERVER-selected. Client-local map data
   supports fast rendering and prediction, not authority over map/mode choice.
   Only implemented modes can be configured (CTF today). Future server-delivered
