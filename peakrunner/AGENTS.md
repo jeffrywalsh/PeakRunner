@@ -44,6 +44,41 @@ and feature scoped separately; update branches from tested main between portions
 Find a Rift preferences are the first separate feature branch. They are not part
 of this `.20260919.4` release baseline; never store match passwords in preferences.
 
+## Resume checkpoint — 2026-09-19
+
+- Reviewed release baseline `d84133d` is committed and published on GitHub
+  `main`. See `docs/release-baseline-review.md` for source-archive equality,
+  test results and exclusions. This Git reconciliation did not redeploy services.
+- Live game/server remain `0.1.0-raindance.20260919.4`; launcher
+  `0.1.0-r1`, feed sequence `2026091907`. Recheck live state before deployment.
+- The original checkout at
+  `/Users/jeffrywalsh/workspace/PeakRunner` remains on `terrain-materials`
+  with its dirty contents preserved. Much of that diff is now committed on main;
+  do not blindly commit it again or reset/clean it.
+- The clean publication worktree is `/private/tmp/peakrunner-baseline.SZ5oeH`
+  (native workspace in its `peakrunner/` subdirectory). Temporary worktrees
+  are not durable backups: use `git worktree list` and remote main to recover.
+- The next feature is `feature/find-rift-preferences`. Its implemented but
+  unpublished work remains in the original checkout: `src/preferences.rs`,
+  preferences changes in `src/app.rs`, `src/lib.rs`,
+  `examples/launch_smoke.rs`, and `docs/client-preferences.md`.
+  Compare those files against main to isolate the feature; preserve other edits.
+  The browser QA image is `screenshots/preferences-browser.png`.
+  Do not claim preferences are in the .4 downloads.
+- Preferences remember name, directory URL and direct host, never passwords.
+  Paths: macOS `~/Library/Application Support/PeakRunner/client.json`;
+  Windows `%APPDATA%\PeakRunner\client.json`; Linux
+  `$XDG_CONFIG_HOME/PeakRunner/client.json` or `~/.config/PeakRunner/client.json`.
+  Use an isolated `PEAKRUNNER_CONFIG_DIR` for QA; automated join sessions must
+  not overwrite real preferences.
+- Feature/map branch names, order and merge gates are in `docs/roadmap.md`.
+  Initialize each from the reviewed main baseline; update from tested main before
+  starting later portions. Merge/push only completed, tested work. No branch
+  deletion or force pushes. Map names are proposals, all distributed assets original.
+- Next: isolate preferences on its feature branch, rerun its tests and native
+  browser QA, then merge when verified. After that, multi-map support comes
+  before individual map additions, followed by modes, inventory and armor.
+
 ## Gameplay and security contracts
 
 - The server owns identity, teams, movement validity, damage, scores and outcomes.
