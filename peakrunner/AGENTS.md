@@ -75,8 +75,13 @@ They are not in the published `.20260919.4` binaries; never store passwords.
   Initialize each from the reviewed main baseline; update from tested main before
   starting later portions. Merge/push only completed, tested work. No branch
   deletion or force pushes. Map names are proposals, all distributed assets original.
-- Next: update `feature/multi-map-system` from tested main and implement the
-  multi-map foundation before individual maps, then modes, inventory and armor.
+- Multi-map work is in progress on `feature/multi-map-system`, updated from
+  main `396cf0d`, in `/private/tmp/peakrunner-baseline.SZ5oeH/peakrunner`.
+  First checkpoint: validated catalog metadata and stable built-in map IDs;
+  runtime still uses the single-pack slot. See `docs/multi-map-system.md` on
+  that branch for remaining registry, protocol, renderer and launcher work.
+  Do NOT merge the incomplete branch or claim multiple packs are playable yet.
+  Continue with the immutable installed-pack registry; leave movement untouched.
   A new client release is still required to deliver preferences to launcher users;
   do not overwrite existing .4 archives or restart servers for this client-only work.
 

@@ -1,0 +1,42 @@
+# Multi-map foundation — in progress
+
+Branch: `feature/multi-map-system`, based on main `396cf0d`.
+Do not merge or deploy this branch until the complete pipeline is tested.
+
+## First checkpoint
+
+`core::map_catalog` defines a strict, portable metadata contract: stable lowercase
+map IDs, display names, schema/revision, supported rules, team spawn regions,
+extent and resolution. It rejects duplicate identities, unknown fields/modes,
+nonfinite/out-of-bounds coordinates and excessive dimensions/catalog counts.
+Only CTF is allowed until other game modes are implemented. Metadata contains
+no paths, URLs or scripts. The catalog is not yet a runtime pack loader.
+
+`MapId::key/parse` centralizes existing Valley/Raindance identities and server
+selection. Existing display labels, enum serialization, gameplay protocol,
+Raindance asset bytes and movement remain unchanged.
+
+## Remaining integration, in order
+
+1. Replace the global optional `map_pack::PACK` with an immutable installed-pack
+   registry. Keep built-in Raindance available when another pack is installed.
+   Decide a stable wire identity (never process-local catalog indices), and bound
+   total loaded assets as well as each file. Keep private legacy reference imports
+   separate from distributable original packs.
+2. Connect metadata to manifest/compiler output. Preserve existing terrain diagonal,
+   hole, dimensions, spawn clearance and equipment behavior. Remove hardcoded
+   Raindance assumptions in terrain/render/audio/cache selection. Metadata alone
+   must not advertise a playable pack.
+3. Make server-selected map identity plus content fingerprint part of admission.
+   A different *unselected* installed map must not prevent joining. Reject missing
+   or mismatched selected content before granting a player slot. Bump protocol
+   only when implementing this coordinated wire change.
+4. Present installed maps in the native menu. Update signed launcher layout and
+   packaging to distribute multiple packs, preserve old clients' update/rollback
+   behavior, and keep directory independent of gameplay core.
+5. Test two distinct original packs coexisting, switching and loading safely,
+   matching and mismatching clients, invalid manifests, late joins, resets and
+   rendered collisions/spawns. Run real multi-client and native render checks.
+
+No new map, release artifact, server deployment or completed multi-map support
+is claimed by the first checkpoint.

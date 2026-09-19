@@ -28,10 +28,7 @@ struct Peer {
 }
 impl GameHost {
     pub fn bind(addr: &str, name: &str, max_players: u32, map: &str) -> io::Result<Self> {
-        let map = match map.to_lowercase().as_str() {
-            "valley" => MapId::Valley, "raindance" => MapId::Raindance,
-            _ => return Err(invalid("unknown map: use Valley or Raindance")),
-        };
+        let map = MapId::parse(map).ok_or_else(|| invalid("unknown map: use Valley or Raindance"))?;
         if !(2..=MAX_PLAYERS as u32).contains(&max_players) { return Err(invalid("capacity must be 2–8")); }
         if name.is_empty() || name.len() > 64 || name.chars().any(char::is_control) { return Err(invalid("invalid match name")); }
         let listener = TcpListener::bind(private_bind(addr)?)?;

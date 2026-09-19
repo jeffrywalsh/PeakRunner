@@ -136,6 +136,16 @@ pub enum MapId {
     Raindance,
 }
 
+impl MapId {
+    /// Stable identity, independent of display labels and filesystem locations.
+    pub fn key(self) -> &'static str {
+        match self { Self::Valley => "valley", Self::Raindance => "raindance" }
+    }
+    pub fn parse(key: &str) -> Option<Self> {
+        [Self::Valley, Self::Raindance].into_iter().find(|id| id.key().eq_ignore_ascii_case(key))
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct MapInfo {
     pub id: MapId,
