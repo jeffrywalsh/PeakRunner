@@ -155,7 +155,7 @@ impl PeakRunnerApp {
             self.grab(ctx, false);
         }
         if self.touch_swap {
-            self.world.input.weapon = if self.world.input.weapon == 0 { 1 } else { 0 };
+            self.world.input.weapon = (self.world.input.weapon + 1) % 3;
             self.touch_swap = false;
         }
 
@@ -181,6 +181,7 @@ impl PeakRunnerApp {
             if i.key_pressed(egui::Key::Num2) {
                 self.world.input.weapon = 1;
             }
+            if i.key_pressed(egui::Key::Num3) { self.world.input.weapon = 2; }
         });
         let jump = ctx.input(|i| i.key_down(egui::Key::Space)) || pad.jump || self.touch_jump;
         let jet = mouse.jet || pad.jet || self.touch_jet;
@@ -471,7 +472,7 @@ impl PeakRunnerApp {
                     hint(ui, "Jump / ski", "Space");
                     hint(ui, "Jet", "Right click");
                     hint(ui, "Jet steer", "WASD");
-                    hint(ui, "Fire", "Click · 1/2");
+                    hint(ui, "Fire", "Click · 1/2/3");
                 });
             });
     }
@@ -658,7 +659,7 @@ fn play_hud(
     painter.text(
         rect.center_bottom() + Vec2::new(0.0, -56.0),
         Align2::CENTER_BOTTOM,
-        if hud.weapon == 0 { "Disc" } else { "Repeater" },
+        match hud.weapon { 0 => "Disc", 1 => "Chaingun", _ => "Grenade launcher" },
         FontId::proportional(22.0),
         FG,
     );

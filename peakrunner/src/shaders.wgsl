@@ -10,6 +10,10 @@ struct WorldUniforms {
     pad0: f32,
     color: vec3<f32>,
     pad1: f32,
+    ground_cover: vec4<f32>,
+    ground_soil: vec4<f32>,
+    ground_rock: vec4<f32>,
+    ground_rules: vec4<f32>,
 }
 
 struct SkyUniforms {
@@ -26,6 +30,9 @@ struct EmitUniforms {
 }
 
 @group(0) @binding(0) var<uniform> world: WorldUniforms;
+@group(0) @binding(1) var grass_albedo: texture_2d<f32>;
+@group(0) @binding(2) var grass_samp: sampler;
+@group(0) @binding(3) var grass_normal: texture_2d<f32>;
 @group(1) @binding(0) var<uniform> sky: SkyUniforms;
 @group(2) @binding(0) var<uniform> emit_u: EmitUniforms;
 @group(3) @binding(0) var scene_tex: texture_2d<f32>;
@@ -66,13 +73,29 @@ fn terrain_noise(p: vec2<f32>) -> f32 {
         mix(terrain_hash(cell + vec2<f32>(0.0, 1.0)), terrain_hash(cell + vec2<f32>(1.0)), u.x), u.y);
 }
 
+fn safe_normalize(v: vec3<f32>) -> vec3<f32> {
+    let l2 = dot(v, v);
+    if (l2 < 1e-8) {
+        return vec3<f32>(0.0, 1.0, 0.0);
+    }
+    return v / sqrt(l2);
+}
+
+fn terrain_tangent(n: vec3<f32>) -> vec3<f32> {
+    var t = vec3<f32>(1.0, 0.0, 0.0) - n * n.x;
+    if (dot(t, t) < 1e-4) {
+        t = vec3<f32>(0.0, 0.0, 1.0) - n * n.z;
+    }
+    return safe_normalize(t);
+}
+
 @fragment
 fn fs_world(in: LitOut) -> @location(0) vec4<f32> {
-    let n = normalize(in.n);
-    let ndl = max(dot(n, world.sun), 0.0);
+    var n = normalize(in.n);
+    let mesh_n = n;
+    let slope = 1.0 - mesh_n.y;
     var albedo = world.color;
-    if (world.mode > 0.5) {
-        let slope = 1.0 - n.y;
+    if (world.mode > 0.5 && world.mode < 1.5) {
         let rock = vec3<f32>(0.27, 0.25, 0.23);
         let snow = vec3<f32>(0.66, 0.73, 0.79);
         let ice = vec3<f32>(0.42, 0.55, 0.64);
@@ -81,16 +104,39 @@ fn fs_world(in: LitOut) -> @location(0) vec4<f32> {
         albedo = mix(mix(rock, ice, ice_amt * 0.55), snow, snow_amt);
         let broad = terrain_noise(in.world_pos.xz * 0.045);
         let detail = terrain_noise(in.world_pos.xz * 0.7);
-        if (world.mode > 1.5) {
-            let grass = mix(vec3<f32>(0.24, 0.28, 0.13), vec3<f32>(0.47, 0.45, 0.25), broad);
-            let stone = mix(vec3<f32>(0.28, 0.27, 0.24), vec3<f32>(0.49, 0.46, 0.38), detail);
-            albedo = mix(grass, stone, smoothstep(0.17, 0.48, slope + (broad - 0.5) * 0.14));
-        }
-        // Continuous world-space detail, faded in the distance to avoid shimmer.
         let detail_fade = 1.0 - smoothstep(40.0, 220.0, length(world.cam - in.world_pos));
         albedo *= 0.88 + 0.12 * broad + (detail - 0.5) * 0.12 * detail_fade;
     }
+    if (world.mode > 1.5) {
+        let xz = in.world_pos.xz;
+        let tile = world.ground_cover.w;
+        let patch_scale = world.ground_soil.w;
+        // Fixed world-space scales: no camera-distance UV morphing.
+        let tex = textureSample(grass_albedo, grass_samp, xz / tile).r;
+        let mid = textureSample(grass_albedo, grass_samp,
+            vec2<f32>(xz.y, -xz.x) / (tile * 3.1)).r;
+        let broad = terrain_noise(xz / patch_scale);
+        let broken = terrain_noise(xz / (patch_scale * 0.23) + vec2<f32>(13.0, 29.0));
+        let dry = smoothstep(world.ground_rules.w - 0.13, world.ground_rules.w + 0.13,
+            broad * 0.7 + broken * 0.3 + slope * 0.20);
+        let rock_weight = smoothstep(world.ground_rules.x, world.ground_rules.y, slope);
+        let cover = world.ground_cover.rgb * mix(0.85, 1.15, broken);
+        albedo = mix(mix(cover, world.ground_soil.rgb, dry),
+            world.ground_rock.rgb, rock_weight);
+        let grain = (tex - 0.5) * 1.5 + (mid - 0.5) * 0.6;
+        albedo *= 1.0 + grain * world.ground_rock.w;
+
+        let tn = textureSample(grass_normal, grass_samp, xz / tile).xyz * 2.0 - 1.0;
+        let tangent = terrain_tangent(mesh_n);
+        let bitangent = safe_normalize(cross(tangent, mesh_n));
+        let mapped = safe_normalize(tangent * tn.x + bitangent * tn.z + mesh_n * tn.y);
+        n = safe_normalize(mix(mesh_n, mapped, world.ground_rules.z));
+    }
+    let ndl = max(dot(n, world.sun), 0.0);
     var col = albedo * (0.22 + 0.78 * ndl);
+    if (world.mode > 1.5) {
+        col = mix(col * vec3<f32>(0.92, 0.96, 0.99), col * vec3<f32>(1.05, 1.02, 0.94), ndl);
+    }
     col = col + albedo * vec3<f32>(0.12, 0.16, 0.22) * max(n.y, 0.0);
     col = col + world.color * world.emit;
     if (world.mode < 0.5 && world.emit < 0.5) {
@@ -144,14 +190,27 @@ fn fs_sky(in: FullOut) -> @location(0) vec4<f32> {
     return vec4<f32>(col, 1.0);
 }
 
+struct EmitOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) facing: f32,
+}
+
 @vertex
-fn vs_emit(in: LitIn) -> @builtin(position) vec4<f32> {
-    let _keep = in.n.x;
-    return emit_u.mvp * vec4<f32>(in.pos + vec3<f32>(_keep * 0.0, 0.0, 0.0), 1.0);
+fn vs_emit(in: LitIn) -> EmitOut {
+    var out: EmitOut;
+    out.clip = emit_u.mvp * vec4<f32>(in.pos, 1.0);
+    let view_axis = normalize(vec3<f32>(emit_u.mvp[0].w, emit_u.mvp[1].w, emit_u.mvp[2].w));
+    out.facing = dot(in.n, view_axis);
+    return out;
 }
 
 @fragment
-fn fs_emit() -> @location(0) vec4<f32> {
+fn fs_emit(in: EmitOut) -> @location(0) vec4<f32> {
+    // Negative alpha selects soft smoke; other additive effects stay unchanged.
+    if (emit_u.color.a < 0.0) {
+        let soft = pow(abs(in.facing), 3.0);
+        return vec4<f32>(emit_u.color.rgb, -emit_u.color.a * soft);
+    }
     return emit_u.color;
 }
 

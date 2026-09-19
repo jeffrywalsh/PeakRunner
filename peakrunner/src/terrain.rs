@@ -148,6 +148,19 @@ pub struct MapInfo {
 }
 
 const RAIN_N: usize = 256;
+/// Surface appearance is independent of the heightfield and collision mesh.
+/// New landscapes can supply palettes/scales here without adding grass geometry.
+pub fn surface_style(map: MapId) -> crate::grass::SurfaceStyle {
+    match map {
+        MapId::Raindance => crate::grass::HIGHLAND,
+        MapId::Valley => crate::grass::SurfaceStyle {
+            cover: [0.66, 0.73, 0.79, 5.0],
+            soil: [0.42, 0.55, 0.64, 35.0],
+            rock: [0.27, 0.25, 0.23, 0.5],
+            rules: [0.12, 0.42, 0.08, 0.5],
+        },
+    }
+}
 const RAIN_STEP: f32 = 8.0;
 /// 255 steps of 8 m. The Tribes file stores 256 corners.
 const RAIN_SIZE: f32 = 2040.0;
@@ -183,11 +196,78 @@ pub fn info(id: MapId) -> MapInfo {
     maps().into_iter().find(|m| m.id == id).unwrap_or(maps()[0])
 }
 
-pub fn height_on(id: MapId, x: f32, z: f32) -> f32 {
+fn source_height(id: MapId, x: f32, z: f32) -> f32 {
     match id {
         MapId::Valley => height(x, z),
         MapId::Raindance => height_rain(x, z),
     }
+}
+
+/// The exact two triangles emitted by sample_mesh_of, including its diagonal.
+/// Shading and ski steering can use smoothed normals; collision cannot use a
+/// separate curved heightfield beneath these planar faces.
+pub fn surface_on(id: MapId, x: f32, z: f32) -> (f32, Vec3) {
+    let spec = info(id);
+    let cell = spec.size / (spec.res - 1) as f32;
+    let gx = (x / cell).clamp(0.0, (spec.res - 1) as f32);
+    let gz = (z / cell).clamp(0.0, (spec.res - 1) as f32);
+    let ix = (gx.floor() as usize).min(spec.res - 2);
+    let iz = (gz.floor() as usize).min(spec.res - 2);
+    let tx = gx - ix as f32;
+    let tz = gz - iz as f32;
+    let x0 = ix as f32 * cell;
+    let z0 = iz as f32 * cell;
+    let a = source_height(id, x0, z0);
+    let b = source_height(id, x0 + cell, z0);
+    let c = source_height(id, x0, z0 + cell);
+    let (y, dx, dz) = if tx + tz <= 1.0 {
+        (a + (b - a) * tx + (c - a) * tz, b - a, c - a)
+    } else {
+        let d = source_height(id, x0 + cell, z0 + cell);
+        (d + (c - d) * (1.0 - tx) + (b - d) * (1.0 - tz), d - c, d - b)
+    };
+    (y, Vec3::new(-dx / cell, 1.0, -dz / cell).normalize())
+}
+
+pub fn height_on(id: MapId, x: f32, z: f32) -> f32 {
+    surface_on(id, x, z).0
+}
+
+/// Earliest contact along a segment. Grid X, Z and X+Z crossings divide it
+/// into intervals contained in one rendered triangle, so the height gap is
+/// linear on each interval. This catches ridges even if both endpoints clear.
+pub fn segment_hit(id: MapId, start: Vec3, end: Vec3, clearance: f32) -> Option<f32> {
+    let spec = info(id);
+    let cell = spec.size / (spec.res - 1) as f32;
+    let mut cuts = vec![0.0, 1.0];
+    for (a, b) in [(start.x, end.x), (start.z, end.z), (start.x + start.z, end.x + end.z)] {
+        if (b - a).abs() < 1e-6 { continue; }
+        let lo = (a.min(b) / cell).floor() as i32 + 1;
+        let hi = (a.max(b) / cell).ceil() as i32;
+        for k in lo..hi {
+            let t = (k as f32 * cell - a) / (b - a);
+            if t > 0.0 && t < 1.0 { cuts.push(t); }
+        }
+    }
+    cuts.sort_by(f32::total_cmp);
+    cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+    let gap = |t: f32| {
+        let p = start.lerp(end, t);
+        p.y - height_on(id, p.x, p.z) - clearance
+    };
+    let mut previous_t = 0.0;
+    let mut previous_gap = gap(0.0);
+    if previous_gap < -0.0001 { return Some(0.0); }
+    for t in cuts.into_iter().skip(1) {
+        let next_gap = gap(t);
+        if next_gap < -0.0001 || (next_gap <= 0.0 && previous_gap > 0.0001) {
+            let fraction = (previous_gap / (previous_gap - next_gap)).clamp(0.0, 1.0);
+            return Some(previous_t + (t - previous_t) * fraction);
+        }
+        previous_t = t;
+        previous_gap = next_gap;
+    }
+    None
 }
 
 pub fn normal_on(id: MapId, x: f32, z: f32) -> Vec3 {
@@ -224,7 +304,7 @@ pub fn sample_mesh_of(id: MapId) -> (Vec<f32>, Vec<u16>) {
         for ix in 0..res {
             let x = ix as f32 / (res - 1) as f32 * spec.size;
             let z = iz as f32 / (res - 1) as f32 * spec.size;
-            let y = height_on(id, x, z);
+            let y = source_height(id, x, z);
             let n = normal_on(id, x, z);
             verts.extend_from_slice(&[x, y, z, n.x, n.y, n.z]);
         }
@@ -262,6 +342,61 @@ fn height_rain(x: f32, z: f32) -> f32 {
 #[cfg(test)]
 mod map_tests {
     use super::*;
+
+    #[test]
+    fn collision_height_and_normal_match_rendered_triangles() {
+        for map in [MapId::Valley, MapId::Raindance] {
+            let (vertices, indices) = sample_mesh_of(map);
+            let vertex = |i: u16| Vec3::from_slice(&vertices[i as usize * 6..i as usize * 6 + 3]);
+            for triangle in indices.chunks_exact(3).step_by(97) {
+                let a = vertex(triangle[0]);
+                let b = vertex(triangle[1]);
+                let c = vertex(triangle[2]);
+                let normal = (b - a).cross(c - a).normalize();
+                for weights in [[0.2, 0.3, 0.5], [0.75, 0.2, 0.05]] {
+                    let p = a * weights[0] + b * weights[1] + c * weights[2];
+                    let (y, n) = surface_on(map, p.x, p.z);
+                    assert!((y - p.y).abs() < 0.002, "{map:?}: visual y={} collision y={y}", p.y);
+                    assert!(n.dot(normal) > 0.999, "collision must use the rendered face normal");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn swept_contact_finds_a_ridge_between_clear_endpoints() {
+        for map in [MapId::Valley, MapId::Raindance] {
+            let spec = info(map);
+            let cell = spec.size / (spec.res - 1) as f32;
+            let mut found = false;
+            'search: for z in (4..spec.res - 4).step_by(3) {
+                for x in 4..spec.res - 4 {
+                    let x0 = x as f32 * cell;
+                    let z0 = z as f32 * cell;
+                    let a = height_on(map, x0, z0);
+                    let b = height_on(map, x0 + cell, z0);
+                    let c = height_on(map, x0 + 2.0 * cell, z0);
+                    if b <= (a + c) * 0.5 + 0.5 { continue; }
+                    let start = Vec3::new(x0, a + 0.25, z0);
+                    let end = Vec3::new(x0 + 2.0 * cell, c + 0.25, z0);
+                    let t = segment_hit(map, start, end, 0.0).expect("ridge must stop the segment");
+                    assert!(t > 0.0 && t < 0.5);
+                    let hit = start.lerp(end, t);
+                    assert!((hit.y - height_on(map, hit.x, hit.z)).abs() < 0.002);
+                    found = true;
+                    break 'search;
+                }
+            }
+            assert!(found, "need a convex ridge on {map:?}");
+        }
+    }
+
+    #[test]
+    fn a_segment_leaving_the_surface_is_not_a_collision() {
+        let ground = height_on(MapId::Valley, EMBER_HOME.x, EMBER_HOME.z);
+        let start = Vec3::new(EMBER_HOME.x, ground, EMBER_HOME.z);
+        assert!(segment_hit(MapId::Valley, start, start + Vec3::Y * 3.0, 0.0).is_none());
+    }
 
     #[test]
     fn raindance_is_a_two_kilometer_ravine() {

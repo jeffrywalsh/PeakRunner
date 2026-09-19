@@ -1,6 +1,9 @@
 use glam::{Mat3, Mat4, Vec3};
 
-use crate::sim::{MatchState, Team, World};
+use crate::sim::{
+    MatchState, Team, World, DISC_RELOAD, VM_ANCHOR_BOLT, VM_ANCHOR_DISC, VM_MUZZLE_DISC,
+    VM_TURN_X, VM_TURN_Y, VM_DISC_TURN_X, VM_DISC_TURN_Y, weapon_reload,
+};
 use crate::terrain::{self, MapId};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -43,6 +46,7 @@ pub struct DrawFrame {
     pub dt: f32,
     pub map: MapId,
     pub fog_density: f32,
+    pub time: f32,
 }
 
 pub fn clip_correct(proj: Mat4) -> Mat4 {
@@ -192,35 +196,79 @@ pub fn build_frame(world: &World, aspect: f32, dt: f32) -> DrawFrame {
                 model: Mat4::from_translation(d.pos) * Mat4::from_scale(Vec3::splat(0.28)),
                 color: [0.3, 0.85, 1.0, 0.35],
             });
-            // Short luminous wake makes the trajectory readable across the valley.
+            // Connected, tapered wake. Limit it to the actual flight age so a
+            // new shot never draws a trail behind its launch point.
+            let trail_time = (5.0 - d.life).clamp(0.0, 0.04);
+            let forward = d.vel.normalize_or_zero();
+            let mut right = forward.cross(Vec3::Y).normalize_or_zero();
+            if right.length_squared() < 0.01 { right = Vec3::X; }
+            let up = right.cross(forward);
             for k in 1..=5 {
+                if trail_time <= 0.0 { break; }
                 let t = k as f32 / 5.0;
+                let radius = 0.10 * (1.0 - t * 0.7);
+                let center = d.pos - d.vel * (trail_time * (k as f32 - 0.5) / 5.0);
+                let length = d.vel.length() * trail_time / 5.0;
                 emit.push(EmitDraw {
                     mesh: MeshId::Sphere,
-                    model: Mat4::from_translation(d.pos - d.vel * (0.008 * k as f32))
-                        * Mat4::from_scale(Vec3::splat(0.19 * (1.0 - t * 0.65))),
+                    model: Mat4::from_cols((right * radius).extend(0.0), (up * radius).extend(0.0),
+                        (-forward * length * 0.55).extend(0.0), center.extend(1.0)),
                     color: [0.35, 0.75, 1.0, 0.24 * (1.0 - t * 0.8)],
                 });
             }
+        } else if d.kind == 2 {
+            lit.push(LitDraw {
+                mesh: MeshId::Sphere,
+                model: Mat4::from_translation(d.pos) * Mat4::from_scale(Vec3::splat(0.16)),
+                color: Vec3::new(0.24, 0.34, 0.12), emit: 0.1, mode: 0.0,
+            });
+            lit.push(LitDraw {
+                mesh: MeshId::Cube,
+                model: Mat4::from_translation(d.pos) * Mat4::from_rotation_y(d.spin)
+                    * Mat4::from_scale(Vec3::new(0.21, 0.04, 0.21)),
+                color: Vec3::new(0.95, 0.62, 0.12), emit: 0.35, mode: 0.0,
+            });
         } else {
             let f = d.vel.normalize_or_zero();
-            let r = f.cross(Vec3::Y).normalize_or_zero();
+            let mut r = f.cross(Vec3::Y).normalize_or_zero();
+            if r.length_squared() < 0.01 { r = Vec3::X; }
             let u = r.cross(f).normalize_or_zero();
+            let length = (d.vel.length() * (1.2 - d.life).clamp(0.0, 0.006)).min(2.0);
+            if length > 0.01 {
+                emit.push(EmitDraw {
+                    mesh: MeshId::Sphere,
+                    model: Mat4::from_cols((r * 0.025).extend(0.0), (u * 0.025).extend(0.0),
+                        (f * length * 0.5).extend(0.0), (d.pos - f * length * 0.5).extend(1.0)),
+                    color: [1.0, 0.68, 0.22, 0.45],
+                });
+            }
             lit.push(LitDraw {
                 mesh: MeshId::Cube,
                 model: Mat4::from_cols(
-                    (r * 0.05).extend(0.0),
-                    (u * 0.05).extend(0.0),
-                    (f * 0.7).extend(0.0),
+                    (r * 0.018).extend(0.0),
+                    (u * 0.018).extend(0.0),
+                    (f * 0.30).extend(0.0),
                     d.pos.extend(1.0),
                 ),
-                color: Vec3::new(0.7, 0.95, 1.0),
+                color: Vec3::new(1.0, 0.78, 0.30),
                 emit: 0.8,
                 mode: 0.0,
             });
         }
     }
 
+    // Persist actual sampled positions, rather than extrapolating backward:
+    // smoke follows the arc and stays behind when a grenade bounces.
+    for puff in &world.smoke {
+        let t = (puff.age / 0.5).clamp(0.0, 1.0);
+        let near_fade = ((puff.pos.distance(eye) - 0.8) / 1.2).clamp(0.0, 1.0);
+        emit.push(EmitDraw {
+            mesh: MeshId::Sphere,
+            model: Mat4::from_translation(puff.pos)
+                * Mat4::from_scale(Vec3::splat(0.07 + t * 0.20)),
+            color: [0.55, 0.57, 0.59, -0.16 * (1.0 - t) * near_fade],
+        });
+    }
     for e in &world.explosions {
         let t = (e.age / 0.42).clamp(0.0, 1.0);
         let a = (1.0 - t) * 0.85;
@@ -270,6 +318,7 @@ pub fn build_frame(world: &World, aspect: f32, dt: f32) -> DrawFrame {
         dt,
         map: world.map,
         fog_density,
+        time: world.time,
     }
 }
 
@@ -311,45 +360,60 @@ fn disc_launcher(base: Mat4, time: f32, cooldown: f32) -> Vec<LitDraw> {
             color, emit, mode: 0.0,
         });
     };
-    part(MeshId::Bevel, Vec3::new(0.0, -0.055, 0.16), Vec3::new(0.34, 0.23, 0.52), silver, 0.0);
+    part(MeshId::Bevel, Vec3::new(0.0, -0.055, 0.12), Vec3::new(0.30, 0.19, 0.42), silver, 0.0);
     part(MeshId::Bevel, Vec3::new(0.0, -0.22, 0.23), Vec3::new(0.13, 0.25, 0.21), dark, 0.0);
-    part(MeshId::Bevel, Vec3::new(0.0, -0.04, -0.31), Vec3::new(0.24, 0.07, 0.70), steel, 0.0);
-    part(MeshId::Cube, Vec3::new(0.0, 0.003, -0.27), Vec3::new(0.17, 0.012, 0.62), dark, 0.0);
+    part(MeshId::Bevel, Vec3::new(0.0, -0.04, -0.31), Vec3::new(0.40, 0.07, 0.70), steel, 0.0);
+    part(MeshId::Cube, Vec3::new(0.0, 0.003, -0.27), Vec3::new(0.32, 0.012, 0.62), dark, 0.0);
     for side in [-1.0, 1.0] {
-        let x = side * 0.15;
-        part(MeshId::Bevel, Vec3::new(x, 0.018, -0.27), Vec3::new(0.105, 0.15, 0.98), silver, 0.0);
-        part(MeshId::Bevel, Vec3::new(x, 0.088, -0.27), Vec3::new(0.075, 0.018, 0.91), edge, 0.0);
+        let x = side * 0.205;
+        part(MeshId::Bevel, Vec3::new(x, 0.018, -0.27), Vec3::new(0.09, 0.15, 0.98), silver, 0.0);
+        part(MeshId::Bevel, Vec3::new(x, 0.088, -0.27), Vec3::new(0.063, 0.018, 0.91), edge, 0.0);
         part(MeshId::Bevel, Vec3::new(x, 0.018, -0.765), Vec3::new(0.085, 0.115, 0.055), steel, 0.0);
         // Interior rail energy strip; the open channel remains dark.
-        part(MeshId::Cube, Vec3::new(side * 0.094, 0.035, -0.36), Vec3::new(0.008, 0.025, 0.50), cyan, 0.6);
+        part(MeshId::Cube, Vec3::new(side * 0.157, 0.035, -0.36), Vec3::new(0.008, 0.025, 0.50), cyan, 0.6);
         for k in 0..5 {
             let z = 0.04 - k as f32 * 0.14;
-            part(MeshId::Cube, Vec3::new(x, 0.101, z), Vec3::new(0.047, 0.009, 0.05), dark, 0.0);
-            part(MeshId::Bevel, Vec3::new(side * 0.199, 0.008, z), Vec3::new(0.012, 0.065, 0.065), steel, 0.0);
+            part(MeshId::Cube, Vec3::new(x, 0.099, z), Vec3::new(0.047, 0.005, 0.05), dark, 0.0);
+            part(MeshId::Bevel, Vec3::new(side * 0.251, 0.008, z), Vec3::new(0.01, 0.065, 0.065), steel, 0.0);
         }
         for k in 0..3 {
             part(MeshId::Cube, Vec3::new(x, 0.102, -0.49 - k as f32 * 0.065),
                 Vec3::new(0.049, 0.01, 0.022), cyan, 0.7);
         }
     }
+    // A mechanical feed sled opens and returns over the existing reload cycle.
+    let cycle = (1.0 - cooldown / DISC_RELOAD).clamp(0.0, 1.0);
+    let open = if cooldown > 0.0 { (cycle * std::f32::consts::PI).sin() } else { 0.0 };
+    part(MeshId::Bevel, Vec3::new(0.0, 0.065, 0.055 + open * 0.12),
+        Vec3::new(0.17, 0.045, 0.19), steel, 0.0);
+    part(MeshId::Cube, Vec3::new(0.0, 0.09, 0.08 + open * 0.12),
+        Vec3::new(0.1, 0.008, 0.018), cyan, 0.35 + cycle * 0.25);
     for k in 0..4 {
-        part(MeshId::Bevel, Vec3::new(-0.208, 0.031, 0.03 - k as f32 * 0.09),
+        part(MeshId::Bevel, Vec3::new(-0.253, 0.031, 0.03 - k as f32 * 0.09),
             Vec3::new(0.013, 0.033, 0.041), Vec3::new(0.92, 0.66, 0.08), 0.0);
     }
     let charge = (1.0 - cooldown / 0.75).clamp(0.0, 1.0);
     if charge > 0.0 {
+        // Expose the round in the widened tray: it should read as a
+        // loaded disc launcher, not two bars concealing a tiny light.
+        let disc_base = base * Mat4::from_translation(Vec3::new(0.0, 0.075, 0.12 - charge * 0.65))
+            * Mat4::from_rotation_y(time * 18.0);
         draws.push(LitDraw {
             mesh: MeshId::Disc,
-            model: base * Mat4::from_translation(Vec3::new(0.0, 0.025, -0.19 - charge * 0.15))
-                * Mat4::from_rotation_y(time * 18.0)
-                * Mat4::from_scale(Vec3::new(0.085 * charge, 0.018, 0.085 * charge)),
-            color: cyan, emit: 0.65, mode: 0.0,
+            model: disc_base * Mat4::from_scale(Vec3::new(0.155, 0.022, 0.155)),
+            color: cyan, emit: 0.55, mode: 0.0,
+        });
+        draws.push(LitDraw {
+            mesh: MeshId::Disc,
+            model: disc_base * Mat4::from_translation(Vec3::Y * 0.012)
+                * Mat4::from_scale(Vec3::new(0.132, 0.004, 0.132)),
+            color: Vec3::new(0.025, 0.23, 0.95), emit: 0.5, mode: 0.0,
         });
     }
-    if cooldown > 0.97 {
+    if cooldown > DISC_RELOAD - 0.08 {
         draws.push(LitDraw {
             mesh: MeshId::Sphere,
-            model: base * Mat4::from_translation(Vec3::new(0.0, 0.02, -0.79))
+            model: base * Mat4::from_translation(VM_MUZZLE_DISC)
                 * Mat4::from_scale(Vec3::new(0.07, 0.025, 0.12)),
             color: Vec3::new(0.5, 0.9, 1.0), emit: 1.4, mode: 0.0,
         });
@@ -432,36 +496,63 @@ fn viewmodel_draws(world: &World) -> Vec<LitDraw> {
     if !p.alive {
         return Vec::new();
     }
-    let shot_age = if p.weapon == 0 { 1.05 } else { 0.16 } - p.cooldown;
+    let shot_age = weapon_reload(p.weapon) - p.cooldown;
     let kick = if p.cooldown > 0.0 { (-shot_age * 15.0).exp() } else { 0.0 };
     let sway = (world.time * 1.4).sin() * 0.012;
-    let base = Mat4::from_translation(Vec3::new(
-        0.32 + sway,
-        -0.28 - kick * 0.05,
-        -0.62 + kick * 0.08,
-    )) * Mat4::from_rotation_y(0.18)
-        * Mat4::from_rotation_x(-0.08 + kick * 0.12);
+    let anchor = if p.weapon == 0 { VM_ANCHOR_DISC } else { VM_ANCHOR_BOLT };
+    let (yaw, pitch) = if p.weapon == 0 { (VM_DISC_TURN_Y, VM_DISC_TURN_X) }
+        else { (VM_TURN_Y, VM_TURN_X) };
+    let base = Mat4::from_translation(anchor + Vec3::new(sway, -kick * 0.05, kick * 0.08))
+        * Mat4::from_rotation_y(yaw)
+        * Mat4::from_rotation_x(pitch + kick * 0.12);
     if p.weapon == 0 {
-        return disc_launcher(base, world.time, p.cooldown);
+        // Pivot around the muzzle, not the grip: move the rear toward the
+        // right edge without moving the launch point or changing ballistics.
+        let angled = base * Mat4::from_translation(VM_MUZZLE_DISC)
+            * Mat4::from_rotation_y(0.12)
+            * Mat4::from_translation(-VM_MUZZLE_DISC);
+        return disc_launcher(angled, world.time, p.cooldown);
     }
     let mut draws = vec![
         LitDraw {
-            mesh: MeshId::Cube,
+            mesh: MeshId::Bevel,
             model: base * Mat4::from_scale(Vec3::new(0.18, 0.16, 0.55)),
-            color: Vec3::new(0.16, 0.17, 0.19),
-            emit: 0.0,
-            mode: 0.0,
-        },
-        LitDraw {
-            mesh: MeshId::Cube,
-            model: base
-                * Mat4::from_translation(Vec3::new(0.0, 0.02, -0.38))
-                * Mat4::from_scale(Vec3::new(0.07, 0.07, 0.42)),
-            color: Vec3::new(0.12, 0.12, 0.13),
+            color: Vec3::new(0.34, 0.38, 0.41),
             emit: 0.0,
             mode: 0.0,
         },
     ];
+    let barrel_count = if p.weapon == 1 { 6 } else { 1 };
+    for k in 0..barrel_count {
+        let angle = k as f32 * std::f32::consts::TAU / 6.0
+            + if p.cooldown > 0.0 && p.weapon == 1 { world.time * 35.0 } else { 0.0 };
+        let radius = if p.weapon == 1 { 0.036 } else { 0.105 };
+        let offset = if p.weapon == 1 { Vec3::new(angle.cos(), angle.sin(), 0.0) * 0.075 }
+            else { Vec3::ZERO };
+        let tube = base * Mat4::from_translation(Vec3::new(0.0, 0.02, -0.38) + offset)
+            * Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2);
+        draws.push(LitDraw { mesh: MeshId::Disc,
+            model: tube * Mat4::from_scale(Vec3::new(radius, 0.42, radius)),
+            color: Vec3::new(0.30, 0.34, 0.36), emit: 0.0, mode: 0.0 });
+        draws.push(LitDraw { mesh: MeshId::Disc,
+            model: base * Mat4::from_translation(Vec3::new(0.0, 0.02, -0.593) + offset)
+                * Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2)
+                * Mat4::from_scale(Vec3::new(radius * 0.72, 0.004, radius * 0.72)),
+            color: Vec3::splat(0.025), emit: 0.0, mode: 0.0 });
+    }
+    if p.weapon == 2 {
+        draws.push(LitDraw { mesh: MeshId::Disc,
+            model: base * Mat4::from_translation(Vec3::new(0.0, -0.04, -0.06))
+                * Mat4::from_rotation_z(std::f32::consts::FRAC_PI_2)
+                * Mat4::from_scale(Vec3::new(0.17, 0.30, 0.17)),
+            color: Vec3::new(0.37, 0.42, 0.23), emit: 0.0, mode: 0.0 });
+    }
+    if p.cooldown > 0.0 && shot_age < 0.035 {
+        draws.push(LitDraw { mesh: MeshId::Sphere,
+            model: base * Mat4::from_translation(Vec3::new(0.0, 0.02, -0.64))
+                * Mat4::from_scale(Vec3::new(0.07, 0.07, 0.14)),
+            color: Vec3::new(1.0, 0.66, 0.18), emit: 1.3, mode: 0.0 });
+    }
     {
         draws.push(LitDraw {
             mesh: MeshId::Cube,
@@ -476,9 +567,9 @@ fn viewmodel_draws(world: &World) -> Vec<LitDraw> {
     draws.push(LitDraw {
         mesh: MeshId::Cube,
         model: base
-            * Mat4::from_translation(Vec3::new(0.0, 0.12, -0.05))
-            * Mat4::from_scale(Vec3::new(0.03, 0.06, 0.08)),
-        color: Vec3::new(0.85, 0.25, 0.16),
+            * Mat4::from_translation(Vec3::new(0.0, 0.095, -0.05))
+            * Mat4::from_scale(Vec3::new(0.025, 0.025, 0.08)),
+        color: Vec3::new(0.95, 0.64, 0.14),
         emit: 0.3,
         mode: 0.0,
     });

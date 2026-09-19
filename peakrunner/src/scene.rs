@@ -6,10 +6,11 @@ use eframe::egui_wgpu::{CallbackResources, CallbackTrait, ScreenDescriptor};
 use glam::{Mat4, Vec3};
 
 use crate::drawlist::{normal_columns, DrawFrame, EmitDraw, LitDraw, MeshId};
+use crate::grass;
 use crate::terrain::{self, MapId};
 
-const SLOT: u64 = 256;
-const WORLD_SIZE: u64 = 240;
+const SLOT: u64 = 512;
+const WORLD_SIZE: u64 = 304;
 const SKY_SIZE: u64 = 96;
 const EMIT_SIZE: u64 = 80;
 
@@ -29,6 +30,10 @@ struct WorldUniform {
     pad0: f32,
     color: [f32; 3],
     pad1: f32,
+    ground_cover: [f32; 4],
+    ground_soil: [f32; 4],
+    ground_rock: [f32; 4],
+    ground_rules: [f32; 4],
 }
 
 #[repr(C)]
@@ -79,6 +84,12 @@ pub struct SceneGpu {
     snow: Vec<Vec3>,
     target_is_srgb: bool,
     terrain_map: MapId,
+    grass_ready: bool,
+    grass_albedo: wgpu::Texture,
+    grass_normal: wgpu::Texture,
+    grass_albedo_view: wgpu::TextureView,
+    grass_normal_view: wgpu::TextureView,
+    grass_sampler: wgpu::Sampler,
 }
 
 impl SceneGpu {
@@ -87,7 +98,9 @@ impl SceneGpu {
             label: Some("peakrunner"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders.wgsl").into()),
         });
-        let world_layout = uniform_layout(device, "world", WORLD_SIZE);
+        let (grass_albedo, grass_albedo_view, grass_normal, grass_normal_view, grass_sampler) =
+            grass_textures(device);
+        let world_layout = world_bind_layout(device);
         let sky_layout = uniform_layout(device, "sky", SKY_SIZE);
         let emit_layout = uniform_layout(device, "emit", EMIT_SIZE);
         let blit_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -137,7 +150,14 @@ impl SceneGpu {
         });
         let uniform_slots = 512;
         let uniform = make_uniform(device, uniform_slots);
-        let world_bg = uniform_group(device, &world_layout, &uniform, WORLD_SIZE);
+        let world_bg = world_bind_group(
+            device,
+            &world_layout,
+            &uniform,
+            &grass_albedo_view,
+            &grass_normal_view,
+            &grass_sampler,
+        );
         let sky_bg = uniform_group(device, &sky_layout, &uniform, SKY_SIZE);
         let emit_bg = uniform_group(device, &emit_layout, &uniform, EMIT_SIZE);
         let (color, color_view, depth, depth_view, blit_bg) =
@@ -180,6 +200,12 @@ impl SceneGpu {
             snow,
             target_is_srgb: target_format.is_srgb(),
             terrain_map: MapId::Valley,
+            grass_ready: false,
+            grass_albedo,
+            grass_normal,
+            grass_albedo_view,
+            grass_normal_view,
+            grass_sampler,
         }
     }
 
@@ -192,6 +218,7 @@ impl SceneGpu {
         height: u32,
         frame: &DrawFrame,
     ) {
+        self.upload_grass(queue);
         if self.terrain_map != frame.map {
             self.meshes[0] = upload(device, "terrain", &terrain::sample_mesh_of(frame.map));
             self.terrain_map = frame.map;
@@ -264,7 +291,7 @@ impl SceneGpu {
             lit_offs.push(push(
                 &mut staging,
                 &mut cursor,
-                bytemuck::bytes_of(&world_uniform(draw, frame.proj * frame.view, frame.eye, frame.sun, frame.fog, frame.fog_density)),
+                bytemuck::bytes_of(&world_uniform(draw, frame.proj * frame.view, frame.eye, frame.sun, frame.fog, frame.fog_density, frame.time, frame.map)),
             ));
         }
         let mut emit_offs = Vec::with_capacity(frame.emit.len());
@@ -281,7 +308,7 @@ impl SceneGpu {
             vm_offs.push(push(
                 &mut staging,
                 &mut cursor,
-                bytemuck::bytes_of(&world_uniform(draw, frame.vm_proj, Vec3::ZERO, vm_sun, Vec3::ZERO, 0.0)),
+                bytemuck::bytes_of(&world_uniform(draw, frame.vm_proj, Vec3::ZERO, vm_sun, Vec3::ZERO, 0.0, 0.0, frame.map)),
             ));
         }
 
@@ -377,20 +404,38 @@ impl SceneGpu {
         }
     }
 
+    fn upload_grass(&mut self, queue: &wgpu::Queue) {
+        if self.grass_ready {
+            return;
+        }
+        let (albedo, normal) = grass::bake_textures();
+        upload_rgba_mips(queue, &self.grass_albedo, &albedo, grass::TEX_SIZE);
+        upload_rgba_mips(queue, &self.grass_normal, &normal, grass::TEX_SIZE);
+        self.grass_ready = true;
+    }
+
     fn ensure_slots(&mut self, device: &wgpu::Device, need: u32) {
         if need <= self.uniform_slots {
             return;
         }
         self.uniform_slots = need.next_power_of_two().max(self.uniform_slots * 2);
         self.uniform = make_uniform(device, self.uniform_slots);
-        self.world_bg = uniform_group(device, &self.world_layout, &self.uniform, WORLD_SIZE);
+        self.world_bg = world_bind_group(
+            device,
+            &self.world_layout,
+            &self.uniform,
+            &self.grass_albedo_view,
+            &self.grass_normal_view,
+            &self.grass_sampler,
+        );
         self.sky_bg = uniform_group(device, &self.sky_layout, &self.uniform, SKY_SIZE);
         self.emit_bg = uniform_group(device, &self.emit_layout, &self.uniform, EMIT_SIZE);
     }
 }
 
-fn world_uniform(draw: &LitDraw, vp: Mat4, cam: Vec3, sun: Vec3, fog: Vec3, density: f32) -> WorldUniform {
+fn world_uniform(draw: &LitDraw, vp: Mat4, cam: Vec3, sun: Vec3, fog: Vec3, density: f32, time: f32, map: MapId) -> WorldUniform {
     let n = normal_columns(draw.model);
+    let style = terrain::surface_style(map);
     WorldUniform {
         mvp: (vp * draw.model).to_cols_array_2d(),
         model: draw.model.to_cols_array_2d(),
@@ -404,7 +449,11 @@ fn world_uniform(draw: &LitDraw, vp: Mat4, cam: Vec3, sun: Vec3, fog: Vec3, dens
         fog: fog.to_array(),
         pad0: density,
         color: draw.color.to_array(),
-        pad1: 0.0,
+        pad1: time,
+        ground_cover: style.cover,
+        ground_soil: style.soil,
+        ground_rock: style.rock,
+        ground_rules: style.rules,
     }
 }
 
@@ -413,6 +462,187 @@ fn emit_uniform(draw: &EmitDraw, vp: Mat4) -> EmitUniform {
         mvp: (vp * draw.model).to_cols_array_2d(),
         color: draw.color,
     }
+}
+
+fn world_bind_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("world"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: NonZeroU64::new(WORLD_SIZE),
+                },
+                count: None,
+            },
+            texture_entry(1),
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            texture_entry(3),
+        ],
+    })
+}
+
+fn texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    }
+}
+
+fn world_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    buffer: &wgpu::Buffer,
+    albedo: &wgpu::TextureView,
+    normal: &wgpu::TextureView,
+    sampler: &wgpu::Sampler,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("world"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer,
+                    offset: 0,
+                    size: NonZeroU64::new(WORLD_SIZE),
+                }),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(albedo),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(normal),
+            },
+        ],
+    })
+}
+
+fn grass_textures(
+    device: &wgpu::Device,
+) -> (
+    wgpu::Texture,
+    wgpu::TextureView,
+    wgpu::Texture,
+    wgpu::TextureView,
+    wgpu::Sampler,
+) {
+    let size = grass::TEX_SIZE;
+    let mips = size.trailing_zeros() + 1;
+    let make = |label: &str| {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: mips,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        })
+    };
+    let albedo = make("grass-albedo");
+    let normal = make("grass-normal");
+    let albedo_view = albedo.create_view(&wgpu::TextureViewDescriptor::default());
+    let normal_view = normal.create_view(&wgpu::TextureViewDescriptor::default());
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("grass"),
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::MipmapFilterMode::Linear,
+        anisotropy_clamp: 8,
+        ..Default::default()
+    });
+    (albedo, albedo_view, normal, normal_view, sampler)
+}
+
+fn upload_rgba_mips(queue: &wgpu::Queue, texture: &wgpu::Texture, base: &[u8], size: u32) {
+    let mut mip = base.to_vec();
+    let mut dim = size;
+    let mut level = 0u32;
+    loop {
+        let row = dim * 4;
+        let padded = row.div_ceil(256) * 256;
+        let mut packed = vec![0u8; (padded * dim) as usize];
+        for y in 0..dim as usize {
+            let src = y * row as usize;
+            let dst = y * padded as usize;
+            packed[dst..dst + row as usize].copy_from_slice(&mip[src..src + row as usize]);
+        }
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: level,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &packed,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded),
+                rows_per_image: Some(dim),
+            },
+            wgpu::Extent3d {
+                width: dim,
+                height: dim,
+                depth_or_array_layers: 1,
+            },
+        );
+        if dim == 1 {
+            break;
+        }
+        mip = downsample_rgba(&mip, dim);
+        dim /= 2;
+        level += 1;
+    }
+}
+
+fn downsample_rgba(src: &[u8], size: u32) -> Vec<u8> {
+    let n = size / 2;
+    let mut dst = vec![0u8; (n * n * 4) as usize];
+    for y in 0..n {
+        for x in 0..n {
+            for c in 0..4u32 {
+                let mut sum = 0u32;
+                for dy in 0..2u32 {
+                    for dx in 0..2u32 {
+                        let sx = x * 2 + dx;
+                        let sy = y * 2 + dy;
+                        sum += src[((sy * size + sx) * 4 + c) as usize] as u32;
+                    }
+                }
+                dst[((y * n + x) * 4 + c) as usize] = (sum / 4) as u8;
+            }
+        }
+    }
+    dst
 }
 
 fn uniform_layout(device: &wgpu::Device, label: &str, size: u64) -> wgpu::BindGroupLayout {
@@ -966,8 +1196,35 @@ mod shader_check {
                 ("desktop", 1280u32, 800u32, 0.0),
                 ("portrait", 390, 844, 0.0),
                 ("firing", 1280, 800, 0.98),
+                ("reload-open", 1280, 800, 0.72),
+                ("reload-feed", 1280, 800, 0.25),
+                ("projectile", 1280, 800, 0.0),
+                ("projectile-flight", 1280, 800, 0.0),
+                ("chaingun", 1280, 800, 0.0),
+                ("chaingun-portrait", 390, 844, 0.0),
+                ("grenade", 1280, 800, 0.0),
+                ("grenade-portrait", 390, 844, 0.0),
+                ("chaingun-shot", 1280, 800, 0.0),
+                ("grenade-shot", 1280, 800, 0.0),
             ] {
                 world.players[0].cooldown = cooldown;
+                world.discs.clear();
+                world.players[0].weapon = if name.starts_with("chaingun") { 1 }
+                    else if name.starts_with("grenade") { 2 } else { 0 };
+                world.input.weapon = world.players[0].weapon;
+                if name.starts_with("projectile") || name.ends_with("shot") {
+                    // Clear the base flag so its pickup model cannot obscure
+                    // the launch sequence when exercising the real game tick.
+                    world.players[0].pos.y += 10.0;
+                    world.input.fire = true;
+                    world.tick(1.0 / 60.0);
+                    world.input.fire = false;
+                    if name == "projectile-flight" { world.tick(0.05); }
+                    if name == "grenade-shot" {
+                        for _ in 0..18 { world.tick(1.0 / 60.0); }
+                    }
+                    assert!(!world.discs.is_empty(), "capture a real fired round");
+                }
                 let frame = crate::drawlist::build_frame(&world, width as f32 / height as f32, 0.0);
                 let mut encoder = device.create_command_encoder(&Default::default());
                 scene.render(&device, &queue, &mut encoder, width, height, &frame);
@@ -1012,5 +1269,71 @@ mod shader_check {
             naga::valid::Capabilities::all(),
         );
         validator.validate(&module).expect("wgsl validate");
+    }
+
+    #[test]
+    #[ignore = "requires a GPU adapter"]
+    fn render_grass_captures() {
+        use super::*;
+        pollster::block_on(async {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+            let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default())
+                .await.expect("GPU adapter");
+            let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default())
+                .await.expect("GPU device");
+            let mut scene = SceneGpu::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+            std::fs::create_dir_all("screenshots").unwrap();
+            let shoot = |scene: &mut SceneGpu, world: &crate::sim::World, name: &str, w: u32, h: u32| {
+                let frame = crate::drawlist::build_frame(world, w as f32 / h as f32, 0.016);
+                let mut encoder = device.create_command_encoder(&Default::default());
+                scene.render(&device, &queue, &mut encoder, w, h, &frame);
+                let stride = (w * 4).div_ceil(256) * 256;
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("capture"),
+                    size: (stride * h) as u64,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                });
+                encoder.copy_texture_to_buffer(
+                    scene.color.as_image_copy(),
+                    wgpu::TexelCopyBufferInfo {
+                        buffer: &buffer,
+                        layout: wgpu::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(stride),
+                            rows_per_image: Some(h),
+                        },
+                    },
+                    wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                );
+                queue.submit([encoder.finish()]);
+                let (tx, rx) = std::sync::mpsc::channel();
+                buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| { tx.send(r).unwrap(); });
+                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                rx.recv().unwrap().unwrap();
+                let mapped = buffer.slice(..).get_mapped_range().unwrap();
+                let pixels: Vec<u8> = mapped.chunks(stride as usize)
+                    .flat_map(|row| row[..w as usize * 4].iter().copied()).collect();
+                let path = format!("screenshots/grass-look-{name}.png");
+                let mut encoder = png::Encoder::new(std::fs::File::create(&path).unwrap(), w, h);
+                encoder.set_color(png::ColorType::Rgba);
+                encoder.set_depth(png::BitDepth::Eight);
+                encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
+                println!("Rendered {path}");
+            };
+            let mut world = crate::sim::World::new();
+            world.set_map(MapId::Raindance);
+            world.flyby = 0.6;
+            shoot(&mut scene, &world, "menu", 1280, 800);
+            world.flyby = 2.4;
+            shoot(&mut scene, &world, "menu-b", 1280, 800);
+            world.start_match(true);
+            world.players.truncate(1);
+            world.players[0].yaw = std::f32::consts::PI;
+            world.players[0].pitch = -0.18;
+            shoot(&mut scene, &world, "ahead", 1280, 800);
+            world.players[0].pitch = -0.62;
+            shoot(&mut scene, &world, "down", 1280, 800);
+        });
     }
 }

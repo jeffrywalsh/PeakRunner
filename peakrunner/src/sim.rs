@@ -1,4 +1,4 @@
-use glam::{Vec2, Vec3};
+use glam::{Mat4, Vec2, Vec3};
 
 use crate::terrain::{
     height, pillars, MapId, Pillar, EMBER_HOME, EYE, GLACIER_HOME, PLAYER_RADIUS,
@@ -42,11 +42,25 @@ const MIN_JET_ENERGY: f32 = 3.0;
 const DISC_SPEED: f32 = 95.0;
 /// Classic `velInheritFactor`. Without this the disc runs away and you cannot disc jump.
 const DISC_INHERIT: f32 = 0.75;
+pub const DISC_RELOAD: f32 = 1.05;
+/// Viewmodel pose. The world muzzle uses the same numbers, or the disc leaves the eye.
+pub const VM_FOV: f32 = 65.0;
+pub const VM_TURN_Y: f32 = 0.18;
+pub const VM_TURN_X: f32 = -0.08;
+pub const VM_DISC_TURN_Y: f32 = 0.005;
+pub const VM_DISC_TURN_X: f32 = 0.004;
+pub const VM_ANCHOR_DISC: Vec3 = Vec3::new(0.40, -0.30, -0.70);
+pub const VM_ANCHOR_BOLT: Vec3 = Vec3::new(0.32, -0.28, -0.62);
+pub const VM_MUZZLE_DISC: Vec3 = Vec3::new(0.0, 0.075, -0.79);
+pub const VM_MUZZLE_BOLT: Vec3 = Vec3::new(0.0, 0.02, -0.59);
 /// Classic `damageRadius`.
 const DISC_RADIUS: f32 = 7.5;
 /// Classic `kickBackStrength` 2000 on a 90 kg body, at the center of the blast.
 const DISC_KICK: f32 = 2000.0 / 90.0;
-const BOLT_SPEED: f32 = 98.0;
+const BOLT_SPEED: f32 = 420.0;
+pub fn weapon_reload(kind: u8) -> f32 {
+    match kind { 0 => DISC_RELOAD, 1 => 0.075, _ => 0.85 }
+}
 const MATCH_TIME: f32 = 8.0 * 60.0;
 const CAPTURES: u32 = 3;
 const SENS: f32 = 0.00235;
@@ -145,7 +159,7 @@ pub struct Disc {
     pub team: Team,
     pub owner: usize,
     pub life: f32,
-    pub kind: u8, // 0 disc, 1 bolt
+    pub kind: u8, // 0 disc, 1 bullet, 2 grenade
     pub spin: f32,
 }
 
@@ -154,6 +168,11 @@ pub struct Explosion {
     pub age: f32,
     pub max_r: f32,
     pub kind: u8,
+}
+
+pub struct SmokePuff {
+    pub pos: Vec3,
+    pub age: f32,
 }
 
 pub struct Flag {
@@ -168,6 +187,7 @@ pub struct World {
     pub players: Vec<Player>,
     pub discs: Vec<Disc>,
     pub explosions: Vec<Explosion>,
+    pub smoke: Vec<SmokePuff>,
     pub flags: [Flag; 2],
     pub pillars: Vec<Pillar>,
     pub score: [u32; 2],
@@ -198,6 +218,33 @@ impl Rng {
     }
 }
 
+pub fn camera_fov(horiz_speed: f32) -> f32 {
+    76.0 + (horiz_speed * 0.14).min(17.0)
+}
+
+/// Camera-space muzzle, widened to the world field of view so it sits on the gun.
+fn muzzle_origin(eye: Vec3, forward: Vec3, weapon: u8, fov_deg: f32) -> Vec3 {
+    let anchor = if weapon == 0 { VM_ANCHOR_DISC } else { VM_ANCHOR_BOLT };
+    let local = if weapon == 0 { VM_MUZZLE_DISC } else { VM_MUZZLE_BOLT };
+    let (yaw, pitch) = if weapon == 0 { (VM_DISC_TURN_Y, VM_DISC_TURN_X) }
+        else { (VM_TURN_Y, VM_TURN_X) };
+    let turned = Mat4::from_rotation_y(yaw) * Mat4::from_rotation_x(pitch);
+    let cam = anchor + turned.transform_point3(local);
+    let widen = (fov_deg * 0.5).to_radians().tan() / (VM_FOV * 0.5).to_radians().tan();
+    let (right, up) = view_basis(forward);
+    eye + right * cam.x * widen + up * cam.y * widen + forward * (-cam.z)
+}
+
+fn view_basis(forward: Vec3) -> (Vec3, Vec3) {
+    let mut right = forward.cross(Vec3::Y);
+    if right.length_squared() < 1.0e-6 {
+        right = forward.cross(Vec3::Z);
+    }
+    let right = right.normalize();
+    let up = right.cross(forward).normalize();
+    (right, up)
+}
+
 fn look_dir(yaw: f32, pitch: f32) -> Vec3 {
     let cp = pitch.cos();
     Vec3::new(-yaw.sin() * cp, pitch.sin(), -yaw.cos() * cp)
@@ -218,6 +265,7 @@ impl World {
             players: Vec::new(),
             discs: Vec::new(),
             explosions: Vec::new(),
+            smoke: Vec::new(),
             flags: [
                 Flag {
                     team: Team::Ember,
@@ -296,6 +344,7 @@ impl World {
         self.players.clear();
         self.discs.clear();
         self.explosions.clear();
+        self.smoke.clear();
         self.score = [0, 0];
         self.kills = 0;
         self.deaths = 0;
@@ -320,6 +369,7 @@ impl World {
         self.players.clear();
         self.discs.clear();
         self.explosions.clear();
+        self.smoke.clear();
         self.score = [0, 0];
         self.kills = 0;
         self.deaths = 0;
@@ -424,6 +474,7 @@ impl World {
         if has("Digit1") {
             self.input.weapon = 0;
         }
+        if has("Digit3") { self.input.weapon = 2; }
     }
 
     pub fn tick(&mut self, dt: f32) {
@@ -447,7 +498,7 @@ impl World {
 
         if !self.players.is_empty() {
             let p = &mut self.players[self.player_id];
-            p.weapon = self.input.weapon.min(1);
+            p.weapon = self.input.weapon.min(2);
             p.yaw -= self.input.look_stick_x * 1.8 * dt;
             p.pitch = (p.pitch - self.input.look_stick_y * 1.4 * dt).clamp(-1.52, 1.52);
         }
@@ -596,6 +647,8 @@ impl World {
 
             let map = self.map;
             let edge = self.map_size() - 6.0;
+            let disc_ready = is_local && self.players[i].weapon == 0
+                && self.players[i].cooldown > 0.0 && self.players[i].cooldown <= dt;
             let land_hit = {
                 let p = &mut self.players[i];
                 p.cooldown = (p.cooldown - dt).max(0.0);
@@ -712,7 +765,7 @@ impl World {
                 }
                 apply_speed_limits(p, dt);
 
-                p.pos += p.vel * dt;
+                let impact_speed = move_over_terrain(map, p, jump_held, dt);
                 if p.skiing {
                     let ground_y = crate::terrain::height_on(map, p.pos.x, p.pos.z) + PLAYER_RADIUS;
                     let drop = p.pos.y - ground_y;
@@ -751,8 +804,8 @@ impl World {
                 }
 
                 let mut land_hit = 0.0;
-                if !was_ground && p.on_ground && p.vel.y < -18.0 {
-                    p.health -= ((-p.vel.y - 18.0) * 1.4).min(22.0);
+                if !was_ground && p.on_ground && impact_speed > 18.0 {
+                    p.health -= landing_damage(impact_speed);
                     land_hit = 0.25;
                 }
                 land_hit
@@ -761,6 +814,7 @@ impl World {
             if land_hit > 0.0 && i == self.player_id {
                 self.trauma = (self.trauma + land_hit).min(1.0);
             }
+            if disc_ready { self.push_event("disc_ready"); }
 
             self.collide_pillars(i);
 
@@ -841,13 +895,23 @@ impl World {
     fn shoot(&mut self, i: usize) {
         let p = &self.players[i];
         let dir = look_dir(p.yaw, p.pitch);
-        let origin = p.pos + Vec3::Y * 1.2 + dir * 1.05;
         let kind = p.weapon;
-        let speed = if kind == 0 { DISC_SPEED } else { BOLT_SPEED };
-        let inherit = if kind == 0 { DISC_INHERIT } else { 0.35 };
-        let mut vel = dir * speed + p.vel * inherit;
+        let eye = p.pos + Vec3::Y * EYE;
+        let spd = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
+        let origin = muzzle_origin(eye, dir, kind, camera_fov(spd));
+        // Leave the muzzle, but steer onto the crosshair so a close shot still hits.
+        let aim = eye + dir * 80.0;
+        let shot = (aim - origin).normalize_or_zero();
+        let shot = if shot.length_squared() > 0.5 { shot } else { dir };
+        let speed = match kind { 0 => DISC_SPEED, 1 => BOLT_SPEED, _ => 48.0 };
+        let inherit = if kind == 0 { DISC_INHERIT } else { 0.75 };
+        let mut vel = shot * speed + p.vel * inherit;
         let is_bot = p.is_bot;
         let team = p.team;
+        if kind == 1 {
+            let (right, up) = view_basis(dir);
+            vel += (right * (self.rng() - 0.5) + up * (self.rng() - 0.5)) * 6.0;
+        }
         if is_bot {
             let a = self.rng() - 0.5;
             let b = self.rng() - 0.5;
@@ -859,64 +923,99 @@ impl World {
             vel,
             team,
             owner: i,
-            life: if kind == 0 { 5.0 } else { 1.6 },
+            life: match kind { 0 => 5.0, 1 => 1.2, _ => 2.0 },
             kind,
             spin: 0.0,
         });
         {
             let p = &mut self.players[i];
-            p.cooldown = if kind == 0 { 1.05 } else { 0.16 };
-            if i == self.player_id {
-                p.pitch = (p.pitch + 0.018).min(1.5);
+            p.cooldown = weapon_reload(kind);
+            if i == self.player_id && kind != 0 {
+                p.pitch = (p.pitch + if kind == 1 { 0.002 } else { 0.012 }).min(1.5);
             }
         }
         if i == self.player_id {
-            self.trauma = (self.trauma + 0.08).min(1.0);
-            self.push_event(if kind == 0 { "disc" } else { "bolt" });
+            self.trauma = (self.trauma + if kind == 1 { 0.015 } else { 0.08 }).min(1.0);
+            self.push_event(match kind { 0 => "disc", 1 => "chain", _ => "grenade" });
         }
     }
 
     fn step_discs(&mut self, dt: f32) {
+        for puff in &mut self.smoke {
+            puff.age += dt;
+            puff.pos.y += dt * 0.35;
+        }
+        self.smoke.retain(|p| p.age < 0.5);
         let n_sub = 4;
         let sdt = dt / n_sub as f32;
         let mut explode: Vec<(Vec3, usize, u8, Team)> = Vec::new();
         let mut keep = Vec::new();
+        let mut bullet_hits = Vec::new();
 
         let map = self.map;
         let far = self.map_size() - 1.0;
         for mut d in self.discs.drain(..) {
+            if d.kind == 2 && self.smoke.len() < 256 {
+                self.smoke.push(SmokePuff { pos: d.pos, age: 0.0 });
+            }
             d.life -= dt;
             if d.life <= 0.0 {
-                explode.push((d.pos, d.owner, d.kind, d.team));
+                if d.kind != 1 { explode.push((d.pos, d.owner, d.kind, d.team)); }
                 continue;
             }
             let mut dead = false;
             for _ in 0..n_sub {
                 d.spin += sdt * 42.0;
-                // Discs fly straight; only the repeater bolt is ballistic.
-                let grav = if d.kind == 0 { 0.0 } else { 0.22 };
+                let grav = if d.kind == 2 { 1.0 } else { 0.0 };
                 d.vel.y -= GRAVITY * grav * sdt;
                 let next = d.pos + d.vel * sdt;
-                let h = crate::terrain::height_on(map, next.x, next.z);
-                if next.y < h + 0.28 || next.x < 1.0 || next.x > far || next.z < 1.0 || next.z > far
-                {
-                    explode.push((Vec3::new(next.x, h.max(next.y), next.z), d.owner, d.kind, d.team));
-                    dead = true;
-                    break;
+                let mut hit = obstacle_hit(map, &self.pillars, d.pos, next, 0.12);
+                // Keep the actual boundary impact height, rather than moving
+                // an airborne explosion down onto the terrain.
+                for (a, b) in [(d.pos.x, next.x), (d.pos.z, next.z)] {
+                    if b < 1.0 || b > far {
+                        let t = if (b - a).abs() > 1e-6 {
+                            ((b.clamp(1.0, far) - a) / (b - a)).clamp(0.0, 1.0)
+                        } else { 0.0 };
+                        hit = Some(hit.map_or(t, |old| old.min(t)));
+                    }
                 }
-                for (pi, pl) in self.players.iter().enumerate() {
+                let mut victim = None;
+                for (idx, pl) in self.players.iter().enumerate() {
                     if !pl.alive || pl.team == d.team {
                         continue;
                     }
                     let c = pl.pos + Vec3::Y * 0.9;
-                    if next.distance(c) < PLAYER_RADIUS + 0.45 {
-                        explode.push((next, d.owner, d.kind, d.team));
-                        dead = true;
-                        let _ = pi;
-                        break;
+                    if let Some(t) = segment_sphere(d.pos, next, c, PLAYER_RADIUS + 0.45) {
+                        if hit.is_none_or(|old| t < old) {
+                            hit = Some(t);
+                            victim = Some(idx);
+                        }
                     }
                 }
-                if dead {
+                if let Some(t) = hit {
+                    let contact = d.pos.lerp(next, t);
+                    if d.kind == 2 {
+                        // Brief launch safety lets close surfaces bounce the
+                        // shell. Armed shells detonate on their next contact.
+                        if d.life <= 1.65 {
+                            explode.push((contact, d.owner, d.kind, d.team));
+                            dead = true;
+                            break;
+                        }
+                        let normal = if let Some(idx) = victim {
+                            (contact - (self.players[idx].pos + Vec3::Y * 0.9)).normalize_or_zero()
+                        } else { grenade_contact_normal(map, &self.pillars, contact, far) };
+                        let inward = d.vel.dot(normal);
+                        if inward < 0.0 { d.vel -= normal * inward * 1.5; }
+                        d.vel *= 0.82;
+                        d.pos = contact + normal * 0.03;
+                        continue;
+                    }
+                    if d.kind == 1 {
+                        if let Some(idx) = victim { bullet_hits.push((idx, d.owner)); }
+                    } else { explode.push((contact, d.owner, d.kind, d.team)); }
+                    dead = true;
                     break;
                 }
                 d.pos = next;
@@ -926,13 +1025,23 @@ impl World {
             }
         }
         self.discs = keep;
+        for (idx, owner) in bullet_hits {
+            if !self.players[idx].alive { continue; }
+            self.players[idx].health -= 8.0;
+            if owner == self.player_id { self.hitmarker = 1.0; self.push_event("hit"); }
+            if idx == self.player_id { self.damage_flash = 0.35; self.push_event("pain"); }
+            if self.players[idx].health <= 0.0 {
+                self.kill(idx, Some(owner));
+                if owner == self.player_id { self.kills += 1; self.msg("FRAG", 1.1); }
+            }
+        }
         for (pos, owner, kind, team) in explode {
             self.explode(pos, owner, kind, team);
         }
     }
 
     fn explode(&mut self, pos: Vec3, owner: usize, kind: u8, team: Team) {
-        let max_r = if kind == 0 { DISC_RADIUS } else { 2.2 };
+        let max_r = if kind == 0 { DISC_RADIUS } else { 9.0 };
         self.explosions.push(Explosion {
             pos,
             age: 0.0,
@@ -940,7 +1049,7 @@ impl World {
             kind,
         });
         self.push_event("boom");
-        let dmg_core = if kind == 0 { 52.0 } else { 14.0 };
+        let dmg_core = if kind == 0 { 52.0 } else { 68.0 };
         let mut killed_by_player = false;
         let pid = self.player_id;
         for i in 0..self.players.len() {
@@ -956,11 +1065,16 @@ impl World {
             if same && i != owner {
                 continue;
             }
+            let body = self.players[i].pos + Vec3::Y * 0.7;
+            // Terrain and midfield pillars shield splash as well as projectiles.
+            if obstacle_hit(self.map, &self.pillars, pos + Vec3::Y * 0.02, body, 0.0)
+                .is_some_and(|t| t < 0.995) { continue; }
             let mul = if i == owner { 0.4 } else { 1.0 };
-            let dmg = (12.0 + dmg_core * fall * fall) * mul;
+            // Preserve point-blank damage, but taper to zero at the radius;
+            // the old constant 12 caused a hard damage jump at its edge.
+            let dmg = (12.0 * fall + dmg_core * fall * fall) * mul;
             self.players[i].health -= dmg;
             // Kick from the blast, not from the chest, so a disc at your feet throws you up.
-            let body = self.players[i].pos + Vec3::Y * 0.7;
             let away = (body - pos).normalize_or_zero();
             let kick = if kind == 0 { DISC_KICK } else { 6.0 };
             let push = away * kick * fall;
@@ -1249,7 +1363,7 @@ impl World {
         };
         let eye = p.pos + Vec3::Y * EYE + off + Vec3::Y * bob;
         let dir = look_dir(p.yaw, p.pitch);
-        let fov = 76.0 + (spd * 0.14).min(17.0);
+        let fov = camera_fov(spd);
         (eye, dir, fov)
     }
 
@@ -1368,6 +1482,199 @@ mod controls {
     }
 
     #[test]
+    fn bullets_hit_one_target_without_splash_or_expiry_explosions() {
+        let mut world = solo_airborne();
+        for x in [128.0, 130.0] {
+            world.players.push(make_player(Team::Glacier, false,
+                Vec3::new(x, 150.0, 120.0), 0.0, BotRole::Defense));
+        }
+        world.discs.push(Disc { pos: Vec3::new(128.0, 150.9, 125.0),
+            vel: Vec3::new(0.0, 0.0, -1000.0), team: Team::Ember,
+            owner: 0, life: 1.0, kind: 1, spin: 0.0 });
+        world.step_discs(STEP);
+        assert_eq!(world.players[1].health, 92.0);
+        assert_eq!(world.players[2].health, 100.0);
+        assert!(world.explosions.is_empty());
+        assert!(world.discs.is_empty());
+        world.players[0].weapon = 1;
+        world.shoot(0);
+        world.discs[0].life = 0.001;
+        world.step_discs(STEP);
+        assert!(world.explosions.is_empty());
+        assert!(world.discs.is_empty());
+    }
+
+    #[test]
+    fn grenade_bounces_then_explodes_once_at_fuse_end() {
+        for map in [MapId::Valley, MapId::Raindance] {
+            let mut world = solo_airborne();
+            world.set_map(map);
+            let home = crate::terrain::info(map).ember;
+            let ground = crate::terrain::height_on(map, home.x, home.z);
+            world.discs.push(Disc { pos: Vec3::new(home.x, ground + 0.25, home.z),
+                vel: Vec3::new(0.0, -30.0, 0.0), team: Team::Ember,
+                owner: 0, life: 2.0, kind: 2, spin: 0.0 });
+            world.step_discs(STEP);
+            assert_eq!(world.discs.len(), 1);
+            assert!(world.discs[0].vel.y > 0.0);
+            assert!(world.explosions.is_empty());
+            world.discs[0].life = 0.001;
+            world.step_discs(STEP);
+            assert!(world.discs.is_empty());
+            assert_eq!(world.explosions.len(), 1);
+            world.step_discs(STEP);
+            assert_eq!(world.explosions.len(), 1);
+        }
+    }
+
+    #[test]
+    fn pillar_stops_bullets_and_bounces_grenades_without_detonation() {
+        for kind in [1, 2] {
+            let mut world = solo_airborne();
+            world.pillars = vec![Pillar { x: 128.0, z: 124.0, r: 1.0, h: 200.0 }];
+            world.discs.push(Disc { pos: Vec3::new(128.0, 150.0, 126.0),
+                vel: Vec3::new(0.0, 0.0, -400.0), team: Team::Ember,
+                owner: 0, life: 2.0, kind, spin: 0.0 });
+            world.step_discs(STEP);
+            assert!(world.explosions.is_empty());
+            if kind == 1 { assert!(world.discs.is_empty()); }
+            else { assert_eq!(world.discs.len(), 1); assert!(world.discs[0].vel.z > 0.0); }
+        }
+    }
+
+    #[test]
+    fn armed_grenade_detonates_on_contact_and_smoke_outlives_it() {
+        let mut world = solo_airborne();
+        world.pillars = vec![Pillar { x: 128.0, z: 124.0, r: 1.0, h: 200.0 }];
+        world.discs.push(Disc { pos: Vec3::new(128.0, 150.0, 126.0),
+            vel: Vec3::new(0.0, 0.0, -400.0), team: Team::Ember,
+            owner: 0, life: 1.5, kind: 2, spin: 0.0 });
+        world.step_discs(STEP);
+        assert!(world.discs.is_empty());
+        assert_eq!(world.explosions.len(), 1);
+        assert!(!world.smoke.is_empty());
+        world.step_discs(0.6);
+        assert!(world.smoke.is_empty());
+        assert_eq!(world.explosions.len(), 1);
+    }
+
+    #[test]
+    fn grenade_arcs_and_third_slot_can_fire() {
+        let mut world = solo_airborne();
+        world.input.weapon = 2;
+        world.input.fire = true;
+        step(&mut world, 1);
+        world.input.fire = false;
+        assert_eq!(world.players[0].weapon, 2);
+        assert_eq!(world.discs[0].kind, 2);
+        let vy = world.discs[0].vel.y;
+        world.step_discs(0.1);
+        assert!(world.discs[0].vel.y < vy - 1.0);
+        assert!(world.explosions.is_empty());
+    }
+
+    #[test]
+    fn landing_damage_is_halved_and_rounded_down() {
+        for (speed, damage) in [(0.0, 0.0), (18.0, 0.0), (19.0, 0.0),
+            (20.0, 1.0), (23.0, 3.0), (30.0, 8.0), (80.0, 11.0)] {
+            assert_eq!(landing_damage(speed), damage);
+        }
+    }
+
+    #[test]
+    fn a_fast_landing_is_resolved_before_the_frame_is_drawn() {
+        for map in [MapId::Valley, MapId::Raindance] {
+            let mut world = solo_airborne();
+            world.set_map(map);
+            let home = crate::terrain::info(map).ember;
+            let floor = crate::terrain::height_on(map, home.x, home.z) + PLAYER_RADIUS;
+            world.players[0].pos = Vec3::new(home.x, floor + 0.25, home.z);
+            world.players[0].vel = Vec3::new(50.0, -80.0, 0.0);
+            world.input.jump = true;
+            step(&mut world, 1);
+            let p = &world.players[0];
+            let floor = crate::terrain::height_on(map, p.pos.x, p.pos.z) + PLAYER_RADIUS;
+            assert!(p.pos.y >= floor - 0.001, "{map:?}: a fast landing must not render below ground");
+            assert!(p.vel.is_finite() && p.pos.is_finite());
+        }
+    }
+
+    #[test]
+    fn fast_discs_hit_the_nearest_target_between_sample_points() {
+        let mut world = solo_airborne();
+        for z in [118.0, 125.0] {
+            world.players.push(make_player(Team::Glacier, false,
+                Vec3::new(128.0, 150.0 + EYE - 0.9, z), 0.0, BotRole::Defense));
+        }
+        world.shoot(0);
+        world.discs[0].vel = Vec3::new(0.0, 0.0, -2000.0);
+        world.step_discs(STEP);
+        assert!(world.discs.is_empty());
+        assert_eq!(world.explosions.len(), 1);
+        assert!(world.explosions[0].pos.z > 125.0, "nearest target wins regardless of player list order");
+        assert!(world.players[2].health < 100.0);
+    }
+
+    #[test]
+    fn pillars_stop_discs_and_shield_targets_from_splash() {
+        let mut world = solo_airborne();
+        world.pillars = vec![Pillar { x: 128.0, z: 124.0, r: 1.0, h: 200.0 }];
+        world.players.push(make_player(Team::Glacier, false,
+            Vec3::new(128.0, 150.0, 122.0), 0.0, BotRole::Defense));
+        world.shoot(0);
+        world.discs[0].vel = Vec3::new(0.0, 0.0, -2000.0);
+        world.step_discs(STEP);
+        assert!(world.discs.is_empty());
+        assert!(world.explosions[0].pos.z > 124.8);
+        assert_eq!(world.players[1].health, 100.0, "solid cover must shield splash");
+    }
+
+    #[test]
+    fn disc_aim_stays_on_the_eye_line_and_does_not_drift_up() {
+        let mut world = solo_airborne();
+        let initial_pitch = 0.3;
+        world.players[0].pitch = initial_pitch;
+        for _ in 0..5 { world.shoot(0); }
+        assert_eq!(world.players[0].pitch, initial_pitch);
+        let p = &world.players[0];
+        let eye = p.pos + Vec3::Y * EYE;
+        let dir = look_dir(0.0, initial_pitch);
+        let d = &world.discs[0];
+        let (right, up) = view_basis(dir);
+        let rel = d.pos - eye;
+        assert!(rel.dot(up) < -0.2, "the disc should leave below the eye, at the gun");
+        assert!(rel.dot(right) > 0.1, "the disc should leave from the right-hand weapon");
+        let aim = (eye + dir * 80.0 - d.pos).normalize();
+        assert!(d.vel.normalize().dot(aim) > 0.999, "the shot still converges on the crosshair");
+    }
+
+    #[test]
+    fn splash_damage_tapers_to_zero_at_the_edge() {
+        let mut world = solo_airborne();
+        let blast = world.players[0].pos + Vec3::X * (DISC_RADIUS - 0.01);
+        world.explode(blast, usize::MAX, 0, Team::Glacier);
+        let damage = 100.0 - world.players[0].health;
+        assert!(damage > 0.0 && damage < 0.05, "edge damage should be negligible, got {damage}");
+    }
+
+    #[test]
+    fn reload_ready_cue_occurs_once_and_fire_stays_gated() {
+        let mut world = solo_airborne();
+        world.input.fire = true;
+        step(&mut world, 1);
+        assert!(world.players[0].cooldown > DISC_RELOAD - STEP * 2.0);
+        step(&mut world, 30);
+        assert_eq!(world.discs.len(), 1, "holding fire cannot bypass reload");
+        world.input.fire = false;
+        let mut cues = 0;
+        for _ in 0..80 {
+            step(&mut world, 1);
+            cues += world.events.matches("disc_ready").count();
+        }
+        assert_eq!(cues, 1);
+    }
+
+    #[test]
     fn airborne_momentum_survives_coasting_and_flag_pickup() {
         for flag in [None, Some(Team::Glacier)] {
             let mut world = solo_airborne();
@@ -1445,12 +1752,23 @@ mod controls {
         world.players[0].vel = Vec3::new(20.0, 0.0, 0.0);
         world.shoot(0);
         let d = &world.discs[0];
-        assert!((d.vel.x - 15.0).abs() < 0.001, "retain weapon velocity inheritance");
-        assert!((d.vel.z + 95.0).abs() < 0.001);
+        let inherited = Vec3::new(20.0, 0.0, 0.0) * DISC_INHERIT;
+        let weapon = d.vel - inherited;
+        assert!(
+            (weapon.length() - DISC_SPEED).abs() < 0.05,
+            "retain weapon velocity inheritance, weapon speed {}",
+            weapon.length()
+        );
+        assert!(weapon.z < -90.0, "the round still flies downrange");
         let y = d.pos.y;
+        let vy = d.vel.y;
         for _ in 0..30 { world.step_discs(STEP); }
         assert_eq!(world.discs.len(), 1);
-        assert!((world.discs[0].pos.y - y).abs() < 0.001, "disc should not sag");
+        let expected = y + vy * 30.0 * STEP;
+        assert!(
+            (world.discs[0].pos.y - expected).abs() < 0.002,
+            "disc should not sag"
+        );
     }
 
     #[test]
@@ -2009,8 +2327,94 @@ mod controls {
     }
 }
 
+fn segment_sphere(start: Vec3, end: Vec3, center: Vec3, radius: f32) -> Option<f32> {
+    let offset = start - center;
+    let c = offset.length_squared() - radius * radius;
+    if c <= 0.0 { return Some(0.0); }
+    let travel = end - start;
+    let a = travel.length_squared();
+    if a < 1e-10 { return None; }
+    let b = offset.dot(travel);
+    let discriminant = b * b - a * c;
+    if discriminant < 0.0 { return None; }
+    let t = (-b - discriminant.sqrt()) / a;
+    (0.0..=1.0).contains(&t).then_some(t)
+}
+
+fn segment_box(start: Vec3, end: Vec3, low: Vec3, high: Vec3) -> Option<f32> {
+    let delta = end - start;
+    let mut entry = 0.0_f32;
+    let mut exit = 1.0_f32;
+    for axis in 0..3 {
+        if delta[axis].abs() < 1e-7 {
+            if start[axis] < low[axis] || start[axis] > high[axis] { return None; }
+        } else {
+            let a = (low[axis] - start[axis]) / delta[axis];
+            let b = (high[axis] - start[axis]) / delta[axis];
+            entry = entry.max(a.min(b));
+            exit = exit.min(a.max(b));
+            if entry > exit { return None; }
+        }
+    }
+    Some(entry)
+}
+
+fn obstacle_hit(map: MapId, pillars: &[Pillar], start: Vec3, end: Vec3, radius: f32) -> Option<f32> {
+    let mut hit = crate::terrain::segment_hit(map, start, end, radius);
+    for pillar in pillars {
+        let y = crate::terrain::height_on(map, pillar.x, pillar.z);
+        // Match the rendered square column, not an unrelated circular volume.
+        let half = pillar.r * 0.8;
+        let padding = Vec3::splat(radius);
+        let low = Vec3::new(pillar.x - half, y, pillar.z - half) - padding;
+        let high = Vec3::new(pillar.x + half, y + pillar.h, pillar.z + half) + padding;
+        if let Some(t) = segment_box(start, end, low, high) {
+            hit = Some(hit.map_or(t, |old| old.min(t)));
+        }
+    }
+    hit
+}
+
 fn player_mass(_p: &Player) -> f32 {
     MASS
+}
+
+/// Sweep across the rendered ground in short steps, resolving contacts in the
+/// same tick as movement. This changes collision, not gravity/thrust/steering.
+fn move_over_terrain(map: MapId, p: &mut Player, ski_held: bool, dt: f32) -> f32 {
+    let steps = ((p.vel.length() * dt / 0.75).ceil() as usize).clamp(1, 64);
+    let sub_dt = dt / steps as f32;
+    let mut impact = 0.0_f32;
+    for _ in 0..steps {
+        let start = p.pos;
+        let end = start + p.vel * sub_dt;
+        if p.skiing {
+            // Supported skiing keeps the existing smooth contact response once
+            // per tick. Re-projecting at every substep would add artificial
+            // friction and change the movement the player already approved.
+            p.pos = end;
+            p.pos.y = p.pos.y.max(crate::terrain::height_on(map, end.x, end.z) + PLAYER_RADIUS);
+            continue;
+        }
+        if let Some(t) = crate::terrain::segment_hit(map, start, end, PLAYER_RADIUS) {
+            p.pos = start.lerp(end, t);
+            let (ground, face) = crate::terrain::surface_on(map, p.pos.x, p.pos.z);
+            p.pos.y = ground + PLAYER_RADIUS;
+            let inward = p.vel.dot(face);
+            if inward < 0.0 {
+                impact = impact.max(-inward);
+                p.vel -= face * inward;
+                p.on_ground = true;
+                p.skiing = ski_held && !p.jetting;
+            }
+            p.pos += p.vel * (sub_dt * (1.0 - t));
+            let floor = crate::terrain::height_on(map, p.pos.x, p.pos.z) + PLAYER_RADIUS;
+            p.pos.y = p.pos.y.max(floor);
+        } else {
+            p.pos = end;
+        }
+    }
+    impact
 }
 
 fn gravity_for_speed(speed: f32) -> f32 {
@@ -2055,6 +2459,33 @@ fn ski_normal(map: MapId, x: f32, z: f32) -> Vec3 {
     let hd = h(x, z - e);
     let hu = h(x, z + e);
     Vec3::new(hl - hr, 2.0 * e, hd - hu).normalize_or_zero()
+}
+
+fn landing_damage(impact_speed: f32) -> f32 {
+    (((impact_speed - 18.0).max(0.0) * 1.4).min(22.0) * 0.5).floor()
+}
+
+fn grenade_contact_normal(map: MapId, pillars: &[Pillar], p: Vec3, far: f32) -> Vec3 {
+    if p.x <= 1.001 { return Vec3::X; }
+    if p.x >= far - 0.001 { return -Vec3::X; }
+    if p.z <= 1.001 { return Vec3::Z; }
+    if p.z >= far - 0.001 { return -Vec3::Z; }
+    let (height, normal) = crate::terrain::surface_on(map, p.x, p.z);
+    if p.y <= height + 0.15 { return normal; }
+    for pillar in pillars {
+        let half = pillar.r * 0.8 + 0.12;
+        let base = crate::terrain::height_on(map, pillar.x, pillar.z);
+        if (p.x - pillar.x).abs() <= half + 0.02 && (p.z - pillar.z).abs() <= half + 0.02
+            && p.y >= base - 0.14 && p.y <= base + pillar.h + 0.14 {
+            let faces = [((p.x - pillar.x - half).abs(), Vec3::X),
+                ((p.x - pillar.x + half).abs(), -Vec3::X),
+                ((p.z - pillar.z - half).abs(), Vec3::Z),
+                ((p.z - pillar.z + half).abs(), -Vec3::Z),
+                ((p.y - base - pillar.h - 0.12).abs(), Vec3::Y)];
+            return faces.into_iter().min_by(|a, b| a.0.total_cmp(&b.0)).unwrap().1;
+        }
+    }
+    normal
 }
 
 fn jet_falloff(speed: f32) -> f32 {

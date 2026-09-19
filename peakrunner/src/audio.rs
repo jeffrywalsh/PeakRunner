@@ -27,7 +27,7 @@ impl Audio {
                 .ok();
             let jet = sink.as_ref().and_then(|sink| {
                 let player = rodio::Player::connect_new(sink.mixer());
-                let noise = noise_buffer(44_100, 0.06);
+                let noise = noise_buffer();
                 player.append(noise);
                 player.set_volume(0.0);
                 Some(player)
@@ -136,15 +136,9 @@ fn rate() -> std::num::NonZero<u32> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn noise_buffer(frames: usize, gain: f32) -> impl rodio::Source<Item = f32> + Send + 'static {
+fn noise_buffer() -> impl rodio::Source<Item = f32> + Send + 'static {
     use rodio::Source;
-    let mut data = Vec::with_capacity(frames);
-    let mut n = 0x1234u32;
-    for _ in 0..frames {
-        n = n.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        let s = (n >> 8) as f32 / 16_777_216.0 * 2.0 - 1.0;
-        data.push(s * gain);
-    }
+    let data = jet_samples(44_100.0);
     rodio::buffer::SamplesBuffer::new(ch(), rate(), data).repeat_infinite()
 }
 
@@ -152,9 +146,11 @@ fn noise_buffer(frames: usize, gain: f32) -> impl rodio::Source<Item = f32> + Se
 fn synth(name: &str) -> Vec<f32> {
     let sr = 44_100.0;
     match name {
-        "disc" => mix(&[tone(180.0, 0.16, sr, 0.16, -80.0), burst(0.12, sr, 0.22)]),
-        "bolt" => mix(&[tone(1400.0, 0.05, sr, 0.08, 400.0), burst(0.04, sr, 0.1)]),
-        "boom" => mix(&[tone(70.0, 0.22, sr, 0.2, -30.0), burst(0.28, sr, 0.35)]),
+        "disc" => disc_samples(sr, false),
+        "disc_ready" => disc_samples(sr, true),
+        "chain" => firearm_samples(sr, false),
+        "grenade" => firearm_samples(sr, true),
+        "boom" => explosion_samples(sr),
         "hit" => tone(980.0, 0.04, sr, 0.12, 0.0),
         "pain" => burst(0.12, sr, 0.2),
         "death" => tone(220.0, 0.4, sr, 0.16, -160.0),
@@ -168,6 +164,139 @@ fn synth(name: &str) -> Vec<f32> {
         "start" => tone(196.0, 0.3, sr, 0.14, 80.0),
         "end" => tone(262.0, 0.4, sr, 0.14, -60.0),
         _ => Vec::new(),
+    }
+}
+
+/// Shared native/WebAudio PCM: a short mechanical attack, resonant body and
+/// descending spin tail. Original synthesis, not a sample from the Tribes game.
+fn disc_samples(sr: f32, ready: bool) -> Vec<f32> {
+    let duration = if ready { 0.18 } else { 0.48 };
+    let count = (sr * duration) as usize;
+    let mut samples = Vec::with_capacity(count);
+    let mut seed = 0xD15C_u32;
+    let mut phase = 0.0_f32;
+    let mut filtered = 0.0_f32;
+    for i in 0..count {
+        let t = i as f32 / sr;
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let noise = (seed >> 8) as f32 / 16_777_216.0 * 2.0 - 1.0;
+        filtered += (noise - filtered) * (1.0 - (-6500.0 / sr).exp());
+        let frequency = if ready { 480.0 + 500.0 * t } else { 135.0 + 620.0 * (-t * 19.0).exp() };
+        phase += std::f32::consts::TAU * frequency / sr;
+        let click = noise * (-t * 180.0).exp() * 0.2;
+        let sample = if ready {
+            let latch = (t - 0.055).max(0.0);
+            let second_click = if t > 0.055 { filtered * (-latch * 90.0).exp() * 0.18 } else { 0.0 };
+            click + second_click + phase.sin() * (-t * 30.0).exp() * 0.065
+        } else {
+            let body = (std::f32::consts::TAU * 85.0 * t).sin() * (-t * 16.0).exp() * 0.32;
+            let whirr = phase.sin() + (phase * 2.03).sin() * 0.28;
+            let spin = 0.78 + 0.22 * (std::f32::consts::TAU * 43.0 * t).sin();
+            click + body + filtered * (-t * 20.0).exp() * 0.28
+                + whirr * spin * (-t * 9.0).exp() * 0.16
+        };
+        let attack = (t / 0.0015).min(1.0);
+        let release = ((duration - t) / 0.015).clamp(0.0, 1.0);
+        samples.push(sample * attack * release);
+    }
+    samples
+}
+
+/// Low exhaust rumble with a restrained turbine layer, crossfaded at the seam.
+fn jet_samples(sr: f32) -> Vec<f32> {
+    let count = (sr * 2.0) as usize;
+    let overlap = (sr * 0.04) as usize;
+    let mut data = Vec::with_capacity(count + overlap);
+    let mut seed = 0x4A37_u32;
+    let mut low = 0.0;
+    let mut mid = 0.0;
+    for i in 0..count + overlap {
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let noise = (seed >> 8) as f32 / 16_777_216.0 * 2.0 - 1.0;
+        low += (noise - low) * (1.0 - (-1800.0 / sr).exp());
+        mid += (noise - mid) * (1.0 - (-9000.0 / sr).exp());
+        let t = i as f32 / sr;
+        let turbine = (std::f32::consts::TAU * 148.0 * t
+            + (std::f32::consts::TAU * 3.0 * t).sin() * 0.3).sin();
+        data.push(low * 0.65 + mid * 0.13 + turbine * 0.055);
+    }
+    for i in 0..overlap {
+        let blend = i as f32 / overlap as f32;
+        data[i] = data[count + i] * (1.0 - blend) + data[i] * blend;
+    }
+    data.truncate(count);
+    data
+}
+
+fn explosion_samples(sr: f32) -> Vec<f32> {
+    let duration = 0.65;
+    let count = (sr * duration) as usize;
+    let mut data = Vec::with_capacity(count);
+    let mut seed = 0xB00B_u32;
+    let mut low = 0.0;
+    for i in 0..count {
+        let t = i as f32 / sr;
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let noise = (seed >> 8) as f32 / 16_777_216.0 * 2.0 - 1.0;
+        low += (noise - low) * (1.0 - (-2400.0 / sr).exp());
+        let thump = (std::f32::consts::TAU * (68.0 * t - 18.0 * t * t)).sin();
+        let body = thump * (-t * 12.0).exp() * 0.34 + low * (-t * 7.0).exp() * 0.65;
+        let crack = noise * (-t * 95.0).exp() * 0.16;
+        data.push((body + crack) * (t / 0.002).min(1.0)
+            * ((duration - t) / 0.03).clamp(0.0, 1.0));
+    }
+    data
+}
+
+fn firearm_samples(sr: f32, grenade: bool) -> Vec<f32> {
+    let duration = if grenade { 0.25 } else { 0.065 };
+    let mut seed = 0xC4A1_u32;
+    let mut low = 0.0;
+    (0..(sr * duration) as usize).map(|i| {
+        let t = i as f32 / sr;
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let noise = (seed >> 8) as f32 / 16_777_216.0 * 2.0 - 1.0;
+        low += (noise - low) * (1.0 - (-3500.0 / sr).exp());
+        let body = (std::f32::consts::TAU * if grenade { 92.0 } else { 175.0 } * t).sin();
+        let sample = if grenade { (body * 0.3 + low * 0.3) * (-t * 20.0).exp() }
+            else { (noise * 0.16 + body * 0.13) * (-t * 65.0).exp() };
+        sample * (t / 0.001).min(1.0) * ((duration - t) / 0.008).clamp(0.0, 1.0)
+    }).collect()
+}
+
+#[cfg(test)]
+mod disc_audio_tests {
+    #[test]
+    fn jet_and_explosion_are_finite_and_have_headroom() {
+        for sr in [44_100.0, 48_000.0] {
+            let jet = super::jet_samples(sr);
+            let boom = super::explosion_samples(sr);
+            let chain = super::firearm_samples(sr, false);
+            let grenade = super::firearm_samples(sr, true);
+            for samples in [&jet, &boom, &chain, &grenade] {
+                let peak = samples.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
+                assert!(peak > 0.02 && peak < 0.9);
+                assert!(samples.iter().all(|s| s.is_finite()));
+            }
+            assert!((jet[0] - jet.last().unwrap()).abs() < 0.1);
+            assert_eq!(boom[0], 0.0);
+            assert!(boom.last().unwrap().abs() < 0.001);
+        }
+    }
+
+    #[test]
+    fn disc_cues_have_clean_edges_and_headroom_at_both_sample_rates() {
+        for sr in [44_100.0, 48_000.0] {
+            for ready in [false, true] {
+                let samples = super::disc_samples(sr, ready);
+                assert!(!samples.is_empty());
+                assert_eq!(samples[0], 0.0);
+                assert!(samples.last().unwrap().abs() < 0.001);
+                let peak = samples.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
+                assert!(peak > 0.02 && peak < 0.9);
+                assert!(samples.iter().all(|s| s.is_finite()));
+            }
+        }
     }
 }
 
@@ -241,17 +370,16 @@ impl Audio {
         };
         let now = ctx.current_time();
         match name {
-            "disc" => {
-                beep(ctx, dest, 180.0, 0.16, now, -80.0);
-                burst(ctx, dest, 0.12, 0.22, now);
-            }
-            "bolt" => {
-                beep(ctx, dest, 1400.0, 0.05, now, 400.0);
-                burst(ctx, dest, 0.04, 0.1, now);
-            }
-            "boom" => {
-                beep(ctx, dest, 70.0, 0.22, now, -30.0);
-                burst(ctx, dest, 0.28, 0.35, now);
+            "disc" | "disc_ready" | "boom" | "chain" | "grenade" => {
+                let rate = ctx.sample_rate();
+                let samples = if name == "boom" { explosion_samples(rate) }
+                    else if name == "chain" || name == "grenade" { firearm_samples(rate, name == "grenade") }
+                    else { disc_samples(rate, name == "disc_ready") };
+                let Ok(buffer) = ctx.create_buffer(1, samples.len() as u32, rate) else { return };
+                if buffer.copy_to_channel(&samples, 0).is_err() { return; }
+                let Ok(src) = ctx.create_buffer_source() else { return };
+                src.set_buffer(Some(&buffer));
+                if src.connect_with_audio_node(dest).is_ok() { let _ = src.start(); }
             }
             "hit" => beep(ctx, dest, 980.0, 0.04, now, 0.0),
             "pain" => burst(ctx, dest, 0.12, 0.2, now),
@@ -278,23 +406,17 @@ impl Audio {
             return;
         };
         if on && self.jet.is_none() {
-            let rate = ctx.sample_rate() as u32;
-            let Ok(buffer) = ctx.create_buffer(1, rate.max(1), ctx.sample_rate()) else {
+            let data = jet_samples(ctx.sample_rate());
+            let Ok(buffer) = ctx.create_buffer(1, data.len() as u32, ctx.sample_rate()) else {
                 return;
             };
-            let mut data = vec![0.0f32; rate.max(1) as usize];
-            let mut n = 0x51u32;
-            for s in &mut data {
-                n = n.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-                *s = ((n >> 8) as f32 / 16_777_216.0) * 2.0 - 1.0;
-            }
             let _ = buffer.copy_to_channel(&data, 0);
             let Ok(src) = ctx.create_buffer_source() else { return };
             src.set_buffer(Some(&buffer));
             src.set_loop(true);
             let Ok(gain) = ctx.create_gain() else { return };
             gain.gain().set_value(0.0001);
-            let _ = gain.gain().set_target_at_time(0.06, ctx.current_time(), 0.05);
+            let _ = gain.gain().set_target_at_time(0.22, ctx.current_time(), 0.05);
             if src.connect_with_audio_node(&gain).is_err() {
                 return;
             }
@@ -310,7 +432,7 @@ impl Audio {
             }
             if let Some(src) = self.jet.take() {
                 #[allow(deprecated)]
-                let _ = src.stop_with_when(ctx.current_time());
+                let _ = src.stop_with_when(ctx.current_time() + 0.16);
             }
             self.jet_gain = None;
         }
