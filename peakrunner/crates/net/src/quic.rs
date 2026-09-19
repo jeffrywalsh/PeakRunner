@@ -313,7 +313,8 @@ async fn server_connection(conn: &Connection, backend: SocketAddr, status: Arc<M
 pub async fn run_server(bind: SocketAddr, cert: &[u8], key: &[u8]) -> io::Result<()> {
     let cfg = server_config(cert, key)?;
     let endpoint = Endpoint::server(cfg, bind)?;
-    let host = GameHost::bind("127.0.0.1:0", "North Spine", 8, "Valley")?
+    let map = std::env::var("PEAKRUNNER_MATCH_MAP").unwrap_or_else(|_| "Valley".into());
+    let host = GameHost::bind("127.0.0.1:0", "North Spine", 8, &map)?
         .with_password(std::env::var("PEAKRUNNER_MATCH_PASSWORD").unwrap_or_default());
     let backend = host.local_addr(); let game = host.spawn();
     let status = game.status.clone();

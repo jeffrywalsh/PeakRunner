@@ -5,6 +5,7 @@ services:
     command: [peakrunner-quic]
     user: "10001:10001"
     environment:
+      PEAKRUNNER_MATCH_MAP: Raindance
       PEAKRUNNER_MATCH_PASSWORD: ${PEAKRUNNER_MATCH_PASSWORD:-}
     ports:
       - "7777:7777/udp"

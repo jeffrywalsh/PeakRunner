@@ -53,6 +53,10 @@ No container registry account is required. Git stores source/config, not images.
 
 ## Routine checks and limitations
 
+- The public match runs Raindance (2 km). `PEAKRUNNER_MATCH_MAP` in Compose
+  selects `Valley` or `Raindance`; invalid names fail startup. Change it only
+  when the match is empty, then recreate the container. No client update needed.
+
 - Teams are balanced by player count, not skill. New arrivals join the smaller
   side; departures trigger balancing on the next server tick when the difference
   exceeds one. Transfers prefer non-carriers, then dead players, then newest
