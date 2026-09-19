@@ -25,7 +25,10 @@ survived the restart, and no further reboot is required. The eight-player
 5. The health check observes an advancing simulation clock. Only UDP 7777 is
    published; internal HTTP status and loopback TCP backend are not public.
 6. Pre-DNS WAN testing used an IP override while retaining normal hostname/CA
-   validation. A native desktop join was visually verified. Eight clients passed
+   validation. A native desktop join was visually verified. The final normal WAN
+   run passed with eight clients for 60 seconds: 1166–1181 snapshots per client,
+   longest snapshot gap 188 ms, maximum acknowledgement gap 18 ticks (~300 ms).
+   Eight clients also passed
    60 seconds with 1% packet loss and 10–60 ms added delay in each direction:
    longest snapshot gap 410 ms, maximum acknowledgement gap 41 ticks (~683 ms),
    850–887 complete snapshots per client. This is a short resilience check, not
