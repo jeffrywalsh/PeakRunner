@@ -41,8 +41,8 @@ or directory application. Test-only dependencies are intentional. Verify with
 
 Next-work branch order and merge gates are in `docs/roadmap.md`. Keep each map
 and feature scoped separately; update branches from tested main between portions.
-Find a Rift preferences are the first separate feature branch. They are not part
-of this `.20260919.4` release baseline; never store match passwords in preferences.
+Find a Rift preferences are documented in `docs/client-preferences.md`.
+They are not in the published `.20260919.4` binaries; never store passwords.
 
 ## Resume checkpoint — 2026-09-19
 
@@ -58,13 +58,13 @@ of this `.20260919.4` release baseline; never store match passwords in preferenc
 - The clean publication worktree is `/private/tmp/peakrunner-baseline.SZ5oeH`
   (native workspace in its `peakrunner/` subdirectory). Temporary worktrees
   are not durable backups: use `git worktree list` and remote main to recover.
-- The next feature is `feature/find-rift-preferences`. Its implemented but
-  unpublished work remains in the original checkout: `src/preferences.rs`,
-  preferences changes in `src/app.rs`, `src/lib.rs`,
-  `examples/launch_smoke.rs`, and `docs/client-preferences.md`.
-  Compare those files against main to isolate the feature; preserve other edits.
-  The browser QA image is `screenshots/preferences-browser.png`.
-  Do not claim preferences are in the .4 downloads.
+- Find a Rift preferences were isolated on `feature/find-rift-preferences`
+  and verified for main: 133 library tests passed, native all-target, Windows
+  cross-compile and WebAssembly checks passed. The real macOS browser capture
+  restored the saved name/addresses and left the password blank; see
+  `screenshots/preferences-browser.png` and `docs/client-preferences.md`.
+  No Windows/Linux native runtime test is claimed for this feature.
+  Source publication is separate from distribution: preferences are NOT in .4.
 - Preferences remember name, directory URL and direct host, never passwords.
   Paths: macOS `~/Library/Application Support/PeakRunner/client.json`;
   Windows `%APPDATA%\PeakRunner\client.json`; Linux
@@ -75,9 +75,10 @@ of this `.20260919.4` release baseline; never store match passwords in preferenc
   Initialize each from the reviewed main baseline; update from tested main before
   starting later portions. Merge/push only completed, tested work. No branch
   deletion or force pushes. Map names are proposals, all distributed assets original.
-- Next: isolate preferences on its feature branch, rerun its tests and native
-  browser QA, then merge when verified. After that, multi-map support comes
-  before individual map additions, followed by modes, inventory and armor.
+- Next: update `feature/multi-map-system` from tested main and implement the
+  multi-map foundation before individual maps, then modes, inventory and armor.
+  A new client release is still required to deliver preferences to launcher users;
+  do not overwrite existing .4 archives or restart servers for this client-only work.
 
 ## Gameplay and security contracts
 

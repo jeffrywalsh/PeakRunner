@@ -3,6 +3,8 @@ mod audio;
 mod flag_hud;
 #[cfg(not(target_arch = "wasm32"))]
 mod online;
+#[cfg(not(target_arch = "wasm32"))]
+mod preferences;
 mod mouse;
 mod drawlist;
 use peakrunner_core::grass;

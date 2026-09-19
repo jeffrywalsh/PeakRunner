@@ -4,9 +4,19 @@ use std::time::Instant;
 use eframe::egui;
 struct Probe { app: peakrunner::PeakRunnerApp, started: Instant, requested: bool, saved: bool, paused: bool }
 impl eframe::App for Probe {
-    fn raw_input_hook(&mut self, _ctx:&egui::Context, input:&mut egui::RawInput) {
+    fn raw_input_hook(&mut self, ctx:&egui::Context, input:&mut egui::RawInput) {
         if std::env::var_os("QA_SYSTEM_THEME_LIGHT").is_some() {
             input.system_theme=Some(egui::Theme::Light);
+        }
+        if !self.paused && std::env::var_os("QA_BROWSER").is_some() && self.started.elapsed().as_secs()>=2 {
+            self.paused=true;
+            // Deterministic 1280x800 menu layout: activate the real Find match
+            // button, rather than changing private app state for a screenshot.
+            let pos=egui::pos2(90.,ctx.content_rect().bottom()-97.);
+                input.events.push(egui::Event::PointerMoved(pos));
+                for pressed in [true,false] {input.events.push(egui::Event::PointerButton {
+                    pos,button:egui::PointerButton::Primary,pressed,modifiers:Default::default()
+                });}
         }
     }
     fn logic(&mut self, ctx:&egui::Context, frame:&mut eframe::Frame) {

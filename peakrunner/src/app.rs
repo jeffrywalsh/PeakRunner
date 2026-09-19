@@ -149,7 +149,7 @@ impl PeakRunnerApp {
             #[cfg(not(target_arch = "wasm32"))]
             pads: gilrs::Gilrs::new().ok(),
             #[cfg(not(target_arch = "wasm32"))]
-            net: NetUi::new(),
+            net: NetUi::load(),
         };
         #[cfg(not(target_arch = "wasm32"))]
         if let Ok(address) = std::env::var("PEAKRUNNER_JOIN") {
@@ -448,6 +448,10 @@ fn poll_web_pad() -> Pad {
 
 impl eframe::App for PeakRunnerApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.net.settings_changed.is_some_and(|t|t.elapsed().as_millis()>=600) {
+            self.net.save_settings();
+        }
         let dt = ctx.input(|i| i.stable_dt);
         self.step(ctx, if dt > 0.0 { dt } else { 1.0 / 60.0 });
         ctx.request_repaint();
@@ -690,7 +694,9 @@ impl PeakRunnerApp {
                         #[cfg(not(target_arch = "wasm32"))]
                         if self.online() {
                             ui.label(RichText::new("Your name").color(MUTED));
-                            ui.add(egui::TextEdit::singleline(&mut self.net.name).char_limit(24));
+                            if ui.add(egui::TextEdit::singleline(&mut self.net.name).char_limit(24)).changed() {
+                                self.net.settings_edited();
+                            }
                             let valid = peakrunner_core::names::validate(&self.net.name).is_some();
                             ui.label(RichText::new(peakrunner_core::names::HELP).size(11.0).color(MUTED));
                             let ready = self.net.rename_sent.is_none_or(|sent| sent.elapsed().as_secs() >= 11);
@@ -1073,6 +1079,7 @@ impl PeakRunnerApp {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn refresh_servers(&mut self) {
+        self.net.save_settings();
         let addr = self.net.directory.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         self.net.inbox = Some(rx);
@@ -1113,14 +1120,26 @@ impl PeakRunnerApp {
     fn browser_native(&mut self, ui: &mut egui::Ui) {
         ui.label(RichText::new("Encrypted public matches · server-authoritative CTF").size(12.0).color(GLACIER));
         ui.label(RichText::new("Directory").size(12.0).color(MUTED));
-        ui.text_edit_singleline(&mut self.net.directory);
+        if ui.add(egui::TextEdit::singleline(&mut self.net.directory).char_limit(2048)).changed() {
+            self.net.settings_edited();
+        }
         ui.label(RichText::new("Your name").size(12.0).color(MUTED));
-        ui.add(egui::TextEdit::singleline(&mut self.net.name).char_limit(24));
+        if ui.add(egui::TextEdit::singleline(&mut self.net.name).char_limit(24)).changed() {
+            self.net.settings_edited();
+        }
         ui.label(RichText::new(peakrunner_core::names::HELP).size(11.0).color(MUTED));
         ui.label(RichText::new("Match password (optional)").size(12.0).color(MUTED));
         ui.add(egui::TextEdit::singleline(&mut self.net.password).password(true));
         ui.label(RichText::new("Direct server address").size(12.0).color(MUTED));
-        ui.text_edit_singleline(&mut self.net.direct);
+        if ui.add(egui::TextEdit::singleline(&mut self.net.direct).char_limit(2048)).changed() {
+            self.net.settings_edited();
+        }
+        if let Some(warning)=&self.net.preferences.warning {
+            ui.label(RichText::new(warning).size(11.0).color(EMBER));
+        } else if let Some(path)=&self.net.preferences.path {
+            ui.label(RichText::new("Valid settings save automatically. Passwords are never saved.").size(11.0).color(MUTED))
+                .on_hover_text(path.display().to_string());
+        }
         if ui.button("Join directly").clicked() {
             let address = self.net.direct.clone();
             if address.starts_with("quic://") {
@@ -1136,6 +1155,7 @@ impl PeakRunnerApp {
                 self.refresh_servers();
             }
             if ui.button("Back").clicked() {
+                self.net.save_settings();
                 self.mode = Mode::Menu;
             }
         });
@@ -1175,6 +1195,8 @@ impl PeakRunnerApp {
         match peakrunner_net::connect_private(host, port, &self.net.name, &self.net.password) {
             Ok(session) => {
                 self.net.direct = if host.contains("://") { host.into() } else { format!("{host}:{port}") };
+                self.net.settings_edited();
+                self.net.save_settings();
                 self.net.lobby = Default::default();
                 self.net.session = Some(session);
                 self.net.dropped_in = false;
@@ -1245,6 +1267,8 @@ impl PeakRunnerApp {
 
 #[cfg(not(target_arch = "wasm32"))]
 struct NetUi {
+    preferences: crate::preferences::Store,
+    settings_changed: Option<std::time::Instant>,
     rename_sent: Option<std::time::Instant>,
     password: String,
     direct: String,
@@ -1260,6 +1284,23 @@ struct NetUi {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl NetUi {
+    fn load() -> Self {
+        let mut net=Self::new();
+        net.preferences=crate::preferences::Store::user();
+        net.name=net.preferences.saved.name.clone();
+        net.directory=net.preferences.saved.directory.clone();
+        net.direct=net.preferences.saved.direct.clone();
+        net
+    }
+
+    fn settings_edited(&mut self) {self.settings_changed=Some(std::time::Instant::now());}
+
+    fn save_settings(&mut self) {
+        if self.settings_changed.take().is_some() {
+            self.preferences.save(&self.name,&self.directory,&self.direct);
+        }
+    }
+
     fn disconnect(&mut self) {
         self.rename_sent = None;
         if let Some(session) = self.session.take() { session.leave(); }
@@ -1270,6 +1311,8 @@ impl NetUi {
 
     fn new() -> Self {
         Self {
+            preferences: crate::preferences::Store::memory(),
+            settings_changed: None,
             rename_sent: None,
             password: String::new(),
             direct: "quic://play.peakrunner.net:7777".into(),
@@ -1283,6 +1326,11 @@ impl NetUi {
             dropped_in: false,
         }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for NetUi {
+    fn drop(&mut self) {self.save_settings();}
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1335,6 +1383,28 @@ fn big(ui: &mut egui::Ui, label: &str, primary: bool) -> bool {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod exit_tests {
     use super::*;
+
+    #[test]
+    fn closing_net_ui_saves_settings_but_never_password() {
+        let dir=std::env::temp_dir().join(format!("peakrunner-netui-{}-{}",std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let path=dir.join("client.json");
+        {
+            let mut net=NetUi::new();
+            net.preferences=crate::preferences::Store::load(path.clone());
+            net.name="Rift Pilot".into();
+            net.directory="https://example.net/servers".into();
+            net.direct="quic://example.net:7777".into();
+            net.password="never-store-this".into();
+            net.settings_edited();
+        }
+        let saved=crate::preferences::Store::load(path.clone());
+        assert_eq!(saved.saved.name,"Rift Pilot");
+        assert_eq!(saved.saved.directory,"https://example.net/servers");
+        assert_eq!(saved.saved.direct,"quic://example.net:7777");
+        assert!(!std::fs::read_to_string(path).unwrap().contains("never-store-this"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     fn key(key: egui::Key) -> egui::Event {
         egui::Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }
