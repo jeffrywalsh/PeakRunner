@@ -12,12 +12,35 @@ pub struct Online {
     acc: f32,
     pending: VecDeque<(Command, Instant)>,
     targets: Vec<Player>,
+    balance_notice_until: Option<Instant>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{sim::Match, terrain::MapId};
+
+    #[test]
+    fn team_transfer_discards_old_prediction_and_announces_redeployment() {
+        let mut server = Match::new(MapId::Valley);
+        for id in 1..=3 { server.join(id, "Skier").unwrap(); }
+        server.step(&[]);
+        let mut world = World::new();
+        let mut online = Online::default();
+        online.receive(&mut world, &server.snapshot(), 3);
+        online.pending.push_back((Command { seq: 100, move_z: 1.0, ..Command::default() }, Instant::now()));
+        server.leave(1);
+        server.step(&[]);
+        let snapshot = server.snapshot();
+        online.receive(&mut world, &snapshot, 3);
+        assert!(online.pending.is_empty());
+        assert_eq!(world.players[2].team, snapshot.players[2].team);
+        assert_eq!(world.players[2].pos, snapshot.players[2].pos);
+        assert!(world.message.starts_with("AUTO-BALANCED"));
+        server.step(&[]);
+        online.receive(&mut world, &server.snapshot(), 3);
+        assert!(world.message.starts_with("AUTO-BALANCED"));
+    }
 
     #[test]
     fn delayed_snapshots_reconcile_pending_inputs_without_replaying_audio() {
@@ -60,7 +83,7 @@ mod tests {
 }
 impl Default for Online {
     fn default() -> Self { Self { tick: 0, round: 0, phase: Phase::Waiting, latency_ms: 0.0,
-        seq: 0, acc: 0.0, pending: VecDeque::new(), targets: Vec::new() } }
+        seq: 0, acc: 0.0, pending: VecDeque::new(), targets: Vec::new(), balance_notice_until: None } }
 }
 impl Online {
     pub fn receive(&mut self, world: &mut World, state: &Snapshot, id: u32) {
@@ -75,11 +98,12 @@ impl Online {
         if !world.apply_snapshot(state, id) { return; }
         let me = world.player_id;
         let new_round = state.round != self.round;
+        let team_changed = was.as_ref().is_some_and(|p| p.net_id == id && p.team != world.players[me].team);
         let ack = state.acks[me];
         while self.pending.front().is_some_and(|(c, _)| c.seq <= ack) {
             if let Some((_, sent)) = self.pending.pop_front() { self.latency_ms = sent.elapsed().as_secs_f32() * 1000.0; }
         }
-        if new_round { self.pending.clear(); }
+        if new_round || team_changed { self.pending.clear(); }
         self.tick = state.tick; self.round = state.round; self.phase = state.phase;
         self.targets = state.players.clone();
         let current = world.players[me].clone();
@@ -113,7 +137,7 @@ impl Online {
         }
         world.events = events;
         world.trauma = trauma;
-        if let Some(prev) = was.filter(|p| p.net_id == id && p.alive == current.alive && !new_round) {
+        if let Some(prev) = was.filter(|p| p.net_id == id && p.alive == current.alive && !new_round && !team_changed) {
             let correction = prev.pos - world.players[me].pos;
             world.net_camera_offset = if correction.length() < 2.0 {
                 (world.net_camera_offset + correction).clamp_length_max(2.0)
@@ -131,6 +155,10 @@ impl Online {
             }
         }
         world.input = input;
+        if team_changed { self.balance_notice_until = Some(Instant::now() + std::time::Duration::from_secs(4)); }
+        if self.balance_notice_until.is_some_and(|until| until > Instant::now()) {
+            world.message = "AUTO-BALANCED — REDEPLOYED TO THE OTHER TEAM".into();
+        }
     }
 
     pub fn advance(&mut self, world: &mut World, dt: f32, active: bool, session: &peakrunner_net::Session) -> bool {

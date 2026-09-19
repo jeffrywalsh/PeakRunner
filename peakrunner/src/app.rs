@@ -1057,7 +1057,9 @@ impl PeakRunnerApp {
                         #[cfg(not(target_arch = "wasm32"))]
                         {
                             let lobby = self.net.lobby.clone();
-                            let title = if lobby.match_name.is_empty() {
+                            let title = if lobby.error.is_some() {
+                                "Disconnected".to_string()
+                            } else if lobby.match_name.is_empty() {
                                 "Connecting".to_string()
                             } else {
                                 lobby.match_name.clone()

@@ -104,6 +104,36 @@ impl Match {
         p.remote = true;
         self.world.discs.retain(|d| d.owner != slot);
         self.world.network_inputs[slot] = Input::default();
+        self.acks[slot] = 0;
+        if self.world.players.iter().all(|p| p.net_id == 0) {
+            // Fresh session, but keep the transport/healthcheck clock monotonic.
+            let tick = self.tick;
+            *self = Self::new(self.world.map);
+            self.tick = tick;
+        }
+    }
+
+    fn balance_teams(&mut self) {
+        loop {
+            let mut counts = [0usize; 2];
+            for p in &self.world.players {
+                if p.net_id != 0 { counts[p.team.idx()] += 1; }
+            }
+            if counts[0].abs_diff(counts[1]) <= 1 { break; }
+            let larger = if counts[0] > counts[1] { Team::Ember } else { Team::Glacier };
+            // Avoid carriers first, then prefer dead players and newest arrivals.
+            let slot = self.world.players.iter().enumerate()
+                .filter(|(_, p)| p.net_id != 0 && p.team == larger)
+                .min_by_key(|(_, p)| (p.carrying.is_some(), p.alive, std::cmp::Reverse(p.net_id)))
+                .map(|(i, _)| i).unwrap();
+            if let Some(flag) = self.world.players[slot].carrying.take() {
+                self.world.drop_flag(flag, self.world.players[slot].pos);
+            }
+            self.world.discs.retain(|d| d.owner != slot);
+            self.world.players[slot].team = if larger == Team::Ember { Team::Glacier } else { Team::Ember };
+            self.world.respawn(slot);
+            self.world.network_inputs[slot] = Input::default();
+        }
     }
 
     fn restart(&mut self) {
@@ -127,6 +157,9 @@ impl Match {
     pub fn step(&mut self, commands: &[Option<Command>]) {
         self.tick += 1;
         self.world.events.clear();
+        if self.world.players.iter().all(|p| p.net_id == 0) { return; }
+        // Once per tick, after the server processes the whole departure batch.
+        self.balance_teams();
         self.world.time += STEP;
         let both = [Team::Ember, Team::Glacier].iter().all(|team|
             self.world.players.iter().any(|p| p.net_id != 0 && p.team == *team));
@@ -242,6 +275,74 @@ mod tests {
         game.phase = Phase::Playing;
         game.round = 1;
         game
+    }
+
+    #[test]
+    fn departure_balances_teams_without_resetting_active_match() {
+        let mut game = duel();
+        for id in 3..=6 { game.join(id, "Skier").unwrap(); }
+        game.world.score = [2, 1];
+        game.world.players[4].frags = 7;
+        game.leave(1);
+        game.leave(3);
+        game.step(&[]);
+        let count = |team| game.world.players.iter().filter(|p| p.net_id != 0 && p.team == team).count();
+        assert_eq!((count(Team::Ember), count(Team::Glacier)), (2, 2));
+        assert_eq!(game.world.players[4].team, Team::Glacier);
+        assert_eq!(game.world.players[4].frags, 7);
+        assert_eq!(game.world.score, [2, 1]);
+        assert_eq!(game.phase, Phase::Playing);
+    }
+
+    #[test]
+    fn balance_prefers_non_carriers_and_drops_flags_if_unavoidable() {
+        let mut game = duel();
+        game.join(3, "Carrier").unwrap();
+        game.world.players[2].carrying = Some(Team::Glacier);
+        game.world.flags[1].carrier = Some(2);
+        game.leave(1);
+        game.balance_teams();
+        assert_eq!(game.world.players[0].team, Team::Glacier);
+        assert_eq!(game.world.players[2].team, Team::Ember);
+        assert_eq!(game.world.flags[1].carrier, Some(2));
+
+        // Exercise the fallback independently of the normal one-flag limit.
+        game.world.players[0].team = Team::Ember;
+        game.world.players[0].carrying = Some(Team::Ember);
+        game.world.flags[0].carrier = Some(0);
+        game.balance_teams();
+        assert_eq!(game.world.players[2].team, Team::Glacier);
+        assert_eq!(game.world.flags[1].carrier, None);
+        assert_eq!(game.world.players[2].carrying, None);
+    }
+
+    #[test]
+    fn empty_server_resets_every_phase_and_keeps_health_clock_advancing() {
+        for phase in [Phase::Waiting, Phase::Countdown, Phase::Playing, Phase::Intermission] {
+            let mut game = duel();
+            game.phase = phase;
+            game.phase_left = 9.0;
+            game.world.score = [2, 1];
+            game.world.time_left = 12.0;
+            game.tick = 999;
+            game.acks[0] = 300;
+            game.leave(0);
+            game.leave(1);
+            assert_eq!(game.phase, Phase::Waiting);
+            assert_eq!(game.phase_left, 0.0);
+            assert_eq!(game.round, 0);
+            assert_eq!(game.world.score, [0, 0]);
+            assert_eq!(game.world.time_left, MATCH_TIME);
+            assert!(game.acks.iter().all(|ack| *ack == 0));
+            assert!(game.world.discs.is_empty() && game.world.smoke.is_empty() && game.world.explosions.is_empty());
+            assert!(game.world.flags.iter().all(|f| f.carrier.is_none() && f.pos == f.home));
+            game.step(&[]);
+            assert_eq!(game.tick, 1000);
+            game.join(7, "Fresh").unwrap();
+            game.join(8, "Fresh").unwrap();
+            game.step(&[]);
+            assert_eq!(game.phase, Phase::Countdown);
+        }
     }
 
     #[test]
