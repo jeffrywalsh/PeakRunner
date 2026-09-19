@@ -1,10 +1,11 @@
 mod app;
 mod audio;
+#[cfg(not(target_arch = "wasm32"))]
+mod online;
 mod mouse;
 mod drawlist;
-mod grass;
+use peakrunner_core::grass;
 mod scene;
-mod sim;
-mod terrain;
+use peakrunner_core::{sim, terrain};
 
 pub use app::PeakRunnerApp;

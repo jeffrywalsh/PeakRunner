@@ -1,404 +1,204 @@
-use std::io::{BufReader, Write};
-use std::net::{TcpListener, TcpStream, UdpSocket};
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex};
+use std::collections::VecDeque;
+use std::io;
+use std::net::TcpListener;
+use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU32, Ordering}};
 use std::thread;
-use std::time::Duration;
-
-use crate::directory;
+use std::time::{Duration, Instant};
+use peakrunner_core::{sim::{Command, Match, MAX_PLAYERS, STEP}, terrain::MapId};
 use crate::proto::{ClientMsg, ServerMsg, PROTOCOL};
-use crate::wire::{read_msg, write_msg};
-
-struct Guest {
-    id: u32,
-    name: String,
-    tx: Sender<String>,
-    pose: Option<crate::proto::Pose>,
-}
-
-struct Table {
-    next: u32,
-    host: String,
-    guests: Vec<Guest>,
-}
-
-struct DirectoryLink {
-    addr: String,
-    id: Mutex<Option<String>>,
-}
+use crate::wire::{Framed, private_bind, invalid};
 
 pub struct GameHost {
-    listener: TcpListener,
-    name: String,
-    map: String,
-    max_players: u32,
+    listener: TcpListener, name: String, map: MapId, max_players: usize, password: String,
 }
-
+pub struct GameHandle {
+    stop: Arc<AtomicBool>, thread: Option<thread::JoinHandle<()>>,
+    pub players: Arc<AtomicU32>,
+    pub status: Arc<Mutex<crate::public::MatchStatus>>,
+}
+impl Drop for GameHandle {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(t) = self.thread.take() { let _ = t.join(); }
+    }
+}
+struct Peer {
+    wire: Framed, slot: Option<usize>, accepted: Instant, last: Instant,
+    queue: VecDeque<Command>, current: Command, last_seq: u64, tokens: f32,
+}
 impl GameHost {
-    pub fn bind(addr: &str, name: &str, max_players: u32, map: &str) -> std::io::Result<Self> {
-        let listener = TcpListener::bind(addr)?;
-        Ok(Self {
-            listener,
-            name: name.into(),
-            map: map.into(),
-            max_players,
-        })
+    pub fn bind(addr: &str, name: &str, max_players: u32, map: &str) -> io::Result<Self> {
+        let map = match map.to_lowercase().as_str() {
+            "valley" => MapId::Valley, "raindance" => MapId::Raindance,
+            _ => return Err(invalid("unknown map: use Valley or Raindance")),
+        };
+        if !(2..=MAX_PLAYERS as u32).contains(&max_players) { return Err(invalid("capacity must be 2–8")); }
+        if name.is_empty() || name.len() > 64 || name.chars().any(char::is_control) { return Err(invalid("invalid match name")); }
+        let listener = TcpListener::bind(private_bind(addr)?)?;
+        listener.set_nonblocking(true)?;
+        Ok(Self { listener, name: name.into(), map, max_players: max_players as usize, password: String::new() })
     }
-
-    pub fn local_addr(&self) -> std::net::SocketAddr {
-        self.listener.local_addr().expect("local addr")
+    pub fn with_password(mut self, password: String) -> Self { self.password = password; self }
+    pub fn local_addr(&self) -> std::net::SocketAddr { self.listener.local_addr().expect("bound") }
+    pub fn spawn(self) -> GameHandle {
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = stop.clone();
+        let players = Arc::new(AtomicU32::new(0));
+        let count = players.clone();
+        let status = Arc::new(Mutex::new(crate::public::MatchStatus::default()));
+        let stats = status.clone();
+        let thread = thread::spawn(move || self.run(flag, count, stats));
+        GameHandle { stop, thread: Some(thread), players, status }
     }
-
-    pub fn spawn(self) {
-        let name = self.name.clone();
-        let map = self.map.clone();
-        let max_players = self.max_players;
-        thread::Builder::new()
-            .name("peakrunner-server".into())
-            .spawn(move || {
-                if let Err(err) = accept_loop(
-                    self.listener,
-                    name,
-                    map,
-                    max_players,
-                    "Host".into(),
-                    Arc::new(AtomicU32::new(1)),
-                    None,
-                ) {
-                    log::error!("game server stopped: {err}");
+    fn run(self, stop: Arc<AtomicBool>, count: Arc<AtomicU32>, status: Arc<Mutex<crate::public::MatchStatus>>) {
+        let mut game = Match::new(self.map);
+        let mut peers: Vec<Peer> = Vec::new();
+        let mut id = 0u32;
+        let step = Duration::from_secs_f64(STEP as f64);
+        let mut next = Instant::now();
+        while !stop.load(Ordering::Relaxed) {
+            let now = Instant::now();
+            if now < next { thread::sleep((next - now).min(Duration::from_millis(5))); continue; }
+            next += step;
+            // Never repay an unbounded wall-clock backlog after suspension.
+            if now.duration_since(next.min(now)) > Duration::from_millis(100) { next = now + step; }
+            for _ in 0..8 {
+                match self.listener.accept() {
+                    Ok((stream, _)) if peers.len() < 16 => {
+                        if let Ok(wire) = Framed::new(stream, 2048) {
+                            peers.push(Peer { wire, slot: None, accepted: now, last: now,
+                                queue: VecDeque::new(), current: Command::default(), last_seq: 0, tokens: 32.0 });
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                    Err(_) => break,
                 }
-            })
-            .expect("server thread");
+            }
+            let mut commands = vec![None; MAX_PLAYERS];
+            peers.retain_mut(|peer| {
+                peer.tokens = (peer.tokens + 2.0).min(32.0);
+                let result = (|| -> io::Result<()> {
+                    if peer.slot.is_none() && now.duration_since(peer.accepted) > Duration::from_secs(3) {
+                        return Err(invalid("handshake timeout"));
+                    }
+                    if now.duration_since(peer.last) > Duration::from_secs(5) { return Err(invalid("input timeout")); }
+                    for msg in peer.wire.receive::<ClientMsg>()? {
+                        peer.tokens -= 1.0;
+                        if peer.tokens < 0.0 { return Err(invalid("message rate exceeded")); }
+                        match msg {
+                            ClientMsg::Hello { name, protocol, password } if peer.slot.is_none() => {
+                                let name = name.trim();
+                                if protocol != PROTOCOL { return Err(invalid("incompatible game version")); }
+                                if password != self.password { return Err(invalid("incorrect match password")); }
+                                if name.is_empty() || name.len() > 24 || name.chars().any(char::is_control) {
+                                    return Err(invalid("name must be 1–24 bytes without control characters"));
+                                }
+                                if game.world.players.iter().filter(|p| p.net_id != 0).count() >= self.max_players {
+                                    return Err(invalid("match is full"));
+                                }
+                                id = id.checked_add(1).ok_or_else(|| invalid("identity limit"))?;
+                                let slot = game.join(id, name).ok_or_else(|| invalid("match is full"))?;
+                                peer.slot = Some(slot);
+                                log::info!("player_join id={id} slot={slot}");
+                                peer.wire.send(&ServerMsg::Welcome { player_id: id, match_name: self.name.clone() })?;
+                            }
+                            ClientMsg::Input { command } if peer.slot.is_some() => {
+                                if !command.valid() || command.seq <= peer.last_seq || command.seq - peer.last_seq > 1200 {
+                                    return Err(invalid("invalid or out-of-order input"));
+                                }
+                                if peer.queue.len() >= 12 { peer.queue.pop_front(); }
+                                peer.last_seq = command.seq;
+                                peer.last = now;
+                                peer.queue.push_back(command);
+                            }
+                            ClientMsg::Leave => return Err(invalid("left match")),
+                            _ => return Err(invalid("unexpected message")),
+                        }
+                    }
+                    if let Some(slot) = peer.slot {
+                        // A delayed burst must not become permanent input lag or
+                        // buy extra simulation steps. Sample newest held state once
+                        // per server tick; acknowledgements retire skipped inputs.
+                        if let Some(command) = peer.queue.pop_back() { peer.current = command; }
+                        peer.queue.clear();
+                        if now.duration_since(peer.last) <= Duration::from_millis(250) {
+                            commands[slot] = Some(peer.current);
+                        }
+                    }
+                    peer.wire.flush()
+                })();
+                if let Err(e) = result {
+                    if let Some(slot) = peer.slot { log::info!("player_leave id={} reason={e}", game.world.players[slot].net_id); }
+                    let _ = peer.wire.send(&ServerMsg::Reject { message: e.to_string() });
+                    if let Some(slot) = peer.slot { game.leave(slot); commands[slot] = None; }
+                    false
+                } else { true }
+            });
+            let previous_phase = game.phase;
+            game.step(&commands);
+            if game.phase != previous_phase {
+                log::info!("match_phase round={} phase={:?} score={:?}", game.round, game.phase, game.world.score);
+            }
+            if game.tick % 3 == 0 {
+                let msg = ServerMsg::Snapshot { state: game.snapshot() };
+                peers.retain_mut(|peer| {
+                    if peer.slot.is_none() { return true; }
+                    if peer.wire.send(&msg).is_err() {
+                        game.leave(peer.slot.unwrap()); false
+                    } else { true }
+                });
+            }
+            count.store(game.world.players.iter().filter(|p| p.net_id != 0).count() as u32, Ordering::Relaxed);
+            if game.tick % 3 == 0 {
+                *status.lock().expect("match status") = crate::public::MatchStatus {
+                    name: self.name.clone(), map: format!("{:?}", self.map),
+                    players: count.load(Ordering::Relaxed), max_players: self.max_players as u32,
+                    tick: game.tick, round: game.round, phase: format!("{:?}", game.phase),
+                    score: game.world.score, time_left: game.world.time_left,
+                    password_required: !self.password.is_empty(),
+                };
+            }
+        }
     }
 }
 
 pub fn run_from_args() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    let mut directory = "192.168.1.64:7780".to_string();
-    let mut port: u16 = 7781;
+    let mut bind = "127.0.0.1".to_string();
+    let mut port = 7781u16;
     let mut name = "Open rift".to_string();
-    let mut advertise = lan_ip();
     let mut map = "Valley".to_string();
-    let mut host_name = "Host".to_string();
+    let mut directory: Option<String> = None;
+    let mut advertise: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
+        let Some(value) = args.next() else { eprintln!("missing value for {arg}"); return; };
         match arg.as_str() {
-            "--directory" => directory = args.next().unwrap_or(directory),
-            "--port" => port = args.next().and_then(|v| v.parse().ok()).unwrap_or(port),
-            "--name" => name = args.next().unwrap_or(name),
-            "--advertise" => advertise = args.next().unwrap_or(advertise),
-            "--map" => map = args.next().unwrap_or(map),
-            "--host" => host_name = args.next().unwrap_or(host_name),
-            other => {
-                eprintln!("unknown argument {other}");
-                eprintln!(
-                    "usage: peakrunner-server [--directory HOST:PORT] [--port N] [--name NAME] [--host NAME] [--advertise HOST] [--map NAME]"
-                );
-                std::process::exit(2);
-            }
+            "--bind" => bind = value, "--port" => port = value.parse().expect("port"),
+            "--name" => name = value, "--map" => map = value,
+            "--directory" => directory = Some(value), "--advertise" => advertise = Some(value),
+            _ => { eprintln!("unknown option {arg}; use --bind, --port, --name, --map, --directory, --advertise"); return; }
         }
     }
-
-    let host = match GameHost::bind(&format!("0.0.0.0:{port}"), &name, 8, &map) {
-        Ok(host) => host,
-        Err(err) => {
-            eprintln!("could not listen on {port}: {err}");
-            std::process::exit(1);
-        }
-    };
-    let bound = host.local_addr().port();
-    println!("PeakRunner server \"{name}\" listening on 0.0.0.0:{bound}");
-    println!("advertising {advertise}:{bound} to directory {directory}");
-    let players = Arc::new(AtomicU32::new(1));
-    let link = Arc::new(DirectoryLink {
-        addr: directory.clone(),
-        id: Mutex::new(None),
-    });
-    let directory_for_beat = directory.clone();
-    let name_for_beat = name.clone();
-    let map_for_beat = map.clone();
-    let players_for_beat = Arc::clone(&players);
-    let link_for_beat = Arc::clone(&link);
-    thread::spawn(move || {
-        advertise_loop(
-            directory_for_beat,
-            name_for_beat,
-            advertise,
-            bound,
-            map_for_beat,
-            players_for_beat,
-            link_for_beat,
-        )
-    });
-    println!("host {host_name} is seated; others can join");
-    if let Err(err) = accept_loop(host.listener, name, map, 8, host_name, players, Some(link)) {
-        eprintln!("server stopped: {err}");
-        std::process::exit(1);
-    }
-}
-
-fn advertise_loop(
-    directory: String,
-    name: String,
-    host: String,
-    port: u16,
-    map: String,
-    players: Arc<AtomicU32>,
-    link: Arc<DirectoryLink>,
-) {
-    let mut id: Option<String> = None;
+    let password = std::env::var("PEAKRUNNER_MATCH_PASSWORD").unwrap_or_default();
+    let bind_ip: std::net::IpAddr = bind.parse().expect("--bind must be a specific private IP");
+    let host = GameHost::bind(&std::net::SocketAddr::new(bind_ip, port).to_string(), &name, 8, &map)
+        .expect("private game server bind").with_password(password);
+    println!("PeakRunner: {name}, {map}, {}, 8 player CTF; private LAN/VPN transport", host.local_addr());
+    let handle = host.spawn();
+    let mut lease: Option<crate::directory::Lease> = None;
     loop {
-        let players = players.load(Ordering::Relaxed);
-        let result = if let Some(id) = id.as_deref() {
-            directory::heartbeat(&directory, id, players).map(|_| id.to_string())
-        } else {
-            directory::register(&directory, &name, &host, port, players, 8, &map)
-        };
-        match result {
-            Ok(current) => {
-                if id.as_deref() != Some(current.as_str()) {
-                    println!("listed on directory as {current} with {players} connected");
-                }
-                id = Some(current.clone());
-                *link.id.lock().expect("directory id") = Some(current);
-            }
-            Err(err) => {
-                eprintln!("directory: {err}");
-                id = None;
-                *link.id.lock().expect("directory id") = None;
-            }
+        if let Some(dir) = directory.as_deref() {
+            let players = handle.players.load(Ordering::Relaxed);
+            let result = if let Some(l) = &lease {
+                crate::directory::heartbeat(dir, l, players).map(|_| ())
+            } else {
+                crate::directory::register(dir, &name, advertise.as_deref().unwrap_or(&bind), port, players, 8, &map)
+                    .map(|l| { lease = Some(l); })
+            };
+            if let Err(e) = result { log::warn!("directory: {e}"); lease = None; }
         }
         thread::sleep(Duration::from_secs(2));
     }
-}
-
-fn accept_loop(
-    listener: TcpListener,
-    name: String,
-    map: String,
-    max_players: u32,
-    host_name: String,
-    players: Arc<AtomicU32>,
-    link: Option<Arc<DirectoryLink>>,
-) -> std::io::Result<()> {
-    let table = Arc::new(Mutex::new(Table {
-        next: 2,
-        host: host_name,
-        guests: Vec::new(),
-    }));
-    players.store(1, Ordering::Relaxed);
-    for conn in listener.incoming() {
-        let stream = match conn {
-            Ok(stream) => stream,
-            Err(err) => {
-                log::warn!("accept: {err}");
-                continue;
-            }
-        };
-        let table = Arc::clone(&table);
-        let players = Arc::clone(&players);
-        let link = link.clone();
-        let name = name.clone();
-        let map = map.clone();
-        thread::spawn(move || {
-            if let Err(err) = greet(stream, table, players, link, name, map, max_players) {
-                log::debug!("guest left: {err}");
-            }
-        });
-    }
-    Ok(())
-}
-
-fn greet(
-    stream: TcpStream,
-    table: Arc<Mutex<Table>>,
-    players: Arc<AtomicU32>,
-    link: Option<Arc<DirectoryLink>>,
-    match_name: String,
-    map: String,
-    max_players: u32,
-) -> std::io::Result<()> {
-    stream.set_nodelay(true)?;
-    let mut reader = BufReader::new(stream.try_clone()?);
-    let hello: ClientMsg = read_msg(&mut reader)?;
-    let ClientMsg::Hello { name, protocol } = hello else {
-        let mut stream = reader.into_inner();
-        write_msg(
-            &mut stream,
-            &ServerMsg::Reject {
-                message: "expected hello".into(),
-            },
-        )?;
-        return Ok(());
-    };
-    if protocol != PROTOCOL {
-        let mut stream = reader.into_inner();
-        write_msg(
-            &mut stream,
-            &ServerMsg::Reject {
-                message: format!("protocol {protocol} is not {PROTOCOL}"),
-            },
-        )?;
-        return Ok(());
-    }
-    let (tx, rx) = mpsc::channel::<String>();
-    let id = {
-        let mut table = table.lock().expect("guest table");
-        if 1 + table.guests.len() as u32 >= max_players {
-            drop(table);
-            let mut stream = reader.into_inner();
-            write_msg(
-                &mut stream,
-                &ServerMsg::Reject {
-                    message: "rift is full".into(),
-                },
-            )?;
-            return Ok(());
-        }
-        let id = table.next;
-        table.next += 1;
-        table.guests.push(Guest {
-            id,
-            name: name.clone(),
-            tx: tx.clone(),
-            pose: None,
-        });
-        id
-    };
-    let mut writer = stream.try_clone()?;
-    thread::spawn(move || {
-        while let Ok(line) = rx.recv() {
-            if writer.write_all(line.as_bytes()).is_err() || writer.flush().is_err() {
-                break;
-            }
-        }
-    });
-    send_one(
-        &tx,
-        &ServerMsg::Welcome {
-            player_id: id,
-            match_name,
-            map,
-        },
-    );
-    broadcast_players(&table, &players, link.as_deref());
-    broadcast_poses(&table, &players, link.as_deref());
-    let read = read_guest(&mut reader, id, &table, &players, link.as_deref());
-    {
-        let mut table = table.lock().expect("guest table");
-        table.guests.retain(|guest| guest.id != id);
-    }
-    broadcast_players(&table, &players, link.as_deref());
-    read
-}
-
-fn send_one(tx: &Sender<String>, msg: &ServerMsg) {
-    if let Ok(mut line) = serde_json::to_string(msg) {
-        line.push('\n');
-        let _ = tx.send(line);
-    }
-}
-
-fn broadcast_players(table: &Arc<Mutex<Table>>, count: &AtomicU32, link: Option<&DirectoryLink>) {
-    let table = table.lock().expect("guest table");
-    let mut players = vec![table.host.clone()];
-    players.extend(table.guests.iter().map(|guest| guest.name.clone()));
-    let connected = players.len() as u32;
-    count.store(connected, Ordering::Relaxed);
-    let msg = ServerMsg::Players { players };
-    let Ok(mut line) = serde_json::to_string(&msg) else {
-        return;
-    };
-    line.push('\n');
-    for guest in &table.guests {
-        let _ = guest.tx.send(line.clone());
-    }
-    drop(table);
-    if let Some(link) = link {
-        if let Some(id) = link.id.lock().expect("directory id").clone() {
-            let _ = directory::heartbeat(&link.addr, &id, connected);
-        }
-    }
-}
-
-fn read_guest(
-    reader: &mut BufReader<TcpStream>,
-    id: u32,
-    table: &Arc<Mutex<Table>>,
-    players: &AtomicU32,
-    link: Option<&DirectoryLink>,
-) -> std::io::Result<()> {
-    use std::io::BufRead;
-    loop {
-        let mut line = String::new();
-        let n = reader.read_line(&mut line)?;
-        if n == 0 {
-            return Ok(());
-        }
-        let Ok(msg) = serde_json::from_str::<ClientMsg>(line.trim()) else {
-            continue;
-        };
-        if let ClientMsg::Pose { x, y, z, yaw } = msg {
-            let name = {
-                let mut table = table.lock().expect("guest table");
-                let Some(guest) = table.guests.iter_mut().find(|guest| guest.id == id) else {
-                    continue;
-                };
-                guest.pose = Some(crate::proto::Pose {
-                    name: guest.name.clone(),
-                    x,
-                    y,
-                    z,
-                    yaw,
-                });
-                guest.name.clone()
-            };
-            let _ = name;
-            broadcast_poses(table, players, link);
-        }
-    }
-}
-
-fn broadcast_poses(table: &Arc<Mutex<Table>>, count: &AtomicU32, link: Option<&DirectoryLink>) {
-    let table = table.lock().expect("guest table");
-    let mut poses = vec![host_pose(&table.host)];
-    for guest in &table.guests {
-        if let Some(pose) = &guest.pose {
-            poses.push(pose.clone());
-        }
-    }
-    let msg = ServerMsg::Poses { poses };
-    let Ok(mut line) = serde_json::to_string(&msg) else {
-        return;
-    };
-    line.push('\n');
-    for guest in &table.guests {
-        let _ = guest.tx.send(line.clone());
-    }
-    let _ = (count, link);
-}
-
-fn host_pose(name: &str) -> crate::proto::Pose {
-    crate::proto::Pose {
-        name: name.into(),
-        x: 128.0,
-        y: 30.0,
-        z: 232.0,
-        yaw: 0.0,
-    }
-}
-
-fn lan_ip() -> String {
-    let socket = match UdpSocket::bind("0.0.0.0:0") {
-        Ok(socket) => socket,
-        Err(_) => return "127.0.0.1".into(),
-    };
-    if socket.connect("8.8.8.8:80").is_err() {
-        return "127.0.0.1".into();
-    }
-    socket
-        .local_addr()
-        .map(|addr| addr.ip().to_string())
-        .unwrap_or_else(|_| "127.0.0.1".into())
 }

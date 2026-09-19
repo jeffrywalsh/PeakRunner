@@ -1,4 +1,8 @@
 use glam::{Mat4, Vec2, Vec3};
+use serde::{Deserialize, Serialize};
+#[path = "matchplay.rs"]
+mod matchplay;
+pub use matchplay::*;
 
 use crate::terrain::{
     height, pillars, MapId, Pillar, EMBER_HOME, EYE, GLACIER_HOME, PLAYER_RADIUS,
@@ -65,7 +69,7 @@ const MATCH_TIME: f32 = 8.0 * 60.0;
 const CAPTURES: u32 = 3;
 const SENS: f32 = 0.00235;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Team {
     Ember = 0,
     Glacier = 1,
@@ -83,7 +87,7 @@ impl Team {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MatchState {
     Flyby = 0,
     Playing = 1,
@@ -91,13 +95,14 @@ pub enum MatchState {
     Ended = 3,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 enum BotRole {
     Offense,
     Defense,
     Hunter,
 }
 
+#[derive(Clone, Debug)]
 pub struct Input {
     pub move_x: f32,
     pub move_z: f32,
@@ -129,7 +134,15 @@ impl Default for Input {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Player {
+    pub net_id: u32,
+    pub name: String,
+    pub frags: u32,
+    pub losses: u32,
+    pub shots: u32,
+    pub hits: u32,
+    jump_prev: bool,
     pub pos: Vec3,
     pub vel: Vec3,
     pub yaw: f32,
@@ -153,6 +166,7 @@ pub struct Player {
     coyote: f32,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Disc {
     pub pos: Vec3,
     pub vel: Vec3,
@@ -163,6 +177,7 @@ pub struct Disc {
     pub spin: f32,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Explosion {
     pub pos: Vec3,
     pub age: f32,
@@ -170,11 +185,13 @@ pub struct Explosion {
     pub kind: u8,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SmokePuff {
     pub pos: Vec3,
     pub age: f32,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Flag {
     pub team: Team,
     pub pos: Vec3,
@@ -207,6 +224,10 @@ pub struct World {
     pub events: String,
     pub time: f32,
     pub map: MapId,
+    pub net_camera_offset: Vec3,
+    pub blast_serial: u64,
+    network_inputs: Vec<Input>,
+    predicting: bool,
     rng: u32,
 }
 
@@ -300,6 +321,10 @@ impl World {
             events: String::new(),
             time: 0.0,
             map: MapId::Valley,
+            net_camera_offset: Vec3::ZERO,
+            blast_serial: 0,
+            network_inputs: Vec::new(),
+            predicting: false,
             rng: 0xC0FFEE,
         }
     }
@@ -340,6 +365,8 @@ impl World {
     }
 
     pub fn start_match(&mut self, ember: bool) {
+        self.network_inputs.clear();
+        self.net_camera_offset = Vec3::ZERO;
         let team = if ember { Team::Ember } else { Team::Glacier };
         self.players.clear();
         self.discs.clear();
@@ -632,7 +659,11 @@ impl World {
             }
 
             let is_local = i == self.player_id && !self.players[i].is_bot;
-            let (wish_x, wish_z, jump_held, jump_edge, fire, jet) = if is_local {
+            let (wish_x, wish_z, jump_held, jump_edge, fire, jet) = if let Some(input) = self.network_inputs.get(i) {
+                let edge = input.jump && !self.players[i].jump_prev;
+                self.players[i].jump_prev = input.jump;
+                (input.move_x, input.move_z, input.jump, edge, input.fire, input.jet)
+            } else if is_local {
                 (
                     self.input.move_x.clamp(-1.0, 1.0),
                     self.input.move_z.clamp(-1.0, 1.0),
@@ -805,7 +836,7 @@ impl World {
 
                 let mut land_hit = 0.0;
                 if !was_ground && p.on_ground && impact_speed > 18.0 {
-                    p.health -= landing_damage(impact_speed);
+                    if !self.predicting { p.health -= landing_damage(impact_speed); }
                     land_hit = 0.25;
                 }
                 land_hit
@@ -822,7 +853,7 @@ impl World {
                 self.shoot(i);
             }
 
-            if self.players[i].health <= 0.0 && self.players[i].alive {
+            if !self.predicting && self.players[i].health <= 0.0 && self.players[i].alive {
                 self.kill(i, None);
             }
         }
@@ -893,6 +924,7 @@ impl World {
     }
 
     fn shoot(&mut self, i: usize) {
+        self.players[i].shots += 1;
         let p = &self.players[i];
         let dir = look_dir(p.yaw, p.pitch);
         let kind = p.weapon;
@@ -930,7 +962,7 @@ impl World {
         {
             let p = &mut self.players[i];
             p.cooldown = weapon_reload(kind);
-            if i == self.player_id && kind != 0 {
+            if (i == self.player_id || !self.network_inputs.is_empty()) && kind != 0 {
                 p.pitch = (p.pitch + if kind == 1 { 0.002 } else { 0.012 }).min(1.5);
             }
         }
@@ -1028,6 +1060,7 @@ impl World {
         for (idx, owner) in bullet_hits {
             if !self.players[idx].alive { continue; }
             self.players[idx].health -= 8.0;
+            if let Some(p) = self.players.get_mut(owner) { p.hits += 1; }
             if owner == self.player_id { self.hitmarker = 1.0; self.push_event("hit"); }
             if idx == self.player_id { self.damage_flash = 0.35; self.push_event("pain"); }
             if self.players[idx].health <= 0.0 {
@@ -1041,6 +1074,7 @@ impl World {
     }
 
     fn explode(&mut self, pos: Vec3, owner: usize, kind: u8, team: Team) {
+        self.blast_serial += 1;
         let max_r = if kind == 0 { DISC_RADIUS } else { 9.0 };
         self.explosions.push(Explosion {
             pos,
@@ -1093,6 +1127,9 @@ impl World {
                 self.hitmarker = 1.0;
                 self.push_event("hit");
             }
+            if i != owner && !same {
+                if let Some(p) = self.players.get_mut(owner) { p.hits += 1; }
+            }
             if self.players[i].health <= 0.0 {
                 if owner == pid && i != pid {
                     killed_by_player = true;
@@ -1109,11 +1146,16 @@ impl World {
         }
     }
 
-    fn kill(&mut self, i: usize, _killer: Option<usize>) {
+    fn kill(&mut self, i: usize, killer: Option<usize>) {
         if !self.players[i].alive {
             return;
         }
         self.players[i].alive = false;
+        self.players[i].losses += 1;
+        if let Some(k) = killer.filter(|&k| k != i && k < self.players.len()
+            && self.players[k].team != self.players[i].team) {
+            self.players[k].frags += 1;
+        }
         self.players[i].health = 0.0;
         self.players[i].respawn = 3.4;
         self.players[i].jetting = false;
@@ -1153,6 +1195,9 @@ impl World {
         p.cooldown = 0.4;
         p.skiing = false;
         p.jetting = false;
+        p.on_ground = true;
+        p.coyote = 0.0;
+        p.jump_prev = false;
         if i == self.player_id {
             self.msg("REDEPLOYED", 1.4);
         }
@@ -1314,17 +1359,6 @@ impl World {
             .map(|p| Vec2::new(p.vel.x, p.vel.z).length())
             .unwrap_or(0.0)
     }
-    pub fn sync_remotes(&mut self, poses: &[(String, f32, f32, f32, f32)]) {
-        let me = self.players.get(self.player_id).map(|p| p.team).unwrap_or(Team::Ember);
-        self.players.retain(|p| !p.remote);
-        for (name, x, y, z, yaw) in poses {
-            let mut skier = make_player(me.other(), false, Vec3::new(*x, *y, *z), *yaw, BotRole::Offense);
-            skier.remote = true;
-            skier.alive = true;
-            let _ = name;
-            self.players.push(skier);
-        }
-    }
 
     pub fn player_pos(&self) -> Vec3 {
         self.players
@@ -1361,7 +1395,7 @@ impl World {
         } else {
             0.0
         };
-        let eye = p.pos + Vec3::Y * EYE + off + Vec3::Y * bob;
+        let eye = p.pos + Vec3::Y * EYE + off + Vec3::Y * bob + self.net_camera_offset;
         let dir = look_dir(p.yaw, p.pitch);
         let fov = camera_fov(spd);
         (eye, dir, fov)
@@ -2545,6 +2579,13 @@ fn apply_speed_limits(p: &mut Player, dt: f32) {
 
 fn make_player(team: Team, bot: bool, pos: Vec3, yaw: f32, role: BotRole) -> Player {
     Player {
+        net_id: 0,
+        name: String::new(),
+        frags: 0,
+        losses: 0,
+        shots: 0,
+        hits: 0,
+        jump_prev: false,
         pos,
         vel: Vec3::ZERO,
         yaw,

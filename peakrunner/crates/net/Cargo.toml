@@ -11,6 +11,23 @@ env_logger = "0.11"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+peakrunner-core = { path = "../core" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+getrandom = "0.4"
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
+tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
+ureq = "3"
+url = "2"
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls-pemfile = "2"
+webpki-roots = "1"
+postcard = { version = "1", features = ["alloc"] }
+
+[dev-dependencies]
+rcgen = "0.13"
 
 [[bin]]
 name = "peakrunner-directory"
@@ -19,3 +36,11 @@ path = "src/bin/directory.rs"
 [[bin]]
 name = "peakrunner-server"
 path = "src/bin/server.rs"
+
+[[bin]]
+name = "peakrunner-public"
+path = "src/bin/public.rs"
+
+[[bin]]
+name = "peakrunner-quic"
+path = "src/bin/quic.rs"

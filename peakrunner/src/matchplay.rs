@@ -1,0 +1,368 @@
+//! Authoritative match state and the shared movement predictor.
+use super::*;
+
+pub const MAX_PLAYERS: usize = 8;
+
+/// An input, never an outcome. No position, velocity, damage or client delta time.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Command {
+    pub seq: u64,
+    pub move_x: f32,
+    pub move_z: f32,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub jump: bool,
+    pub jet: bool,
+    pub fire: bool,
+    pub weapon: u8,
+}
+
+impl Command {
+    pub fn valid(&self) -> bool {
+        self.seq > 0 && self.seq < u64::MAX && self.move_x.is_finite()
+            && self.move_z.is_finite() && self.yaw.is_finite() && self.pitch.is_finite()
+            && self.move_x.abs() <= 1.0 && self.move_z.abs() <= 1.0
+            && self.yaw.abs() <= 100_000.0 && self.pitch.abs() <= 1.52 && self.weapon < 3
+    }
+    fn input(self) -> Input {
+        Input { move_x: self.move_x, move_z: self.move_z, jump: self.jump,
+            jet: self.jet, fire: self.fire, weapon: self.weapon, ..Input::default() }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Phase { Waiting, Countdown, Playing, Intermission }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Snapshot {
+    pub blast_serial: u64,
+    pub tick: u64,
+    pub round: u32,
+    pub phase: Phase,
+    pub phase_left: f32,
+    pub map: MapId,
+    pub players: Vec<Player>,
+    pub acks: Vec<u64>,
+    pub discs: Vec<Disc>,
+    pub explosions: Vec<Explosion>,
+    pub smoke: Vec<SmokePuff>,
+    pub flags: [Flag; 2],
+    pub score: [u32; 2],
+    pub time_left: f32,
+}
+
+pub struct Match {
+    pub world: World,
+    pub tick: u64,
+    pub round: u32,
+    pub phase: Phase,
+    pub phase_left: f32,
+    pub acks: Vec<u64>,
+}
+
+impl Match {
+    pub fn new(map: MapId) -> Self {
+        let mut world = World::new();
+        world.set_map(map);
+        world.start_rift(true);
+        world.players.clear();
+        for _ in 0..MAX_PLAYERS {
+            let mut p = make_player(Team::Ember, false, world.stand(true), 0.0, BotRole::Offense);
+            p.alive = false;
+            p.remote = true;
+            world.players.push(p);
+        }
+        world.network_inputs = vec![Input::default(); MAX_PLAYERS];
+        Self { world, tick: 0, round: 0, phase: Phase::Waiting, phase_left: 0.0,
+            acks: vec![0; MAX_PLAYERS] }
+    }
+
+    pub fn join(&mut self, id: u32, name: &str) -> Option<usize> {
+        if id == 0 || self.world.players.iter().any(|p| p.net_id == id) { return None; }
+        let slot = self.world.players.iter().position(|p| p.net_id == 0)?;
+        let count = |team| self.world.players.iter().filter(|p| p.net_id != 0 && p.team == team).count();
+        let team = if count(Team::Ember) <= count(Team::Glacier) { Team::Ember } else { Team::Glacier };
+        let mut p = make_player(team, false, self.world.stand(team == Team::Ember),
+            if team == Team::Ember { std::f32::consts::PI } else { 0.0 }, BotRole::Offense);
+        p.net_id = id;
+        p.name = name.into();
+        self.world.players[slot] = p;
+        self.world.respawn(slot);
+        self.acks[slot] = 0;
+        Some(slot)
+    }
+
+    pub fn leave(&mut self, slot: usize) {
+        if let Some(team) = self.world.players[slot].carrying.take() {
+            self.world.drop_flag(team, self.world.players[slot].pos);
+        }
+        let p = &mut self.world.players[slot];
+        p.net_id = 0;
+        p.name.clear();
+        p.alive = false;
+        p.remote = true;
+        self.world.discs.retain(|d| d.owner != slot);
+        self.world.network_inputs[slot] = Input::default();
+    }
+
+    fn restart(&mut self) {
+        self.world.discs.clear();
+        self.world.explosions.clear();
+        self.world.smoke.clear();
+        self.world.place_flags();
+        self.world.score = [0, 0];
+        self.world.time_left = MATCH_TIME;
+        self.world.state = MatchState::Playing;
+        for i in 0..MAX_PLAYERS {
+            if self.world.players[i].net_id != 0 {
+                self.world.respawn(i);
+                let p = &mut self.world.players[i];
+                p.frags = 0; p.losses = 0; p.hits = 0; p.shots = 0; p.jump_prev = false;
+            }
+        }
+    }
+
+    /// Exactly one server-owned timestep. Packet volume cannot advance time.
+    pub fn step(&mut self, commands: &[Option<Command>]) {
+        self.tick += 1;
+        self.world.events.clear();
+        self.world.time += STEP;
+        let both = [Team::Ember, Team::Glacier].iter().all(|team|
+            self.world.players.iter().any(|p| p.net_id != 0 && p.team == *team));
+        match self.phase {
+            Phase::Playing if !both => {
+                // An abandoned team cannot concede a string of uncontested rounds.
+                self.restart(); self.phase = Phase::Waiting; self.phase_left = 0.0;
+            }
+            Phase::Waiting if both => { self.phase = Phase::Countdown; self.phase_left = 3.0; }
+            Phase::Countdown if !both => { self.phase = Phase::Waiting; self.phase_left = 0.0; }
+            Phase::Countdown | Phase::Intermission => {
+                self.phase_left -= STEP;
+                if self.phase_left <= 0.0 {
+                    self.restart();
+                    self.round += 1;
+                    self.phase = if both { Phase::Playing } else { Phase::Waiting };
+                }
+            }
+            _ => {}
+        }
+        for (i, p) in self.world.players.iter_mut().enumerate() {
+            let command = commands.get(i).copied().flatten().unwrap_or_default();
+            let input = if command.valid() && p.net_id != 0 { command } else { Command::default() };
+            if input.seq > 0 {
+                self.acks[i] = self.acks[i].max(input.seq);
+                p.yaw = input.yaw;
+                p.pitch = input.pitch;
+                p.weapon = input.weapon;
+            }
+            self.world.network_inputs[i] = input.input();
+            if self.phase == Phase::Countdown || self.phase == Phase::Intermission {
+                self.world.network_inputs[i] = Input::default();
+            }
+        }
+        if self.phase != Phase::Intermission {
+            self.world.physics_step();
+            if self.phase != Phase::Playing {
+                self.world.score = [0, 0];
+                self.world.time_left = MATCH_TIME;
+                self.world.state = MatchState::Playing;
+            } else if self.world.state == MatchState::Ended {
+                self.phase = Phase::Intermission;
+                self.phase_left = 10.0;
+            }
+        }
+    }
+
+    pub fn snapshot(&self) -> Snapshot {
+        Snapshot { blast_serial: self.world.blast_serial, tick: self.tick, round: self.round, phase: self.phase,
+            phase_left: self.phase_left, map: self.world.map, players: self.world.players.clone(),
+            acks: self.acks.clone(), discs: self.world.discs.clone(),
+            explosions: self.world.explosions.clone(), smoke: self.world.smoke.clone(),
+            flags: self.world.flags.clone(), score: self.world.score, time_left: self.world.time_left }
+    }
+}
+
+impl World {
+    pub fn apply_snapshot(&mut self, snapshot: &Snapshot, id: u32) -> bool {
+        let Some(slot) = snapshot.players.iter().position(|p| p.net_id == id) else { return false; };
+        if self.map != snapshot.map { self.set_map(snapshot.map); }
+        self.network_inputs.clear();
+        self.blast_serial = snapshot.blast_serial;
+        self.player_id = slot;
+        self.players = snapshot.players.clone();
+        for p in &mut self.players { p.remote = true; }
+        self.players[slot].remote = false;
+        self.input.jump_prev = self.players[slot].jump_prev;
+        self.discs = snapshot.discs.clone();
+        self.explosions = snapshot.explosions.clone();
+        self.smoke = snapshot.smoke.clone();
+        self.flags = snapshot.flags.clone();
+        self.score = snapshot.score;
+        self.time_left = snapshot.time_left;
+        self.state = if snapshot.phase == Phase::Intermission { MatchState::Ended } else { MatchState::Playing };
+        self.kills = self.players[slot].frags;
+        self.deaths = self.players[slot].losses;
+        self.message = match snapshot.phase {
+            Phase::Waiting => "WARMUP — WAITING FOR AN OPPONENT".into(),
+            Phase::Countdown => format!("MATCH STARTS IN {:.0}", snapshot.phase_left.ceil()),
+            Phase::Intermission => format!("NEXT ROUND IN {:.0}", snapshot.phase_left.ceil()),
+            Phase::Playing => String::new(),
+        };
+        true
+    }
+
+    /// Reuse the exact movement integrator, but never predict damage or flag outcomes.
+    pub fn predict_command(&mut self, command: Command) {
+        if self.state != MatchState::Playing || self.players.is_empty() { return; }
+        let slot = self.player_id;
+        if !self.players[slot].alive { return; }
+        self.input = command.input();
+        self.input.jump_prev = self.players[slot].jump_prev;
+        self.players[slot].yaw = command.yaw;
+        self.players[slot].pitch = command.pitch;
+        self.players[slot].weapon = command.weapon;
+        let discs = self.discs.len();
+        self.predicting = true;
+        self.step_players(STEP);
+        self.predicting = false;
+        self.players[slot].jump_prev = command.jump;
+        self.discs.truncate(discs);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn duel() -> Match {
+        let mut game = Match::new(MapId::Valley);
+        game.join(1, "Skier").unwrap();
+        game.join(2, "Skier").unwrap();
+        game.phase = Phase::Playing;
+        game.round = 1;
+        game
+    }
+
+    #[test]
+    fn server_and_predictor_use_the_same_movement_and_controls() {
+        for direction in [-1.0, 1.0] {
+            let mut game = duel();
+            let mut client = World::new();
+            client.apply_snapshot(&game.snapshot(), 1);
+            let origin = client.players[0].pos;
+            for seq in 1..121 {
+                let cmd = Command { seq, move_x: direction, move_z: 1.0, yaw: 0.0,
+                    jet: seq < 70, jump: true, ..Command::default() };
+                game.step(&[Some(cmd)]);
+                client.predict_command(cmd);
+                let a = &game.world.players[0]; let b = &client.players[0];
+                assert!(a.pos.distance(b.pos) < 0.0001, "movement diverged at {seq}");
+                assert!(a.vel.distance(b.vel) < 0.0001);
+                assert!((a.energy - b.energy).abs() < 0.0001);
+            }
+            assert!((client.players[0].pos.x - origin.x) * direction > 1.0);
+            assert!(client.players[0].pos.z < origin.z);
+        }
+    }
+
+    #[test]
+    fn all_weapons_damage_on_server_and_respawn_on_server() {
+        for weapon in 0..3 {
+            let mut game = duel();
+            game.world.players[0].pos = Vec3::new(128.0, 150.0, 128.0);
+            game.world.players[1].pos = Vec3::new(128.0, 150.0, 110.0);
+            for p in &mut game.world.players[..2] { p.on_ground = false; p.health = 8.0; p.cooldown = 0.0; }
+            // A direct impact for each projectile type, using the production collision path.
+            game.world.discs.push(Disc { pos: Vec3::new(128.0, 150.7, 111.0),
+                vel: Vec3::new(0.0, 0.0, -95.0), team: Team::Ember, owner: 0,
+                life: if weapon == 2 { 1.5 } else { 1.0 }, kind: weapon, spin: 0.0 });
+            game.step(&[]);
+            assert!(!game.world.players[1].alive, "weapon {weapon} did not kill");
+            assert_eq!(game.world.players[0].frags, 1);
+            assert_eq!(game.world.players[1].losses, 1);
+            let snap = game.snapshot();
+            let mut a = World::new(); let mut b = World::new();
+            assert!(a.apply_snapshot(&snap, 1)); assert!(b.apply_snapshot(&snap, 2));
+            assert!(!a.players[1].alive && !b.players[1].alive);
+            for _ in 0..210 { game.step(&[]); }
+            assert!(game.world.players[1].alive);
+            assert_eq!(game.world.players[1].health, 100.0);
+        }
+    }
+
+    #[test]
+    fn fire_rate_energy_and_invalid_inputs_are_not_client_outcomes() {
+        let mut game = duel();
+        game.world.players[0].cooldown = 0.0;
+        for seq in 1..=120 {
+            game.step(&[Some(Command { seq, fire: true, jet: true, ..Command::default() })]);
+        }
+        assert!(game.world.players[0].shots <= 2);
+        assert!(game.world.players[0].energy < ENERGY_MAX);
+        let invalid = [Command { seq: 1, move_x: 2.0, ..Command::default() },
+            Command { seq: 1, yaw: f32::NAN, ..Command::default() },
+            Command { seq: 1, weapon: 3, ..Command::default() }];
+        for c in invalid { assert!(!c.valid()); }
+        assert!(serde_json::from_str::<Command>(r#"{"seq":1,"position":[999,999,999]}"#).is_err());
+    }
+
+    #[test]
+    fn flag_capture_disconnect_and_round_restart_are_shared() {
+        let mut game = duel();
+        game.world.players[0].pos = game.world.flags[1].pos;
+        game.step(&[]);
+        assert_eq!(game.world.flags[1].carrier, Some(0));
+        game.leave(0);
+        assert_eq!(game.world.flags[1].carrier, None);
+        assert!(game.world.flags[1].drop_timer > 0.0);
+        assert_eq!(game.join(3, "New player"), Some(0));
+        for _ in 0..3 {
+            game.world.players[0].pos = game.world.flags[1].pos;
+            game.step(&[]);
+            game.world.players[0].pos = game.world.flags[0].home;
+            game.step(&[]);
+        }
+        assert_eq!(game.world.score, [3, 0]);
+        assert_eq!(game.phase, Phase::Intermission);
+        let round = game.round;
+        for _ in 0..605 { game.step(&[]); }
+        assert_eq!(game.phase, Phase::Playing);
+        assert_eq!(game.round, round + 1);
+        assert_eq!(game.world.score, [0, 0]);
+        assert_eq!(game.world.players[0].net_id, 3);
+        game.world.time_left = STEP * 0.5;
+        game.step(&[]);
+        assert_eq!(game.phase, Phase::Intermission);
+    }
+
+    #[test]
+    fn late_join_snapshot_keeps_airborne_height_flags_and_health() {
+        let mut game = duel();
+        game.world.players[0].pos.y += 40.0;
+        game.world.players[0].health = 37.0;
+        game.world.flags[1].carrier = Some(0);
+        game.world.players[0].carrying = Some(Team::Glacier);
+        let slot = game.join(3, "Late").unwrap();
+        assert_eq!(slot, 2);
+        let mut client = World::new();
+        client.apply_snapshot(&game.snapshot(), 3);
+        assert_eq!(client.player_id, 2);
+        assert_eq!(client.players[0].pos, game.world.players[0].pos);
+        assert_eq!(client.players[0].health, 37.0);
+        assert_eq!(client.flags[1].carrier, Some(0));
+    }
+
+    #[test]
+    fn abandoned_match_returns_to_warmup_and_requires_new_countdown() {
+        let mut game = duel();
+        game.world.score = [2, 1];
+        game.leave(1);
+        game.step(&[]);
+        assert_eq!(game.phase, Phase::Waiting);
+        assert_eq!(game.world.score, [0, 0]);
+        game.join(3, "Replacement").unwrap();
+        game.step(&[]);
+        assert_eq!(game.phase, Phase::Countdown);
+    }
+}

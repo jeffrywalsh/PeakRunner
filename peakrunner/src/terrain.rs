@@ -130,7 +130,7 @@ pub fn pillars() -> Vec<Pillar> {
 
 /// Which ground the match is on. Valley is the small rift. Raindance is the
 /// Tribes 2 terrain: 256 samples, 8 m apart, heights in meters as raw/32.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum MapId {
     Valley,
     Raindance,

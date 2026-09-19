@@ -1,6 +1,8 @@
 # PeakRunner
 
-Ski and disc capture-the-flag. One Rust crate, three targets: macOS, Windows, and WebAssembly. The match rules and the simulation are the same code on every target.
+Ski and disc capture-the-flag. A shared Rust simulation, a native/WASM client,
+and a headless match server. Online matches currently use the native client;
+the browser build retains offline play.
 
 ## Play on this Mac
 
@@ -45,17 +47,36 @@ trunk serve
 
 ## Multiplayer
 
-Three processes. The directory only lists games. A server advertises itself there. The game asks the directory who is hosting, then connects to that server.
+Eight-player, server-authoritative CTF with encrypted public matches. The server
+runs movement, projectiles, damage, energy, respawns, flags, scores, and the match
+clock at 60 Hz. Clients predict their movement and reconcile to 20 Hz snapshots.
+The default directory is `https://dir.peakrunner.net/servers`; direct encrypted
+joining uses `quic://play.peakrunner.net:7777`. Public deployment is still pending
+certificate provisioning and WAN validation. Choose **Find match** in the updated
+desktop client. The directory is optional; direct joining works without it.
 
 ```sh
-cargo run -p peakrunner-net --bin peakrunner-directory
-cargo run -p peakrunner-net --bin peakrunner-server -- --name "North Spine"
+cargo run --release -p peakrunner-net --bin peakrunner-server -- --name "North Spine" --map Valley
 cargo run --bin peakrunner
 ```
 
-On the menu, Valley is the small rift. Raindance is the 2 km Tribes terrain, with the ravine between the bases. Choose it, then Start match.
+Choose **Find match → Join directly** for the local server at `127.0.0.1:7781`.
+Or use **Find match → Host a private match → Host and join** to host from the
+game itself; closing your hosted match disconnects its guests.
+For friends, bind the server to its specific LAN/VPN IP with `--bind ADDRESS`,
+and use that address in their native clients. The server selects Valley or
+Raindance for everyone. Teams are balanced on join; two opposing players start
+a three-second countdown. First to three captures or eight minutes ends the
+round; the next round starts after ten seconds. Tab shows the roster and K/D.
+Esc opens a menu without pausing the server or protecting your player.
 
-In the game, choose Find match. The directory and a match server both run on dellcon. The directory is `192.168.1.64:7780`. The match server advertises itself there and accepts players on `192.168.1.64:7781`.
+Discovery uses certificate-verified HTTPS through Cloudflare Tunnel on dellcon.
+Gameplay uses certificate-verified QUIC datagrams directly to the VPS over UDP;
+Cloudflare does not relay gameplay. The server operator remains trusted.
+Legacy direct IP connections still use plaintext TCP: use only on a trusted LAN
+or VPN, never port-forward them. Optional match passwords are not verified player
+accounts. See [multiplayer hosting and limits](docs/multiplayer.md)
+for directory setup, tests, security boundaries, and remaining work.
 
 ## Controls
 

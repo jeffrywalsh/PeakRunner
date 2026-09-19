@@ -95,7 +95,8 @@ impl PeakRunnerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Result<Self, String> {
         scene::install(cc)?;
         style_ui(&cc.egui_ctx);
-        Ok(Self {
+        #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
+        let mut app = Self {
             world: {
                 let mut world = World::new();
                 world.set_map(MapId::Raindance);
@@ -120,7 +121,18 @@ impl PeakRunnerApp {
             pads: gilrs::Gilrs::new().ok(),
             #[cfg(not(target_arch = "wasm32"))]
             net: NetUi::new(),
-        })
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Ok(address) = std::env::var("PEAKRUNNER_JOIN") {
+            if let Ok(name) = std::env::var("PEAKRUNNER_NAME") { app.net.name = name; }
+            app.net.password = std::env::var("PEAKRUNNER_MATCH_PASSWORD").unwrap_or_default();
+            if address.starts_with("quic://") {
+                app.join_server(&address, 7777);
+            } else if let Some((host, port)) = address.rsplit_once(':').and_then(|(h, p)| p.parse::<u16>().ok().map(|p| (h, p))) {
+                app.join_server(host, port);
+            }
+        }
+        Ok(app)
     }
 
     fn step(&mut self, ctx: &egui::Context, dt: f32) {
@@ -134,6 +146,7 @@ impl PeakRunnerApp {
         if ctx.input(|i| i.any_touches()) {
             self.touch = true;
         }
+        self.world.events.clear();
         self.poll_net(ctx);
 
         let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
@@ -202,7 +215,22 @@ impl PeakRunnerApp {
         self.world.input.look_stick_x = pad.lx;
         self.world.input.look_stick_y = pad.ly;
 
-        self.world.tick(dt.min(0.1).max(0.0));
+        if self.online() {
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(session) = &self.net.session {
+                let active = self.mode == Mode::Play && ctx.input(|i| i.focused);
+                if !self.net.predictor.advance(&mut self.world, dt, active, session) {
+                    self.net.lobby.error = Some("Connection stalled; leave and rejoin the match.".into());
+                    self.net.session.take();
+                    self.net.dropped_in = false;
+                    self.mode = Mode::Lobby;
+                    self.world.state = MatchState::Paused;
+                    self.grab(ctx, false);
+                }
+            }
+        } else {
+            self.world.tick(dt.min(0.1).max(0.0));
+        }
         let raw = self.world.hud_json();
         if let Ok(hud) = serde_json::from_str::<Hud>(&raw) {
             if !hud.events.is_empty() {
@@ -230,13 +258,13 @@ impl PeakRunnerApp {
     }
 
     fn pause(&mut self, ctx: &egui::Context) {
-        self.world.set_paused(true);
+        if !self.online() { self.world.set_paused(true); }
         self.mode = Mode::Pause;
         self.grab(ctx, false);
     }
 
     fn resume(&mut self, ctx: &egui::Context) {
-        self.world.set_paused(false);
+        if !self.online() { self.world.set_paused(false); }
         self.mode = Mode::Play;
         self.grab(ctx, true);
     }
@@ -248,6 +276,7 @@ impl PeakRunnerApp {
                 session.leave();
             }
             self.net.dropped_in = false;
+            self.net.hosted = None;
         }
         self.world.state = MatchState::Flyby;
         self.mode = Mode::Menu;
@@ -417,6 +446,10 @@ impl eframe::App for PeakRunnerApp {
             Mode::Browser => self.browser_ui(ui),
             Mode::Lobby => self.lobby_ui(ui),
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.online() && (ui.input(|i| i.key_down(egui::Key::Tab)) || self.mode == Mode::End) {
+            self.scoreboard_ui(ui);
+        }
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
@@ -425,6 +458,33 @@ impl eframe::App for PeakRunnerApp {
 }
 
 impl PeakRunnerApp {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn scoreboard_ui(&self, ui: &egui::Ui) {
+        let Some(snapshot) = &self.net.lobby.snapshot else { return; };
+        egui::Area::new(egui::Id::new("online-scoreboard"))
+            .anchor(Align2::RIGHT_TOP, Vec2::new(-18.0, 60.0))
+            .show(ui.ctx(), |ui| {
+                egui::Frame::new().fill(Color32::from_rgba_unmultiplied(12, 18, 28, 242))
+                    .corner_radius(8.0).inner_margin(16.0).show(ui, |ui| {
+                        ui.set_width(300.0);
+                        ui.label(RichText::new("MATCH ROSTER").color(GLACIER).size(13.0));
+                        ui.label(RichText::new(format!("{} · input ack {:.0} ms", self.net.lobby.map,
+                            self.net.predictor.latency_ms)).color(MUTED));
+                        egui::Grid::new("match-scores").striped(true).show(ui, |ui| {
+                            ui.label("Player"); ui.label("Team"); ui.label("K / D"); ui.end_row();
+                            for p in snapshot.players.iter().filter(|p| p.net_id != 0) {
+                                let team = if p.team == crate::sim::Team::Ember { "Ember" } else { "Glacier" };
+                                let color = if p.team == crate::sim::Team::Ember { EMBER } else { GLACIER };
+                                let you = if p.net_id == self.net.lobby.player_id { " · you" } else { "" };
+                                ui.label(RichText::new(format!("{} #{}{you}", p.name, p.net_id)).color(FG));
+                                ui.label(RichText::new(team).color(color));
+                                ui.label(format!("{} / {}", p.frags, p.losses)); ui.end_row();
+                            }
+                        });
+                    });
+            });
+    }
+
     fn menu_ui(&mut self, ui: &mut egui::Ui) {
         egui::Area::new(egui::Id::new("menu"))
             .anchor(Align2::LEFT_BOTTOM, Vec2::new(36.0, -28.0))
@@ -487,7 +547,8 @@ impl PeakRunnerApp {
                     .inner_margin(22.0)
                     .show(ui, |ui| {
                         ui.set_width(280.0);
-                        ui.label(RichText::new("Paused").size(28.0).color(FG).strong());
+                        ui.label(RichText::new(if self.online() { "Match menu" } else { "Paused" }).size(28.0).color(FG).strong());
+                        if self.online() { ui.label(RichText::new("The match continues while this menu is open.").color(MUTED)); }
                         ui.add_space(12.0);
                         if big(ui, "Resume", true) {
                             self.resume(ui.ctx());
@@ -497,7 +558,13 @@ impl PeakRunnerApp {
                             let next = !self.audio.muted();
                             self.audio.set_muted(next);
                         }
-                        if big(ui, "Leave rift", false) {
+                        let leave = {
+                            #[cfg(not(target_arch = "wasm32"))]
+                            { if self.net.hosted.is_some() { "Close hosted match" } else { "Leave rift" } }
+                            #[cfg(target_arch = "wasm32")]
+                            { "Leave rift" }
+                        };
+                        if big(ui, leave, false) {
                             self.menu(ui.ctx());
                         }
                     });
@@ -542,7 +609,9 @@ impl PeakRunnerApp {
                         );
                         ui.label(RichText::new(detail).color(MUTED));
                         ui.add_space(12.0);
-                        if big(ui, "Start match", true) {
+                        if self.online() {
+                            ui.label(RichText::new(&self.world.message).color(GLACIER));
+                        } else if big(ui, "Start match", true) {
                             self.start(ui.ctx());
                         }
                         if big(ui, "Menu", false) {
@@ -786,62 +855,62 @@ fn tap_button(ui: &mut egui::Ui, center_br: egui::Pos2, label: &str) -> bool {
 }
 
 impl PeakRunnerApp {
-    fn poll_net(&mut self, ctx: &egui::Context) {
+    fn online(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        { self.net.dropped_in }
+        #[cfg(target_arch = "wasm32")]
+        { false }
+    }
+
+    fn poll_net(&mut self, _ctx: &egui::Context) {
         #[cfg(not(target_arch = "wasm32"))]
         {
             if let Some(inbox) = &self.net.inbox {
                 if let Ok(result) = inbox.try_recv() {
                     self.net.listing = match result {
                         Ok(servers) => Listing::Ready(servers),
-                        Err(err) => Listing::Failed(err),
+                        Err(err) => Listing::Failed(format!("Directory unavailable: {err}. Direct joining and hosting still work.")),
                     };
                     self.net.inbox = None;
                 }
             }
-            let connected = self
-                .net
-                .session
-                .as_ref()
-                .map(|session| {
-                    self.net.lobby = session.lobby();
-                    self.net.lobby.connected
-                })
-                .unwrap_or(false);
-            if connected && self.mode == Mode::Lobby && !self.net.dropped_in {
-                self.drop_into_rift(ctx);
+            if let Some(session) = &self.net.session { self.net.lobby = session.lobby(); }
+            if let Some(error) = self.net.lobby.error.clone() {
+                if self.net.session.is_some() {
+                    self.net.session.take();
+                    self.net.dropped_in = false;
+                    self.mode = Mode::Lobby;
+                    self.world.state = MatchState::Paused;
+                    self.audio.set_jet(false);
+                    self.grab(_ctx, false);
+                    self.net.lobby.error = Some(error);
+                }
+                return;
             }
-            if self.mode == Mode::Play && self.net.dropped_in {
-                if let Some(me) = self.world.players.get(self.world.player_id) {
-                    let pose = (me.pos.x, me.pos.y, me.pos.z, me.yaw);
-                    if let Some(session) = &self.net.session {
-                        session.send_pose(pose.0, pose.1, pose.2, pose.3);
+            if self.net.lobby.connected {
+                if let Some(snapshot) = self.net.lobby.snapshot.clone() {
+                    if !self.net.dropped_in {
+                        self.net.predictor = crate::online::Online::default();
+                        self.net.dropped_in = true;
+                        self.world.players.clear();
+                        self.world.input = Default::default();
+                        self.mode = Mode::Play;
+                        self.wait_fire_release = true;
+                        self.audio.unlock();
+                        self.audio.play("start");
+                    }
+                    self.net.predictor.receive(&mut self.world, &snapshot, self.net.lobby.player_id);
+                    self.map = snapshot.map;
+                    self.ember = self.world.players[self.world.player_id].team == crate::sim::Team::Ember;
+                    if snapshot.phase == crate::sim::Phase::Intermission && self.mode != Mode::Pause {
+                        self.mode = Mode::End;
+                    } else if snapshot.phase != crate::sim::Phase::Intermission && self.mode == Mode::End {
+                        self.mode = Mode::Play;
+                        self.wait_fire_release = true;
                     }
                 }
-                let mine = self.net.name.clone();
-                let poses: Vec<_> = self
-                    .net
-                    .lobby
-                    .poses
-                    .iter()
-                    .filter(|pose| pose.name != mine)
-                    .map(|pose| {
-                        let y = crate::terrain::height_on(self.world.map, pose.x, pose.z) + 1.2;
-                        (pose.name.clone(), pose.x, y, pose.z, pose.yaw)
-                    })
-                    .collect();
-                self.world.sync_remotes(&poses);
             }
         }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn drop_into_rift(&mut self, ctx: &egui::Context) {
-        self.net.dropped_in = true;
-        self.world.set_map(self.map);
-        self.world.start_rift(self.ember);
-        self.mode = Mode::Play;
-        self.wait_fire_release = true;
-        self.grab(ctx, true);
     }
 
     fn open_browser(&mut self) {
@@ -890,10 +959,41 @@ impl PeakRunnerApp {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn browser_native(&mut self, ui: &mut egui::Ui) {
+        ui.label(RichText::new("Encrypted public matches · server-authoritative CTF").size(12.0).color(GLACIER));
         ui.label(RichText::new("Directory").size(12.0).color(MUTED));
         ui.text_edit_singleline(&mut self.net.directory);
         ui.label(RichText::new("Your name").size(12.0).color(MUTED));
         ui.text_edit_singleline(&mut self.net.name);
+        ui.label(RichText::new("Match password (optional)").size(12.0).color(MUTED));
+        ui.add(egui::TextEdit::singleline(&mut self.net.password).password(true));
+        ui.label(RichText::new("Direct server address").size(12.0).color(MUTED));
+        ui.text_edit_singleline(&mut self.net.direct);
+        if ui.button("Join directly").clicked() {
+            let address = self.net.direct.clone();
+            if address.starts_with("quic://") {
+                self.join_server(&address, 7777);
+            } else if let Some((host, port)) = address.rsplit_once(':').and_then(|(h, p)| p.parse::<u16>().ok().map(|p| (h, p))) {
+                self.join_server(host, port);
+            } else { self.net.listing = Listing::Failed("Use quic://play.peakrunner.net:7777 or a private IP:port".into()); }
+        }
+        ui.collapsing("Host a private match", |ui| {
+            ui.label(RichText::new("Bind to your LAN/VPN IP and port. Loopback is local-only.").color(MUTED));
+            ui.text_edit_singleline(&mut self.net.host_address);
+            ui.label(RichText::new(format!("Map: {} · 8 slots · share this address with friends",
+                terrain::info(self.map).name)).color(MUTED));
+            ui.label(RichText::new("Closing your hosted match disconnects everyone.").color(MUTED));
+            if ui.button("Host and join").clicked() {
+                let name = format!("{}'s match", self.net.name.trim());
+                match peakrunner_net::GameHost::bind(&self.net.host_address, &name, 8, terrain::info(self.map).name) {
+                    Ok(host) => {
+                        let addr = host.local_addr();
+                        self.net.hosted = Some(host.with_password(self.net.password.clone()).spawn());
+                        self.join_server(&addr.ip().to_string(), addr.port());
+                    }
+                    Err(err) => self.net.listing = Listing::Failed(err.to_string()),
+                }
+            }
+        });
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             if ui.button("Refresh").clicked() {
@@ -918,20 +1018,29 @@ impl PeakRunnerApp {
                 let chosen: Vec<_> = servers.clone();
                 for server in chosen {
                     let label = format!(
-                        "{}   {} of {} connected   {}:{}",
-                        server.name, server.players, server.max_players, server.host, server.port
+                        "{} · {} / {} · {}{}",
+                        server.name, server.players, server.max_players, server.map,
+                        if server.host.starts_with("quic://") { " · encrypted UDP" } else { " · LAN" }
                     );
                     if ui.add(egui::Button::new(label).min_size(Vec2::new(420.0, 36.0))).clicked() {
-                        match peakrunner_net::connect(&server.host, server.port, &self.net.name) {
-                            Ok(session) => {
-                                self.net.session = Some(session);
-                                self.mode = Mode::Lobby;
-                            }
-                            Err(err) => self.net.listing = Listing::Failed(err.to_string()),
-                        }
+                        self.join_server(&server.host, server.port);
                     }
                 }
             }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn join_server(&mut self, host: &str, port: u16) {
+        match peakrunner_net::connect_private(host, port, &self.net.name, &self.net.password) {
+            Ok(session) => {
+                self.net.direct = if host.contains("://") { host.into() } else { format!("{host}:{port}") };
+                self.net.lobby = Default::default();
+                self.net.session = Some(session);
+                self.net.dropped_in = false;
+                self.mode = Mode::Lobby;
+            }
+            Err(err) => self.net.listing = Listing::Failed(err.to_string()),
         }
     }
 
@@ -953,10 +1062,18 @@ impl PeakRunnerApp {
                             } else {
                                 lobby.match_name.clone()
                             };
-                            ui.label(RichText::new("IN THE RIFT").size(12.0).color(GLACIER));
+                            ui.label(RichText::new(if lobby.error.is_some() { "DISCONNECTED" } else { "IN THE RIFT" }).size(12.0).color(GLACIER));
                             ui.label(RichText::new(title).size(28.0).color(FG).strong());
                             if let Some(err) = &lobby.error {
                                 ui.label(RichText::new(err).color(EMBER));
+                                ui.label(RichText::new("Rejoining starts a new player session.").color(MUTED));
+                                if ui.button("Reconnect").clicked() {
+                                    let address = self.net.direct.clone();
+                                    if address.starts_with("quic://") { self.join_server(&address, 7777); }
+                                    else if let Some((host, port)) = address.rsplit_once(':').and_then(|(h, p)| p.parse::<u16>().ok().map(|p| (h, p))) {
+                                        self.join_server(host, port);
+                                    }
+                                }
                             } else if lobby.connected {
                                 ui.label(RichText::new(format!("{} · {} skiers", lobby.map, lobby.players.len())).color(MUTED));
                             } else {
@@ -982,6 +1099,7 @@ impl PeakRunnerApp {
                 session.leave();
             }
             self.net.dropped_in = false;
+            self.net.hosted = None;
         }
         self.mode = Mode::Browser;
     }
@@ -989,6 +1107,11 @@ impl PeakRunnerApp {
 
 #[cfg(not(target_arch = "wasm32"))]
 struct NetUi {
+    hosted: Option<peakrunner_net::GameHandle>,
+    host_address: String,
+    password: String,
+    direct: String,
+    predictor: crate::online::Online,
     directory: String,
     name: String,
     listing: Listing,
@@ -1002,7 +1125,12 @@ struct NetUi {
 impl NetUi {
     fn new() -> Self {
         Self {
-            directory: "192.168.1.64:7780".into(),
+            hosted: None,
+            host_address: "127.0.0.1:7781".into(),
+            password: String::new(),
+            direct: "quic://play.peakrunner.net:7777".into(),
+            predictor: Default::default(),
+            directory: "https://dir.peakrunner.net/servers".into(),
             name: "Skier".into(),
             listing: Listing::Idle,
             inbox: None,
@@ -1023,17 +1151,12 @@ enum Listing {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn rift_roster(ui: &egui::Ui, lobby: &peakrunner_net::Lobby) {
-    let names = if lobby.players.is_empty() {
-        "Connecting".to_string()
-    } else {
-        lobby.players.join("  ·  ")
-    };
     ui.painter().text(
-        ui.max_rect().center_top() + Vec2::new(0.0, 18.0),
+        ui.max_rect().center_top() + Vec2::new(0.0, 78.0),
         Align2::CENTER_TOP,
-        format!("{}   {}", lobby.match_name, names),
-        egui::FontId::proportional(16.0),
-        FG,
+        format!("{} · {} / 8 · Tab: scoreboard", lobby.match_name, lobby.players.len()),
+        egui::FontId::proportional(12.0),
+        MUTED,
     );
 }
 
