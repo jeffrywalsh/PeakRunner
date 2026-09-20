@@ -44,65 +44,38 @@ and feature scoped separately; update branches from tested main between portions
 Find a Rift preferences are documented in `docs/client-preferences.md`.
 They are not in the published `.20260919.4` binaries; never store passwords.
 
-## Resume checkpoint — 2026-09-19
+## Resume checkpoint — original checkout restored
 
-- Reviewed release baseline `d84133d` is committed and published on GitHub
-  `main`. See `docs/release-baseline-review.md` for source-archive equality,
-  test results and exclusions. This Git reconciliation did not redeploy services.
-- Live game/server remain `0.1.0-raindance.20260919.4`; launcher
-  `0.1.0-r1`, feed sequence `2026091907`. Recheck live state before deployment.
-- The original checkout at
-  `/Users/jeffrywalsh/workspace/PeakRunner` remains on `terrain-materials`
-  with its dirty contents preserved. Much of that diff is now committed on main;
-  do not blindly commit it again or reset/clean it.
-- The clean publication worktree is `/private/tmp/peakrunner-baseline.SZ5oeH`
-  (native workspace in its `peakrunner/` subdirectory). Temporary worktrees
-  are not durable backups: use `git worktree list` and remote main to recover.
-- Find a Rift preferences were isolated on `feature/find-rift-preferences`
-  and verified for main: 133 library tests passed, native all-target, Windows
-  cross-compile and WebAssembly checks passed. The real macOS browser capture
-  restored the saved name/addresses and left the password blank; see
-  `screenshots/preferences-browser.png` and `docs/client-preferences.md`.
-  No Windows/Linux native runtime test is claimed for this feature.
-  Source publication is separate from distribution: preferences are NOT in .4.
-- Preferences remember name, directory URL and direct host, never passwords.
-  Paths: macOS `~/Library/Application Support/PeakRunner/client.json`;
-  Windows `%APPDATA%\PeakRunner\client.json`; Linux
-  `$XDG_CONFIG_HOME/PeakRunner/client.json` or `~/.config/PeakRunner/client.json`.
-  Use an isolated `PEAKRUNNER_CONFIG_DIR` for QA; automated join sessions must
-  not overwrite real preferences.
-- Feature/map branch names, order and merge gates are in `docs/roadmap.md`.
-  Initialize each from the reviewed main baseline; update from tested main before
-  starting later portions. Merge/push only completed, tested work. No branch
-  deletion or force pushes. Map names are proposals, all distributed assets original.
-- Multi-map work is in progress on `feature/multi-map-system`, updated from
-  main `396cf0d`, in `/private/tmp/peakrunner-baseline.SZ5oeH/peakrunner`.
-  First checkpoint: validated catalog metadata and stable built-in map IDs;
-  runtime still uses the single-pack slot. See `docs/multi-map-system.md` on
-  that branch for remaining registry, protocol, renderer and launcher work.
-  Do NOT merge the incomplete branch or claim multiple packs are playable yet.
-  Server rotation checkpoint adds optional `PEAKRUNNER_MATCH_ROTATION` JSON
-  for built-in Valley/Raindance, CTF only. Advances after intermission and resets
-  to the first entry when empty; live deployment unchanged. See the branch docs
-  for tests and remaining full-transition QA. Compatibility still hashes the
-  old single pack; selected-map admission and registry remain unfinished.
-  Continue with the immutable installed-pack registry; leave movement untouched.
-  A new client release is still required to deliver preferences to launcher users;
-  do not overwrite existing .4 archives or restart servers for this client-only work.
+- Work in `/Users/jeffrywalsh/workspace/PeakRunner/peakrunner`. The original
+  checkout is now on `main`, including preferences, rotation and Skybreak.
+  Use branches in this directory for future work; do not redirect normal builds
+  to the temporary review worktree.
+- User explicitly requested consolidation of the current development work onto
+  main. This does NOT mean the unfinished multi-map system is release-ready.
+  Skybreak traversal/balance, full map-transition QA, selected-map admission and
+  signed multi-pack launcher packaging remain pending. See
+  `docs/skybreak-bastions.md` and `docs/multi-map-system.md`.
+- Normal local command: `cargo run --locked --release -p peakrunner --bin peakrunner`.
+  Offline choices are Raindance and Skybreak Bastions. Valley remains an internal
+  test fixture only. Protocol `maps2` cannot join the public .4 server.
+- Live services/downloads remain `0.1.0-raindance.20260919.4`, launcher
+  `0.1.0-r1`, feed `2026091907`. Git publication is NOT deployment.
+- Original tracked/untracked working state was preserved in LOCAL recovery stash
+  `220972590028f1bdcd61f363bef9f8a415a0e1b7` before switching branches.
+  It may include private reference screenshots: never publish the stash.
+  Do not blindly apply it onto main: most code duplicates already committed work.
+  Unique untracked files are restored separately where they do not collide;
+  differing older screenshots/documentation remain recoverable from the stash.
+  Ignored local assets, credentials, downloads and build cache were left alone.
+- The temporary review worktree `/private/tmp/peakrunner-baseline.SZ5oeH`
+  is detached at `59524c1`; it is not the active workspace or a durable backup.
+- Delete only branches proven ancestors of main. Empty reserved roadmap branches
+  count as merged; recreate the relevant branch from current main when work starts.
+  Roadmap scope remains in `docs/roadmap.md`.
+- Preferences are in main, not the .4 downloads; see `docs/client-preferences.md`.
+  Use isolated `PEAKRUNNER_CONFIG_DIR` for QA; never save match passwords.
 
 ## Gameplay and security contracts
-
-### Skybreak checkpoint
-
-The user prioritized a Broadside-inspired floating-base map and retiring Valley.
-Active development is now `map/skybreak-bastions` in the temporary worktree,
-based on multi-map checkpoint `7e714d4`; main and live .4 remain unchanged.
-See `docs/skybreak-bastions.md` on that branch. Raindance and Skybreak have
-separate packs; Valley remains only an internal test fixture. Skybreak is a first
-playable layout, NOT balance-approved or deployed. Protocol `maps2` is incompatible
-with .4. Do not merge unfinished multi-map dependencies to main or publish clients
-without coordinated server/update packaging. Next: traversal/CTF and map-switch
-QA, then finish selected-map admission and signed multi-pack launcher support.
 
 - Multiplayer map rotation and modes are SERVER-selected. Client-local map data
   supports fast rendering and prediction, not authority over map/mode choice.

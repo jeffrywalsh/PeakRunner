@@ -1,7 +1,8 @@
 # Skybreak Bastions — original floating-base CTF playtest
 
-Branch `map/skybreak-bastions` includes the unfinished multi-map dependency at
-`7e714d4`; neither branch is ready for a main merge/public release yet.
+The user requested consolidating this development checkpoint and its multi-map
+dependency onto main in the original checkout. It is not public-release ready;
+remaining playtest and integration work below still applies.
 
 Valley is removed from the playable menu and production server configuration.
 Its procedural terrain/enum remains an internal regression-test fixture, not a

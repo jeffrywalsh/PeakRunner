@@ -1,7 +1,8 @@
 # Multi-map foundation — in progress
 
-Branch: `feature/multi-map-system`, based on main `396cf0d`.
-Do not merge or deploy this branch until the complete pipeline is tested.
+Development checkpoints have been consolidated onto main at the user's request.
+Do not deploy until the complete pipeline is tested. Continue work in the original
+checkout, creating a new focused branch from main when needed.
 
 ## Server authority contract
 
