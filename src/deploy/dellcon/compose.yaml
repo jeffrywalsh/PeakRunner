@@ -1,7 +1,7 @@
 name: peakrunner-public
 services:
   site:
-    image: sha256:45aa35b7d88a8ca45b57ae06b11a016e7cf29303b9807b4c6ca38221a19264e4
+    image: sha256:27d69f3af6be7598b09918626be5cbf9510e58f5c6d0ebcd70fcecddfa1cf0b2
     restart: unless-stopped
     read_only: true
     user: "10001:10001"

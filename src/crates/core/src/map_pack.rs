@@ -71,6 +71,23 @@ fn skybreak_asset(name: &str) -> Result<&'static [u8], String> {
 
 static PACK: OnceLock<Option<MapPack>> = OnceLock::new();
 
+/// Private test packages keep source-derived maps separate from public assets.
+#[cfg(not(target_arch = "wasm32"))]
+fn private_pack_path(map: crate::terrain::MapId) -> PathBuf {
+    if let Some(root) = std::env::var_os("PEAKRUNNER_PRIVATE_MAPS_DIR") {
+        return PathBuf::from(root).join(map.key());
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            for root in [parent.join("private-maps"), parent.join("../Resources/private-maps")] {
+                if root.is_dir() { return root.join(map.key()); }
+            }
+        }
+    }
+    Path::new("local-assets").join(map.key()).join(
+        if map == crate::terrain::MapId::BroadsideClone { "compiled-donut-v1" } else { "installed" })
+}
+
 pub fn active() -> Option<&'static MapPack> {
     PACK.get_or_init(|| {
         #[cfg(not(target_arch = "wasm32"))]
@@ -103,7 +120,7 @@ pub fn on(map: crate::terrain::MapId) -> Option<&'static MapPack> {
             cache.get_or_init(|| {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
-                    let path=Path::new("local-assets").join(map.key()).join("installed");
+                    let path=private_pack_path(map);
                     if path.join("map.json").is_file() {
                         let pack=MapPack::load(&path).expect("Invalid private collection pack");
                         assert!(pack.manifest.private_reference,"Collection clones must remain private");
@@ -118,9 +135,9 @@ pub fn on(map: crate::terrain::MapId) -> Option<&'static MapPack> {
             STONE.get_or_init(|| {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
-                    let path=Path::new("local-assets/stonehenge-clone/installed");
+                    let path=private_pack_path(map);
                     if path.join("map.json").is_file() {
-                        let pack=MapPack::load(path).expect("Invalid local stonehenge-clone pack");
+                        let pack=MapPack::load(&path).expect("Invalid local stonehenge-clone pack");
                         assert!(pack.manifest.private_reference,"Stonehenge clone must remain private");
                         return Some(pack);
                     }
@@ -131,12 +148,12 @@ pub fn on(map: crate::terrain::MapId) -> Option<&'static MapPack> {
         crate::terrain::MapId::BroadsideClone => {
             static CLONE: OnceLock<Option<MapPack>> = OnceLock::new();
             CLONE.get_or_init(|| {
-                // Explicit local development install; never embedded or downloaded.
+                // Explicit local or packaged test install; never embedded.
                 #[cfg(not(target_arch = "wasm32"))]
                 {
-                    let path=Path::new("local-assets/broadside-clone/compiled-donut-v1");
+                    let path=private_pack_path(map);
                     if path.join("map.json").is_file() {
-                        let pack=MapPack::load(path).expect("Invalid local broadside-clone pack");
+                        let pack=MapPack::load(&path).expect("Invalid local broadside-clone pack");
                         assert!(pack.manifest.private_reference,"Broadside clone must remain private");
                         return Some(pack);
                     }
@@ -159,7 +176,15 @@ impl MapPack {
     pub fn load(root: &Path) -> Result<Self, String> {
         let read = |name: &str, max: u64| -> Result<Vec<u8>, String> {
             let path = root.join(name);
-            let size = path.metadata().map_err(|e| format!("{name}: {e}"))?.len();
+            let size = match path.metadata() {
+                Ok(meta) => meta.len(),
+                Err(e) if name == "ambient.f32" && e.kind() == std::io::ErrorKind::NotFound => {
+                    // Launcher r1 cannot carry empty files. The manifest hash
+                    // below still must prove that this map expects empty audio.
+                    return Ok(Vec::new());
+                }
+                Err(e) => return Err(format!("{name}: {e}")),
+            };
             if size > max { return Err(format!("{name} exceeds size limit")); }
             std::fs::read(path).map_err(|e| e.to_string())
         };
@@ -272,6 +297,13 @@ impl MapPack {
         if name.contains(['/', '\\']) || !self.manifest.files.contains_key(name) {return Err("Unknown map asset".into());}
         if self.root.as_os_str().is_empty() {return (if self.skybreak {skybreak_asset(name)} else {builtin_asset(name)}).map(|b|b.to_vec());}
         let path=self.root.join(name);
+        if name == "ambient.f32" && self.manifest.files[name] == format!("{:x}",Sha256::digest([])) {
+            match path.try_exists() {
+                Ok(false) => return Ok(Vec::new()),
+                Err(e) => return Err(e.to_string()),
+                Ok(true) => (),
+            }
+        }
         if path.metadata().map_err(|e|e.to_string())?.len()>128_000_000 {return Err("Oversized asset".into());}
         let bytes=std::fs::read(path).map_err(|e|e.to_string())?;
         if format!("{:x}",Sha256::digest(&bytes))!=self.manifest.files[name] {return Err(format!("Map asset changed: {name}"));}
@@ -386,6 +418,29 @@ fn sweep_triangle(s:Vec3,e:Vec3,r:f32,tri:[Vec3;3])->Option<(f32,Vec3)> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(not(target_arch = "wasm32"), not(feature = "external-map")))]
+    #[test]
+    fn omitted_ambience_requires_the_empty_content_hash() {
+        use super::*;
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("peakrunner-empty-audio-{}-{nonce}",std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        for name in ["map.json","vertices.bin","collision.bin","height.bin","weights.rgba","textures.rgba"] {
+            std::fs::write(root.join(name), builtin_asset(name).unwrap()).unwrap();
+        }
+        assert!(MapPack::load(&root).is_err(), "missing nonempty audio must fail");
+        let mut manifest: serde_json::Value = serde_json::from_slice(builtin_asset("map.json").unwrap()).unwrap();
+        manifest["files"]["ambient.f32"] = format!("{:x}",Sha256::digest([])).into();
+        std::fs::write(root.join("map.json"),serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let absent = MapPack::load(&root).unwrap();
+        assert!(absent.asset("ambient.f32").unwrap().is_empty());
+        std::fs::write(root.join("ambient.f32"),[]).unwrap();
+        assert_eq!(absent.fingerprint, MapPack::load(&root).unwrap().fingerprint);
+        std::fs::write(root.join("ambient.f32"),[1,2,3,4]).unwrap();
+        assert!(absent.asset("ambient.f32").is_err());
+        assert!(MapPack::load(&root).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
     use super::*;
 
     #[test]

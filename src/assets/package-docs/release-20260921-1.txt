@@ -1,0 +1,8 @@
+Private test .20260921.1: saved Find match preferences (never passwords) and
+server-selected CTF rotation across Raindance, Skybreak Bastions, Broadside Clone,
+Stonehenge Clone, Snowblind Clone and Desert of Death Clone. The four clone packs
+are source-derived test assets, not original PeakRunner art. Update before
+joining the matching server; .20260919.4 is incompatible. Map traversal and
+balance need human playtesting. Skybreak is embedded; Raindance and the four
+clone packs are signed external payloads. Windows remains experimental; Linux
+hardware/audio gameplay is untested. Existing endpoints remain openly reachable.

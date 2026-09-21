@@ -24,6 +24,197 @@ The old checkout and legacy browser prototype remain at
 - Older commands assume the native workspace: execute from `src/`. Historical
   absolute PeakRunner/peakrunner paths and app locations are no longer current.
 - Git history/remotes/stashes retained. See `docs/workspace-layout.md`.
+- Linux migration validation passed on dellcon (2026-09-21): release client
+  build plus isolated Xvfb/Mesa local-match rendering smoke, visually checked.
+  See workspace-layout for image provenance, capture and limitations. This was
+  not a deployment; real GPU performance and audio playback remain untested.
+
+## Active deployment request — six-map private test (2026-09-21)
+
+This section supersedes older public-release, Raindance-only and private-clone
+offline-only deployment instructions below for **this explicitly requested test**.
+The user clarified: "we need to put all in rotation. this isn't a public server,
+this is a private test" and then "ignore trying to firewall this out for now".
+Do not ask again whether to keep only Raindance or add firewall/password gating.
+Use the existing dellcon/VPS deployment and existing site/launcher delivery path.
+Those endpoints remain publicly reachable; "private test" describes the intended
+audience, not an implemented access boundary. No firewall, DNS, SSH, tunnel or
+password change is requested. Preserve TLS verification and infrastructure hardening.
+
+### Scope and source
+
+- Active checkout: `~/workspace/peakrunner`; all build commands run in `src/`.
+  Prior native conversation recovered from thread
+  `01a0b61d-e052-7db0-bae8-9e9364058f30`, originally at
+  `~/workspace/PeakRunner/peakrunner`. The parent browser project is historical;
+  do not build/deploy from `PeakRunner.bak`.
+- Published version: `0.1.0-private.20260921.1`. Keep launcher
+  `0.1.0-r1` unless verification establishes that it needs a change. Select a
+  signed feed sequence greater than all currently published sequences.
+- Server-selected CTF rotation, in order: **Raindance, Skybreak Bastions,
+  Broadside Clone, Stonehenge Clone, Snowblind Clone, Desert of Death Clone**.
+  Valley remains retired/internal. Empty-server reset returns to Raindance.
+- For this test the user authorizes deploying the four installed source-derived
+  runtime packs alongside clients and server. Keep them in ignored research and
+  release storage; do not commit/push imported packs, captures, source archives,
+  credentials or signing keys. This is not a general original-assets-only release.
+- Original Raindance/Skybreak build inputs remain in `src/assets/maps/`.
+  Private inputs via `src/local-assets`: Broadside `broadside-clone/compiled-donut-v1`;
+  Stonehenge, Snowblind and Desert of Death each `<map-key>/installed`.
+  Copy only `map.json` and its six verified runtime payloads, not editable source,
+  mission archives, prior packs, app bundles or the whole research directory.
+
+### Steps in simple terms
+
+1. Save the current server and website settings so we can roll back.
+2. Prepare all six maps and make matching game/server builds.
+3. Test joining, changing maps, rendering and launcher updates.
+4. Put the new server and map packs on the VPS; switch when nobody is playing.
+5. Put matching downloads and signed updates on dellcon, then update the website.
+6. Check the live server, downloads and launcher from outside the network.
+7. Write down exactly what shipped, how to recover, and what still needs playtesting.
+
+**These deployment steps are complete for `0.1.0-private.20260921.1`.**
+Do not repeat the deployment simply to complete this checklist. A read-only
+follow-up confirmed both pinned images healthy and the six-map rotation configured;
+one player was connected, so no further restart or WAN slot test was performed.
+Detailed execution and completion evidence:
+[six-map release runbook](docs/release-20260921-1.md#detailed-execution-steps).
+Human balance/traversal, native Windows runtime and physical Linux GPU/audio
+testing remain separate playtest work.
+
+### Implementation and deployment steps
+
+1. Inspect Git status and preserve existing work. No new commit/push is requested.
+   Check live host health, version/protocol and occupancy through the existing
+   directory/status endpoints and narrow Docker inspections.
+2. Enable imported rotation only with `PEAKRUNNER_PRIVATE_TEST=1` on the test
+   server. Fail startup for missing/invalid rotation packs. Load packs from
+   `PEAKRUNNER_PRIVATE_MAPS_DIR/<map-key>`; packaged clients also locate them
+   beside the executable in `private-maps/` or in macOS
+   `Contents/Resources/private-maps/`. Preserve existing local development paths.
+3. Include each installed imported pack's identity/fingerprint in gameplay
+   compatibility so missing/mismatched test collections are rejected before a
+   player slot is granted. `.20260919.4` / `map1` clients are incompatible.
+   Do not present combined-collection compatibility as selected-map-only admission.
+4. Verify normal workspace library tests, all-target compilation, app boundaries,
+   private collection rotation with connected clients, late joins and empty reset.
+   Socket tests require local networking. Private tests need an explicit absolute
+   `PEAKRUNNER_PRIVATE_MAPS_DIR`, since Cargo tests run from crate directories.
+   Render and inspect actual map transitions; keep human balance/traversal and
+   platform limitations honest. Do not change approved movement physics.
+5. Stage maps with `python3 scripts/stage-private-maps.py ABSOLUTE_NEW_DIRECTORY`.
+   It verifies manifest hashes and refuses overwrite. Build matching Mac ARM64,
+   Windows x64 and Linux x64 clients. Build Linux/server on dellcon, not the VPS.
+   Record exact source archive hashes, build provenance and immutable image IDs.
+   Keep private map transfer separate from the source-only Docker build context.
+6. Package standalone clients with `PEAKRUNNER_PRIVATE_TEST=1` and
+   `scripts/package-client.sh`; Mac maps must be copied before bundle signing.
+   Stage signed feeds with `PEAKRUNNER_PRIVATE_TEST=1` and
+   `scripts/stage-launcher-release.sh`. Managed layout is
+   `game/private-maps/<map-key>/`, external original Raindance is `map/`, and
+   original Skybreak remains embedded. Signing key stays on the admin Mac.
+   Launcher r1 rejects zero-byte files. Omit only empty `ambient.f32` files from
+   managed payloads: the loader must accept absence only when the manifest's
+   SHA-256 proves empty audio. Keep standalone/server packs byte-identical.
+   Verify signatures, hashes, fresh install, upgrade, repair/rollback and actual
+   managed-game launch. No claim of independent Skybreak pack updating.
+7. Stage matching server image and versioned map directory on the VPS. Mount the
+   collection read-only at `/opt/peakrunner/private-maps` in the container. Keep
+   eight slots, TLS/QUIC UDP 7777, current certificates, limits and non-root user.
+   Configure the six-entry rotation in `src/deploy/vps/compose.yaml`.
+8. Before cutover, back up current Compose/release/source records and signed
+   platform manifests on their hosts. Retain previous images and downloads.
+   Recheck occupancy immediately; coordinate any restart with connected players.
+   Update the matching server before publishing incompatible clients using
+   `sudo -n docker compose --env-file release.conf up -d --no-deps match`.
+   Verify health, advancing tick, name, selected map, version and protocol.
+9. Put standalone archives and signed blobs on dellcon; verify remote hashes.
+   Publish signed platform manifests atomically only after all blobs exist and
+   server verification passes. Update website manifest descriptions/checksums
+   to describe this six-map test honestly. Build/pin the website image; recreate
+   only `site` with the documented dummy-token command. Do not recreate the
+   directory/tunnel or touch unrelated dellcon services.
+10. Verify apex/www HTTPS, directory details, desktop/mobile download UI, every
+    advertised archive hash and signed feed/blob. Run a small encrypted WAN
+    client check only when empty. Verify connected rotation and actual rendering;
+    leave unverified human/Windows/GPU/audio claims explicitly pending.
+11. Record deployed versus staged state, source/image hashes, feed sequence and
+    rollback paths in this guide and `docs/release-20260921-1.md`; synchronize
+    package release notes. Rollback restores a compatible server/client set;
+    launcher recovery needs a newly signed higher sequence, not a downgrade.
+
+### Published checkpoint — 2026-09-21
+
+- **Deployed and published:** game `0.1.0-private.20260921.1`, launcher remains
+  `0.1.0-r1`, signed feed sequence `2026092102`. Standalone archive names use
+  package revision `r2`. All six maps are configured in the CTF rotation above.
+  Restart occurred with zero players after a second occupancy check.
+- VPS match image:
+  `sha256:d801944ba2641ce9aafc6c4eb991aab131e7cb59b26671571a0d88a24f86b40d`.
+  Website image:
+  `sha256:27d69f3af6be7598b09918626be5cbf9510e58f5c6d0ebcd70fcecddfa1cf0b2`.
+  Directory and tunnel were not recreated. No firewall/DNS/password change.
+- Runtime maps are versioned at
+  `/opt/peakrunner/private-map-releases/20260921-private1`, with
+  `/opt/peakrunner/private-maps` selecting that directory and mounted read-only.
+  Exact archives/build records are under
+  `/data/peakrunner/releases/20260921-private1/` on dellcon.
+- Server/client source archive `source-v3.tar.gz` SHA-256:
+  `9f38581e9a63897b7e3930c038f380d3a6deb76aa188c5271d58fae4bdd38050`.
+  Separate `private-maps.tar.gz` SHA-256:
+  `e89328f4b2834c12d0d8d39052cbf59793b7c00989bda42eeca5a989eea732cb`.
+  Saved server image SHA-256:
+  `43efb09c5e449fe7d9266c6c0edf5d61bb7fa088fbac897e092d954b01d6f519`.
+  Final website archive `site-final-r2.tar.gz` SHA-256:
+  `c2bdbe7fc06367a89bc741d981d613710239087b69380710b29bbeea71410906`.
+  Source is a working-tree snapshot based on `a4f00b5`, not a clean committed
+  release. Later runbook/provenance updates and a code comment are not in that
+  build archive. No new commit or push was performed.
+- Linux final clients used the verified base
+  `peakrunner-layout-validation:20260921` (ID recorded above), with the saved
+  `final-client.Dockerfile` exporting only deliverables. Recipe SHA-256:
+  `5407dcece2ecc6bfa4734b11ca62ded6c6cf97eb40389050c2b4c50d357a176d`.
+  Do not pass a bare `sha256:...` as Docker FROM/BUILD_BASE: it was interpreted
+  as a registry name. The earlier full compiler-image export was slow; prefer
+  an artifacts target. `20260921-public1`, source-v2 and feed sequence
+  `2026092101` were superseded stages, never published as this release.
+- Verification: 152 workspace library tests; all-target and WASM checks
+  (existing unused Lobby warning); app boundaries; packaging script parsing.
+  The omitted-audio regression rejects missing nonempty audio and corruption.
+  Connected local clients rotated through all six maps and back, retained
+  identities, accepted a late join and reset after departure. A single GPU
+  renderer switched across all six maps and back; captures visually inspected.
+- Mac: every map rendered in an isolated real local match. Signed install,
+  actual client/update lock, .4 upgrade, rollback, downgrade rejection and
+  corrupted-map repair passed. A fresh installation from the published feed
+  also launched and held/released its lock.
+- Linux: signed install and actual client/update lock passed under Xvfb/Mesa.
+  Stonehenge joined/rendered using the installed managed packs (including omitted
+  empty audio); capture inspected at
+  `research/screenshots/private1-linux-stonehenge.png`. ALSA reported no device:
+  audio and real-GPU performance remain untested. Windows was cross-built,
+  not newly runtime-tested. Human traversal/balance and extended matches remain
+  playtest work; local accelerated rotation is not a full live human match.
+- New VPS passed healthy/advancing-tick checks and a two-client, ten-second
+  certificate-validated QUIC WAN test: 200 snapshots/client, maximum ack gap
+  eight ticks, maximum snapshot gap 81 ms. Isolated image check used ~35 MiB
+  idle within the existing 384 MiB/one-CPU limits; no larger capacity claim.
+- All three live signed manifests and every blob passed verification; manifests
+  return `Cache-Control: no-store`. All six advertised archives matched their
+  hashes when downloaded over HTTPS. Apex/www advertise the new version.
+  Desktop/mobile host dialogs/downloads passed without overflow or application
+  errors. The existing CSP blocks Cloudflare's injected analytics beacon; this
+  specific console warning is recorded, and the CSP was not weakened.
+- Rollback backups:
+  `/opt/peakrunner/backups/20260921-private1/` and
+  `/data/peakrunner/public/backups/20260921-private1/` (includes old platform
+  manifests). Retain old images, blobs and downloads. Recovery must restore a
+  compatible server/client set and use a higher signed feed sequence.
+- Detailed provenance/hashes: `src/deploy/launcher-release.json`,
+  `src/deploy/client-release-staging.json`, `src/deploy/vps/source.json`,
+  `src/deploy/vps/release.conf`, `src/deploy/dellcon/site-source.json` and
+  `docs/release-20260921-1.md`. Live state must still be rechecked for future work.
 
 ## Working rules
 

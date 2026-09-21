@@ -1,5 +1,11 @@
 # Multi-map foundation — in progress
 
+The user explicitly authorized a fixed six-map test deployment on 2026-09-21,
+superseding the general deployment hold below for that test. See
+[release record](release-20260921-1.md) and the active section in AGENTS.md.
+Collection-wide admission and signed delivery are verified for those six maps;
+the general installed-pack registry and selected-map-only admission remain open.
+
 Development checkpoints have been consolidated onto main at the user's request.
 Do not deploy until the complete pipeline is tested. Continue work in the original
 checkout, creating a new focused branch from main when needed.

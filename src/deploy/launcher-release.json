@@ -1,31 +1,47 @@
 {
-  "version": "0.1.0-raindance.20260919.4",
+  "version": "0.1.0-private.20260921.1",
   "launcher_version": "0.1.0-r1",
-  "status": "published and publicly signature/hash verified",
+  "status": "deployed and published; health, HTTPS signatures and hashes verified on 2026-09-21",
   "feed": "https://peakrunner.net/updates/v1",
-  "sequence": 2026091907,
+  "sequence": 2026092102,
   "source": {
-    "archive": "/data/peakrunner/releases/20260919-visual4/source.tar.gz",
-    "sha256": "f8ae31fe40ef6be449eb7860dc0f239667fa39d2fde37f2316d7f0dac227ee03",
-    "kind": "working-tree snapshot; not committed or pushed"
+    "archive": "/data/peakrunner/releases/20260921-private1/source-v3.tar.gz",
+    "sha256": "9f38581e9a63897b7e3930c038f380d3a6deb76aa188c5271d58fae4bdd38050",
+    "base_revision": "a4f00b55498569cdffccb149294090e320a78649",
+    "kind": "working-tree snapshot with uncommitted changes; not a clean Git reproduction"
   },
   "linux_source": {
-    "archive": "/data/peakrunner/releases/20260919-visual4/source.tar.gz",
-    "sha256": "f8ae31fe40ef6be449eb7860dc0f239667fa39d2fde37f2316d7f0dac227ee03",
-    "kind": "working-tree snapshot; not committed or pushed",
-    "build_base": "sha256:89ab291a5b3e681948845e7cc6e6ba4efedde8e95220e8161353e98db9d8d07e",
-    "dockerfile": "deploy/launcher-linux.Dockerfile",
+    "archive": "/data/peakrunner/releases/20260921-private1/source-v3.tar.gz",
+    "sha256": "9f38581e9a63897b7e3930c038f380d3a6deb76aa188c5271d58fae4bdd38050",
+    "base_revision": "a4f00b55498569cdffccb149294090e320a78649",
+    "kind": "working-tree snapshot with uncommitted changes; not a clean Git reproduction",
+    "build_base": "sha256:2d2edf1e7bc678ec57c58f4d02bd05d21cdf6ec5d87c8ddb23673100a241a35f",
+    "dockerfile": "/data/peakrunner/releases/20260921-private1/final-client.Dockerfile",
+    "dockerfile_sha256": "5407dcece2ecc6bfa4734b11ca62ded6c6cf97eb40389050c2b4c50d357a176d",
     "target": "artifacts"
   },
-  "server_version": "0.1.0-raindance.20260919.4",
-  "server_image": "sha256:a0ff0ac83d865b92adf512db58183176900f575bbbf1e99b2810984d61503920",
-  "server_note": "Updated at user request, with explicit approval to briefly disconnect one player. Gameplay protocol unchanged. Directory and tunnel not restarted.",
-  "site_image": "sha256:45aa35b7d88a8ca45b57ae06b11a016e7cf29303b9807b4c6ca38221a19264e4",
+  "private_maps": {
+    "archive": "/data/peakrunner/releases/20260921-private1/private-maps.tar.gz",
+    "sha256": "e89328f4b2834c12d0d8d39052cbf59793b7c00989bda42eeca5a989eea732cb",
+    "files": 28,
+    "managed_note": "Three empty ambient.f32 files are represented by their manifest hashes and omitted from managed payloads for launcher r1 compatibility."
+  },
+  "server_version": "0.1.0-private.20260921.1",
+  "server_image": "sha256:d801944ba2641ce9aafc6c4eb991aab131e7cb59b26671571a0d88a24f86b40d",
+  "site_image": "sha256:27d69f3af6be7598b09918626be5cbf9510e58f5c6d0ebcd70fcecddfa1cf0b2",
+  "rotation": [
+    "raindance",
+    "skybreak-bastions",
+    "broadside-clone",
+    "stonehenge-clone",
+    "snowblind-clone",
+    "desert-of-death-clone"
+  ],
   "artifacts": [
     {
       "url": "/downloads/PeakRunnerLauncher-0.1.0-r1-macos-arm64.zip",
       "sha256": "449f3f91fe1abc08beaaf8e4914cefe9661d051b345aea84dfb76fc98d67c39b",
-      "verification": "Install once; signed game/map updates, repair and rollback. Apple Silicon. Ad-hoc signed, not Apple notarized; may require Privacy & Security → Open Anyway."
+      "verification": "Install once; signed game/map updates, repair and rollback. Apple Silicon. Ad-hoc signed, not Apple notarized; may require Privacy & Security \u2192 Open Anyway."
     },
     {
       "url": "/downloads/PeakRunnerLauncher-0.1.0-r1-windows-x64.zip",
@@ -38,40 +54,58 @@
       "verification": "Signed updates, repair and rollback. Debian 12 / glibc 2.36+. Desktop OpenGL for launcher; Vulkan for game; ALSA, udev, X11/Wayland and libxkbcommon-x11. Software-rendered checks; audio and interactive gameplay untested."
     },
     {
-      "url": "/downloads/PeakRunner-0.1.0-raindance.20260919.4-macos-arm64.zip",
-      "sha256": "d43e9c78509aca6df3650e77e92deda830c0221f8f26062896db3d67d38e3e1a",
-      "verification": "Full game with embedded Raindance assets. Apple Silicon, ad-hoc signed and not notarized. No automatic updates; an alternative to the launcher. Visual update; compatible with the .20260919.3 server."
+      "url": "/downloads/PeakRunner-0.1.0-private.20260921.1-r2-macos-arm64.zip",
+      "sha256": "1d79908b0dd48c9362282b5d46c6f82ba4ad88a962e1abbdfda8d96a0229294d",
+      "verification": "Six-map test package for Apple Silicon. Ad-hoc signed, not notarized. Includes the four source-derived clone packs. Requires the matching .20260921.1 server; download again for future standalone updates."
     },
     {
-      "url": "/downloads/PeakRunner-0.1.0-raindance.20260919.4-windows-x64.zip",
-      "sha256": "2a648f9f2c7f7ec80ba626144e24f938d633042f517c6b0be61842c85d641be9",
-      "verification": "Unsigned x64 full-game ZIP with embedded assets. Same platform-testing limitations as the launcher build. Download a new archive for future updates. Visual update; compatible with the .20260919.3 server."
+      "url": "/downloads/PeakRunner-0.1.0-private.20260921.1-r2-windows-x64.zip",
+      "sha256": "4ae823ac61cdc2b37b092e211bd52fced956fd6331d10d1a1ca052b73a59f78e",
+      "verification": "Unsigned x64 six-map test package, including the four source-derived clone packs. Cross-built; this release has no new Windows runtime verification. Requires the matching .20260921.1 server."
     },
     {
-      "url": "/downloads/PeakRunner-0.1.0-raindance.20260919.4-linux-x64.tar.gz",
-      "sha256": "6d823cae109a17c7f791d1ba054411f34f57962691aedaddda5f1253c74cf833",
-      "verification": "Full-game archive with embedded assets. Debian 12 / glibc 2.36+ and the game libraries above. Software-rendering checks do not establish playable frame rates. Visual update; compatible with the .20260919.3 server."
+      "url": "/downloads/PeakRunner-0.1.0-private.20260921.1-r2-linux-x64.tar.gz",
+      "sha256": "e22e95c849c7f364ea31fba339ba45f3ec094c60b7f9821832d0725ccfb02549",
+      "verification": "Six-map test package for Debian 12 / glibc 2.36+, including the four source-derived clone packs. Vulkan, ALSA, udev and X11/Wayland libraries required. Software-rendered QA; hardware, audio and full gameplay untested."
     }
   ],
+  "feeds": {
+    "macos-arm64": {
+      "manifest_sha256": "44ffa583423b7141b005924ed2f936a5f5e95cc14a5f56beb41ef1dd4a17f3f1",
+      "files": 33
+    },
+    "windows-x64": {
+      "manifest_sha256": "0e6f5cfa19971c50a4f6a8e99703ac850905e6e2b73011165642aeabdf48d1a5",
+      "files": 33
+    },
+    "linux-x64": {
+      "manifest_sha256": "78adf114899683653de553af4e619dc5ddc89edbd49cda35ce21d9fe9104398c",
+      "files": 33
+    }
+  },
   "verification": [
-    "Workspace library tests, all-target and WASM checks passed; application boundaries passed",
-    "All three public signed feeds and every blob verified; sequence 2026091907",
-    "All six public archive SHA-256 hashes verified; apex/www advertise .4",
+    "152 workspace library tests; native all-target, WASM and app boundary checks passed",
+    "Local connected-client six-map rotation, late join and empty reset passed",
+    "Single GPU renderer switched across all six maps and back; captures inspected",
+    "Mac per-map local-match captures, signed install, actual client lock, .4 upgrade, rollback, downgrade rejection and corrupted-map repair passed",
+    "Final Linux server image health/advancing tick passed under 384MiB/one CPU in isolation",
+    "Linux signed install, actual managed client lock and Stonehenge local-match capture passed under Xvfb/Mesa; screenshot inspected",
+    "Two-client ten-second QUIC WAN test: 200 snapshots each, maximum ack gap 8 ticks, maximum snapshot gap 81 ms",
+    "All three live signed feeds and every blob verified; sequence 2026092102 and no-store manifests",
+    "All six advertised archive hashes verified over HTTPS; apex/www exact release manifest verified",
     "Fresh live-feed Mac installation and actual game/update-lock test passed",
-    "Mac .3-to-.4 upgrade reused all seven map files; extracted app signature passed",
-    "Linux signed install, actual game lock and forced-light native menu render passed under Xvfb/Mesa",
-    "Windows release cross-built; no new Windows runtime claim: QA VM lacked interactive session and was shut down",
-    "Two-client ten-second .4 WAN test against .3 passed: ack gap 9 ticks, snapshot gap 103ms, 196 snapshots each",
-    "Post-restart .4 server health and public directory version verified; two-client five-second WAN check passed: ack gap 7 ticks, snapshot gap 68ms, 100 snapshots each",
-    "Desktop/mobile public website renders and host details verified, six download cards, no errors or horizontal overflow"
+    "Live desktop/mobile downloads and host dialogs passed with no overflow or application errors; Cloudflare injected analytics is blocked by existing CSP"
   ],
   "limitations": [
     "Not Apple notarized or Windows code signed",
-    "Windows native x64 hardware, audio, input and extended gameplay unverified",
-    "Linux audio and interactive gameplay unverified; software rendering is not a performance promise",
-    "Launcher self-update and cache garbage collection not implemented"
+    "Windows cross-built; no new runtime verification",
+    "Human traversal/balance, Linux physical GPU performance and audio remain untested",
+    "Collection-wide fingerprints; not selected-map-only admission",
+    "Test endpoints remain openly reachable at user request",
+    "Cloudflare analytics beacon is blocked by the existing CSP; functional site checks pass"
   ],
-  "rollback": "/data/peakrunner/public/backups/20260919-visual4; retain old blobs/archives; recovery feed must have a higher sequence",
+  "rollback": "/opt/peakrunner/backups/20260921-private1 and /data/peakrunner/public/backups/20260921-private1; restore compatible server/client set; sign higher-sequence recovery feed",
   "private_key": "Retained only on administrator machine; not uploaded or committed",
-  "runbook": "docs/visual-release-20260919-4.md"
+  "runbook": "docs/release-20260921-1.md",
+  "server_note": "Six-map test restart after zero-player recheck. Certificate-validated two-client WAN smoke passed. Directory/tunnel not recreated; no firewall/password changes."
 }

@@ -31,6 +31,55 @@ mod tests {
         }
     }
     #[test]
+    #[ignore = "requires private collection and PEAKRUNNER_PRIVATE_TEST=1"]
+    fn private_collection_rotates_connected_clients_and_resets() {
+        use peakrunner_core::terrain::MapId;
+        let maps = [MapId::Raindance, MapId::Skybreak, MapId::BroadsideClone,
+            MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone];
+        let policy = serde_json::to_string(&maps.iter().map(|m|
+            serde_json::json!({"map":m.key(),"mode":"ctf"})).collect::<Vec<_>>()).unwrap();
+        let mut host = GameHost::bind("127.0.0.1:0", "Private rotation QA", 8, "raindance")
+            .unwrap().with_rotation(&policy).unwrap();
+        host.accelerated_rounds = true;
+        let port = host.local_addr().port();
+        let handle = host.spawn();
+        let a = connect_private("127.0.0.1", port, "Alpha", "").unwrap();
+        let b = connect_private("127.0.0.1", port, "Beta", "").unwrap();
+        wait(|| a.lobby().connected && b.lobby().connected);
+        let ids = [a.lobby().player_id, b.lobby().player_id];
+        let mut tick = 0;
+        let mut seq = 0;
+        let mut last_input = Instant::now() - Duration::from_secs(1);
+        for map in maps.into_iter().chain([MapId::Raindance]) {
+            wait(|| {
+                let send = last_input.elapsed() >= Duration::from_millis(20);
+                if send { seq += 1; last_input = Instant::now(); }
+                for c in [&a,&b] {
+                    assert!(c.lobby().error.is_none(), "waiting for {map:?}: {:?}", c.lobby().error);
+                    if send { assert!(c.send_input(Command { seq, ..Command::default() }), "input queue full for {map:?}"); }
+                }
+                [&a,&b].iter().all(|c| c.lobby().snapshot.as_ref().is_some_and(|s|s.map == map))
+            });
+            for (i,c) in [&a,&b].iter().enumerate() {
+                let lobby = c.lobby();
+                assert_eq!(lobby.player_id, ids[i]);
+                assert!(lobby.error.is_none());
+                let state = lobby.snapshot.unwrap();
+                assert!(state.tick >= tick);
+                assert!(state.players.iter().all(|p|p.pos.is_finite() && p.vel.is_finite()));
+            }
+            tick = a.lobby().snapshot.unwrap().tick;
+        }
+        // A late join receives the current authoritative map and stable peers.
+        let late = connect_private("127.0.0.1", port, "Late", "").unwrap();
+        wait(|| late.lobby().snapshot.is_some());
+        assert_eq!(late.lobby().snapshot.unwrap().map, MapId::Raindance);
+        a.leave(); b.leave(); late.leave();
+        wait(|| handle.players.load(std::sync::atomic::Ordering::Relaxed) == 0);
+        wait(|| handle.status.lock().unwrap().map == "Raindance");
+    }
+
+    #[test]
     fn server_rotation_selects_initial_map_for_real_clients() {
         let host = GameHost::bind("127.0.0.1:0", "Rotation test", 8, "Valley").unwrap()
             .with_rotation(r#"[{"map":"skybreak-bastions","mode":"ctf"},{"map":"raindance","mode":"ctf"}]"#).unwrap();

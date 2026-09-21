@@ -64,8 +64,20 @@ Use `PeakRunner.bak` or Git history for recovery; do not delete the backup yet.
 - App dependency boundaries, website JavaScript checks and 19 map-tool tests pass.
 - The real native client selected Snowblind and started a match after migration.
   Private map installs still resolve.
-- Linux Docker recipe inputs were corrected and reviewed. Local Docker is not
-  installed; remote source transfer requires separate approval before Linux
-  compilation can be claimed. No remote build/deployment was performed yet.
+- Linux amd64 release client, launch-smoke example and networking-smoke example
+  built on dellcon on 2026-09-21 from commit `a4f00b5`, with user-approved
+  transfer of Cargo source and only the original Raindance/Skybreak assets.
+  Image: `peakrunner-layout-validation:20260921`, immutable ID
+  `sha256:2d2edf1e7bc678ec57c58f4d02bd05d21cdf6ec5d87c8ddb23673100a241a35f`.
+- Linux runtime smoke passed (exit 0) with Xvfb/Mesa software Vulkan and
+  `QA_LOCAL=1`: the real client joined an in-container match and captured a
+  frame. Visually inspected terrain, weapon and HUD, including warmup state.
+  Capture: `research/screenshots/peakrunner-linux-layout.png` (ignored).
+  QA container used `--init --network none`, no host mounts/ports and isolated
+  preferences. No private map assets or credentials were transferred.
+- Headless runtime emitted missing XDG runtime-directory and ALSA-device
+  warnings. Audio playback, physical GPU performance and sustained multiplayer
+  gameplay remain untested by this check. The networking-smoke utility was
+  compiled, not run against any public server. No deployment/restart occurred.
 - Staging audit includes only `research/README.md`; private credentials, reference
   map packs, captures, app bundles and build caches are excluded.

@@ -1,11 +1,17 @@
 {
   "repository": "git@github.com:jeffrywalsh/PeakRunner.git",
-  "base_revision": "0f1ab82dfe6a4f4d5d8ec9f29359c5a8ef45e12e",
-  "source_kind": "working-tree archive; release .4 version alignment requested by user; gameplay protocol unchanged; not committed or pushed",
-  "source_archive": "/data/peakrunner/releases/20260919-visual4/source.tar.gz",
-  "source_sha256": "f8ae31fe40ef6be449eb7860dc0f239667fa39d2fde37f2316d7f0dac227ee03",
-  "directory": "peakrunner",
+  "base_revision": "a4f00b55498569cdffccb149294090e320a78649",
+  "source_kind": "working-tree source archive; six-map test requested by user; uncommitted changes; not a clean Git reproduction",
+  "status": "deployed and published; health, HTTPS signatures and hashes verified on 2026-09-21",
+  "version": "0.1.0-private.20260921.1",
+  "source_archive": "/data/peakrunner/releases/20260921-private1/source-v3.tar.gz",
+  "source_sha256": "9f38581e9a63897b7e3930c038f380d3a6deb76aa188c5271d58fae4bdd38050",
+  "private_maps_archive": "/data/peakrunner/releases/20260921-private1/private-maps.tar.gz",
+  "private_maps_sha256": "e89328f4b2834c12d0d8d39052cbf59793b7c00989bda42eeca5a989eea732cb",
+  "image_archive_sha256": "43efb09c5e449fe7d9266c6c0edf5d61bb7fa088fbac897e092d954b01d6f519",
+  "image": "sha256:d801944ba2641ce9aafc6c4eb991aab131e7cb59b26671571a0d88a24f86b40d",
+  "directory": "src",
   "dockerfile": "crates/server/Dockerfile",
   "platform": "linux/amd64",
-  "tag": "peakrunner/server:20260919-public4"
+  "tag": "peakrunner/server:20260921-private1-r2"
 }

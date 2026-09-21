@@ -1511,6 +1511,22 @@ mod shader_check {
                 assert_eq!(world.flags[0].home,glam::Vec3::from_array(pack.manifest.flags[0]));
                 return;
             }
+            if std::env::var_os("QA_ROTATION").is_some() {
+                for map in [MapId::Raindance, MapId::Skybreak, MapId::BroadsideClone,
+                    MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone,
+                    MapId::Raindance] {
+                    world.set_map(map); world.start_match(true); world.players.truncate(1);
+                    let pack = peakrunner_core::map_pack::on(map).expect("rotation pack installed");
+                    let pos = Vec3::from_array(pack.manifest.spawns[0]) + Vec3::Y * 2.;
+                    let target = Vec3::from_array(pack.manifest.flags[1]);
+                    let d = (target-pos).normalize();
+                    world.players[0].pos = pos;
+                    world.players[0].yaw = (-d.x).atan2(-d.z);
+                    world.players[0].pitch = d.y.asin();
+                    shoot(&mut scene, &world, &format!("rotation-{}",map.key()), 1280, 800);
+                }
+                return;
+            }
             if std::env::var_os("QA_STONEHENGE").is_some() {
                 world.set_map(if std::env::var_os("QA_INSTALLED_CLONE").is_some() {MapId::StonehengeClone} else {MapId::Raindance});
                 world.start_match(true);

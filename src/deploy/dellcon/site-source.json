@@ -1,8 +1,9 @@
 {
-  "tag": "peakrunner/site:20260919-visual4",
-  "image": "sha256:45aa35b7d88a8ca45b57ae06b11a016e7cf29303b9807b4c6ca38221a19264e4",
-  "source_archive": "/data/peakrunner/releases/20260919-visual4/site.tar.gz",
-  "source_sha256": "fae067a53653c6a85b79758a289520995ccff050798f3faeb142fe8e92fc802f",
+  "tag": "peakrunner/site:20260921-private1-r2",
+  "image": "sha256:27d69f3af6be7598b09918626be5cbf9510e58f5c6d0ebcd70fcecddfa1cf0b2",
+  "source_archive": "/data/peakrunner/releases/20260921-private1/site-final-r2.tar.gz",
+  "source_sha256": "c2bdbe7fc06367a89bc741d981d613710239087b69380710b29bbeea71410906",
+  "status": "deployed and published; health, HTTPS signatures and hashes verified on 2026-09-21",
   "dockerfile": "site/Dockerfile",
   "downloads": "/data/peakrunner/downloads",
   "updates": "/data/peakrunner/updates/v1",

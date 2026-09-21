@@ -18,7 +18,7 @@ impl Rotation {
         let maps = entries.into_iter().map(|e| {
             match e.mode { SupportedMode::Ctf => {} }
             let id = MapId::parse(&e.map).ok_or_else(|| format!("map is not installed: {}", e.map))?;
-            if id.is_private_clone() { return Err("Imported clones are private/offline only".to_string()); }
+            validate_private_map(id)?;
             if !cfg!(test) && id == MapId::Valley { return Err("Valley is retired; use raindance or skybreak-bastions".to_string()); }
             Ok(id)
         }).collect::<Result<Vec<_>, _>>()?;
@@ -27,6 +27,18 @@ impl Rotation {
     pub fn current(&self) -> MapId { self.maps[self.cursor] }
     pub fn advance(&mut self) -> MapId { self.cursor = (self.cursor + 1) % self.maps.len(); self.current() }
     pub fn reset(&mut self) -> MapId { self.cursor = 0; self.current() }
+}
+
+pub(crate) fn validate_private_map(map: MapId) -> Result<(), String> {
+    if map.is_private_clone() {
+        if std::env::var("PEAKRUNNER_PRIVATE_TEST").as_deref() != Ok("1") {
+            return Err("Imported clones require explicit PEAKRUNNER_PRIVATE_TEST=1".into());
+        }
+        if peakrunner_core::map_pack::on(map).is_none() {
+            return Err(format!("Private rotation map is not installed: {}", map.key()));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -3,6 +3,15 @@
 The public game server is independent of dellcon. Keep the website and HTTPS
 directory on dellcon; do not proxy the game UDP endpoint through its tunnel.
 
+The user has requested using these hosts for the six-map private test, with no
+firewall/password changes. See the active deployment section in repository-root
+`AGENTS.md` and `docs/release-20260921-1.md` for staged versus deployed state.
+The deployed test Compose explicitly opts into private test maps and mounts the
+separately verified collection read-only. Preserve that directory alongside the
+recorded image/source archives when restoring; it is not embedded in the image
+or backed up by Git. Original-only builds and old `.4` clients do not match the
+new collection's gameplay protocol. Build commands now run from repository `src/`.
+
 ## Administration access
 
 Connect as `peakrunner-admin@198.12.80.145` with the existing SSH key. Direct root,

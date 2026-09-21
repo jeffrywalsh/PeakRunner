@@ -11,6 +11,8 @@ use crate::wire::{Framed, private_bind, invalid};
 pub struct GameHost {
     listener: TcpListener, name: String, map: MapId, max_players: usize, password: String,
     rotation: crate::rotation::Rotation,
+    #[cfg(test)]
+    pub(crate) accelerated_rounds: bool,
 }
 pub struct GameHandle {
     stop: Arc<AtomicBool>, thread: Option<thread::JoinHandle<()>>,
@@ -30,13 +32,14 @@ struct Peer {
 impl GameHost {
     pub fn bind(addr: &str, name: &str, max_players: u32, map: &str) -> io::Result<Self> {
         let map = MapId::parse(map).ok_or_else(|| invalid("unknown map: use raindance or skybreak-bastions"))?;
-        if map.is_private_clone() { return Err(invalid("Imported clones are private offline development maps")); }
+        crate::rotation::validate_private_map(map).map_err(|e| invalid(&e))?;
         if !cfg!(test) && map == MapId::Valley { return Err(invalid("Valley is retired; use raindance or skybreak-bastions")); }
         if !(2..=MAX_PLAYERS as u32).contains(&max_players) { return Err(invalid("capacity must be 2–8")); }
         if name.is_empty() || name.len() > 64 || name.chars().any(char::is_control) { return Err(invalid("invalid match name")); }
         let listener = TcpListener::bind(private_bind(addr)?)?;
         listener.set_nonblocking(true)?;
-        Ok(Self { listener, name: name.into(), map, max_players: max_players as usize, password: String::new(), rotation: crate::rotation::Rotation::single(map) })
+        Ok(Self { listener, name: name.into(), map, max_players: max_players as usize, password: String::new(), rotation: crate::rotation::Rotation::single(map),
+            #[cfg(test)] accelerated_rounds: false })
     }
     pub fn with_rotation(mut self, json: &str) -> io::Result<Self> {
         self.rotation = crate::rotation::Rotation::parse(json).map_err(|e| invalid(&e))?;
@@ -151,6 +154,11 @@ impl GameHost {
                 for peer in &mut peers { peer.current = Command::default(); peer.queue.clear(); }
             }
             game.step(&commands);
+            #[cfg(test)]
+            if self.accelerated_rounds && game.tick % 120 == 0 && game.world.players.iter().any(|p|p.net_id != 0) {
+                game.phase = peakrunner_core::sim::Phase::Intermission;
+                game.phase_left = STEP;
+            }
             if game.phase != previous_phase {
                 log::info!("match_phase round={} phase={:?} score={:?}", game.round, game.phase, game.world.score);
             }

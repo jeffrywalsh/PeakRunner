@@ -8,6 +8,15 @@ even if its launcher closes. Standalone clients remain supported.
 
 ## Release status
 
+Six-map test `0.1.0-private.20260921.1`, feed `2026092102`, is published at the user's request; see
+[deployment steps](../AGENTS.md#active-deployment-request--six-map-private-test-2026-09-21).
+Existing r1 supports `game/private-maps/<map-key>/` signed files. It rejects
+zero-byte files, so managed packages omit only empty `ambient.f32`; the game
+accepts absence only when the signed map manifest records the empty SHA-256.
+Standalone/server packs retain those files. No key rotation or launcher schema
+change is required. Publication signatures/hashes and fresh Mac installation
+passed. The older status and verification below document the previous releases.
+
 Launcher `0.1.0-r1`, game `.20260919.4` and signed feed sequence `2026091907`
 are published on peakrunner.net. This client-only visual release remains
 compatible with `.20260919.3`; Springdale Central was subsequently updated to

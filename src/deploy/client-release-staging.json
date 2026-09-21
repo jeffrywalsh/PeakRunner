@@ -1,29 +1,30 @@
 {
-  "version": "0.1.0-raindance.20260919.4",
-  "status": "published at https://peakrunner.net/#downloads and through signed launcher feeds",
+  "version": "0.1.0-private.20260921.1",
+  "status": "deployed and published; health, HTTPS signatures and hashes verified on 2026-09-21",
   "source": {
-    "archive": "/data/peakrunner/releases/20260919-visual4/source.tar.gz",
-    "sha256": "f8ae31fe40ef6be449eb7860dc0f239667fa39d2fde37f2316d7f0dac227ee03",
-    "kind": "working-tree snapshot; not committed or pushed"
+    "archive": "/data/peakrunner/releases/20260921-private1/source-v3.tar.gz",
+    "sha256": "9f38581e9a63897b7e3930c038f380d3a6deb76aa188c5271d58fae4bdd38050",
+    "base_revision": "a4f00b55498569cdffccb149294090e320a78649",
+    "kind": "working-tree snapshot with uncommitted changes; not a clean Git reproduction"
   },
-  "directory": "local-assets/releases/0.1.0-raindance.20260919.4",
-  "requires": "Existing equipment3:blast3:chat2:names1:ping1:fov1:map1 protocol; compatible with live .20260919.3 server",
+  "directory": "research/local-assets/releases/0.1.0-private.20260921.1-r2",
+  "requires": "Matching maps2 protocol plus identical fingerprints for all four imported test packs; .20260919.4 incompatible",
   "launcher_record": "deploy/launcher-release.json",
   "artifacts": [
     {
-      "file": "PeakRunner-0.1.0-raindance.20260919.4-macos-arm64.zip",
-      "sha256": "d43e9c78509aca6df3650e77e92deda830c0221f8f26062896db3d67d38e3e1a",
-      "verification": "Full game with embedded Raindance assets. Apple Silicon, ad-hoc signed and not notarized. No automatic updates; an alternative to the launcher. Visual update; compatible with the .20260919.3 server."
+      "file": "PeakRunner-0.1.0-private.20260921.1-r2-macos-arm64.zip",
+      "sha256": "1d79908b0dd48c9362282b5d46c6f82ba4ad88a962e1abbdfda8d96a0229294d",
+      "verification": "Six-map test package for Apple Silicon. Ad-hoc signed, not notarized. Includes the four source-derived clone packs. Requires the matching .20260921.1 server; download again for future standalone updates."
     },
     {
-      "file": "PeakRunner-0.1.0-raindance.20260919.4-windows-x64.zip",
-      "sha256": "2a648f9f2c7f7ec80ba626144e24f938d633042f517c6b0be61842c85d641be9",
-      "verification": "Unsigned x64 full-game ZIP with embedded assets. Same platform-testing limitations as the launcher build. Download a new archive for future updates. Visual update; compatible with the .20260919.3 server."
+      "file": "PeakRunner-0.1.0-private.20260921.1-r2-windows-x64.zip",
+      "sha256": "4ae823ac61cdc2b37b092e211bd52fced956fd6331d10d1a1ca052b73a59f78e",
+      "verification": "Unsigned x64 six-map test package, including the four source-derived clone packs. Cross-built; this release has no new Windows runtime verification. Requires the matching .20260921.1 server."
     },
     {
-      "file": "PeakRunner-0.1.0-raindance.20260919.4-linux-x64.tar.gz",
-      "sha256": "6d823cae109a17c7f791d1ba054411f34f57962691aedaddda5f1253c74cf833",
-      "verification": "Full-game archive with embedded assets. Debian 12 / glibc 2.36+ and the game libraries above. Software-rendering checks do not establish playable frame rates. Visual update; compatible with the .20260919.3 server."
+      "file": "PeakRunner-0.1.0-private.20260921.1-r2-linux-x64.tar.gz",
+      "sha256": "e22e95c849c7f364ea31fba339ba45f3ec094c60b7f9821832d0725ccfb02549",
+      "verification": "Six-map test package for Debian 12 / glibc 2.36+, including the four source-derived clone packs. Vulkan, ALSA, udev and X11/Wayland libraries required. Software-rendered QA; hardware, audio and full gameplay untested."
     }
   ]
 }
