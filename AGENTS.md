@@ -1,364 +1,437 @@
-# PeakRunner repository routing
+# PeakRunner project guide
 
-For the active PeakRunner game, multiplayer services, maps, native builds,
-peakrunner.net website or Docker deployments, read `peakrunner/AGENTS.md` first.
-It is the project-specific operational guide and supersedes the legacy sandbox
-assumptions below for that subtree. The Git root is here; the active Cargo
-workspace and production website are under `peakrunner/`. Do not run the old
-root React/Vercel scaffold's build or deployment workflow for native-game tasks.
+Read this before changing code or infrastructure. Active Git repository:
+`/Users/jeffrywalsh/workspace/peakrunner`. Rust/build workspace: its `src/`
+directory. Run Cargo, packaging, website and Docker commands FROM `src/`.
+The old checkout and legacy browser prototype remain at
+`/Users/jeffrywalsh/workspace/PeakRunner.bak`. Do not edit/run the backup.
 
-The legacy `game/` and root web scaffold are retained for reference; preserve
-them unless a task explicitly targets them. The following App Builder contract
-applies only when working on that legacy scaffold in its original environment.
+## Three-directory layout — supersedes historical paths below
 
-# App Builder Workspace (legacy scaffold)
+- `src/`: complete build inputs: Cargo manifests/lockfile, client `src/`,
+  `crates/`, `.cargo/`, original `assets/`, map inputs, scripts, tools, deploy,
+  site and examples. Keep required non-code build assets here.
+- `docs/`: documentation and historical validation notes.
+- `research/`: ignored private assets, captures, app bundles and secrets.
+  Never stage wholesale or force-add. Only its README is tracked.
+- Root retains README, AGENTS, ignore and Git metadata; no other content dirs.
+- Local-only compatibility links `src/local-assets`, `src/screenshots`,
+  `src/docs` point into research/docs. Public compilation needs none of them;
+  Docker excludes them. Never embed imported private map packs.
+- `cf-key` moved to `research/secrets/cf-key`; helper default updated.
+- Package README inputs now live in `src/assets/package-docs/`; synchronize
+  with canonical docs when changing release guidance.
+- Older commands assume the native workspace: execute from `src/`. Historical
+  absolute PeakRunner/peakrunner paths and app locations are no longer current.
+- Git history/remotes/stashes retained. See `docs/workspace-layout.md`.
 
-**The single source of truth** for the App Builder sandbox contract. You are
-Grok Build, in an isolated Linux sandbox; read it fully before writing code.
-Prompts are often short and casual — read intent generously and ship a
-**playable / demo-quality** product.
+## Working rules
 
-**Depth lives in `.grok/references/*.md`**, read on demand as skills load
-theirs; the rules below name the file to open at each point it matters.
+- Inspect `git status` first. Preserve unrelated/uncommitted work. Do not commit,
+  push, merge, delete branches or reset files unless the user requests it.
+- Use `rg` and `apply_patch`. Legacy `.grok` instructions are archived in the
+  backup, not this native project's contract. Keep gameplay/UI in Rust/egui.
+- Make focused changes. Leave the playtested movement physics alone unless asked.
+- Never claim a build is deployed, a platform is runtime-tested, or configs are
+  backed up to GitHub without verifying that specific state.
+- Keep this guide and the linked runbooks updated when architecture, commands,
+  deployment paths or release procedures change. Live state must still be checked.
 
----
+## Architecture and ownership
 
-## Skills (in `.grok/skills/` — consult BEFORE building)
+| Component | Location | Responsibility |
+| --- | --- | --- |
+| Native client | `src/` | Rust, eframe/egui, wgpu, audio, input, prediction and UI |
+| Launcher/updater | `crates/launcher/` | Independent native launcher; signed file-level updates, repair and rollback; see `docs/launcher.md` |
+| Shared simulation | `crates/core/` | Movement, combat, map data, equipment, authoritative match rules |
+| Gameplay protocol | `crates/protocol/` | Messages, compatibility marker, snapshot packets |
+| Client networking | `crates/net/` | Client sessions and QUIC transport |
+| Match server | `crates/server/` | Authoritative simulation, admission, validation, TLS/QUIC |
+| Discovery contract | `crates/discovery/` | Host adverts, status queries, transport helpers |
+| Directory app | `crates/directory/` | Lists configured hosts and their live status; no gameplay core |
+| Public website | `site/` | Static HTML/CSS/JS, Caddy, download manifest and live host UI |
+| Original map kit | `maps/`, `assets/maps/`, `scripts/` | Editable source and compiled original assets |
 
-Skills are auto-listed with trigger words; open the matching `SKILL.md` (plus
-its `references/`) **before** you build or polish. Routing the triggers miss:
-DOM / overlay UI **including game chrome** → **`design-ui`**; game / canvas / 3D
-→ **`building-games`**, both for a game with UI chrome; **`controls`** before
-any WASD / vehicle / flight movement (inverted A/D is the top ship-blocker);
-the viewer's real Google/Microsoft/Notion/etc. data (calendar, mail, files,
-docs) → **`app-data`** — mandatory before writing **or refusing** such
-integration, and when you think "can't access user data", "needs OAuth",
-"Grok Dashboard instead": it serves viewer connector data via the gate;
-**`neon`** / **`auth`** only per §0.5.
+Preserve app boundaries: directory must not depend on core/protocol/rendering;
+server must not depend on client graphics/audio; client must not embed the server
+or directory application. Test-only dependencies are intentional. Verify with
+`node scripts/check-app-boundaries.mjs`. See `docs/apps.md`.
 
-**Only call `imagine_*` tools when they appear in your available tools list** —
-never invent tool calls. Without them ship art with **CSS, SVG, emoji, canvas
-code-draw or geometric/WebGL**: the correct path, not a failure. Gen-assuming
-skills still apply as design guidance.
+Next-work branch order and merge gates are in `docs/roadmap.md`. Keep each map
+and feature scoped separately; update branches from tested main between portions.
+Find a Rift preferences are documented in `docs/client-preferences.md`.
+They are not in the published `.20260919.4` binaries; never store passwords.
 
-Gen-tool art: **`generate2dsprite`** (sprites), **`generate2dmap`** (maps),
-**`game-asset-core`** + specialists (doctrine/QC) — but **abstract / geometric
-games (tetris, snake, pong, breakout) stay procedural even when gen tools are
-listed**; generated sheets there are a quality regression. Pipelines:
-`.grok/references/generated-art.md`.
+## Resume checkpoint — original checkout restored
 
----
+- 2026-09-21 collection extension: **Snowblind Clone** and **Desert of Death
+  Clone** are installed in the normal native game's wrapped map menu, at
+  `local-assets/snowblind-clone/installed` and
+  `local-assets/desert-of-death-clone/installed`. Both use the NEW native readers
+  and each has an original donut poster; they remain source-derived/private and
+  are rejected by public server startup/rotation via `MapId::is_private_clone()`.
+  No deployment, commit or public asset packaging. Broadside/Stonehenge installed
+  assets were not replaced. See `docs/collection-snowblind-desert.md` for builds,
+  validation, omitted source features and exact private-pack paths.
+  `stonehenge.py --profile snowblind|desert-of-death` now supports profiles;
+  editable exports record profile and fixed poster anchor. Three terrain layers
+  are padded with a zero-weight fourth channel. DTS sorted cluster words are
+  preserved as integers because unused leaf-plane bits can represent NaN.
+  `always-on` equipment circuits explicitly support maps without generators;
+  other circuits still require their same-team generator. No artificial generator
+  objects are added. Neutral repair prop remains visual-only, not team-assigned.
+  QA: 19 Python tests, workspace library tests, all-targets check, app boundaries,
+  private spawn/wall tests, GPU exterior/donut/spawn views, real menu-to-match
+  capture for each map, CTF pickup/capture and map reset. Both editable rebuilds
+  reproduce all six runtime payloads; poster resizing changes six corners only.
 
-## 0. Two worlds (read this first)
+- Mission collection parser implemented independently in
+  `tools/broadside_clone/mission.py` with four passing tests. Output:
+  `local-assets/broadside-clone/missions-v1`: 79 parsed / 5 unsupported of 84.
+  Stonehenge parsed 163 objects, seven interior instances across four DIFs,
+  two flags/eight spawn regions. Missing direct dependency: Stonehenge_nef.nav.
+  See new pipeline README for exact errors/limits. These are parsed mission
+  trees, NOT 79 converted playable maps. Stonehenge alone now has a playable
+  native import (below). Never reuse the old converter or execute mission scripts.
 
-You run tools, edit files, start servers and drive Playwright in a Linux sandbox
-at `/workspace`. The user is in the Grok chat UI and can **only** chat and watch
-a **live preview** — no shell, no terminal, no `/workspace` — and you never see
-their machine.
+- Fresh TER v3 codec: `tools/broadside_clone/terrain_file.py`; three synthetic
+  tests in `test_terrain_file.py`. Stonehenge terrain decoded to
+  `local-assets/stonehenge-clone/terrain-v1` and re-encoded through editable
+  JSON/PNG with exact full-file equality (460,306 bytes, 65,536 heights,
+  four material layers). Embedded editor scripts remain inert base64 data.
+  Only TER version 3 is supported. That codec test alone does not validate
+  rendering; separate integration checks now cover Stonehenge below.
 
-- A preview proxy auto-discovers whatever you serve on **`0.0.0.0:8080`** and
-  streams it into the live preview, which updates as you edit and save. It is
-  the user's **entire** view of your work: success = app **running on
-  `0.0.0.0:8080`**, **verified by you**, dev server **left up**.
-- Never treat the user as a local developer with Docker, ports or a terminal
-  (§ "Communication rules"), and **speak in product terms** — ports, paths,
-  `localhost`, "container", tool names and `curl` are noise to them.
+- Stonehenge private playable checkpoint (2026-09-21): new independent
+  `interior_file.py` (DIF resource44/interior0) and `shape_file.py` (static DTS
+  v19–23) feed `tools/broadside_clone/stonehenge.py`. Do not route these through
+  old conversion tools or approximate prefab buildings. Installed pack:
+  `local-assets/stonehenge-clone/installed` (v6 material-flags correction,
+  rebuilt from the previous editable export; prior pack preserved).
+  Normal client offers **Stonehenge Clone** without env overrides; private map
+  is rejected by dedicated-server startup and rotation. Nothing deployed.
+  Seven building instances, 100 scenery instances, 18 equipment instances;
+  88,925 render / 3,603 collision triangles. Source BSP clips 217 terrain cells
+  to prevent hills intruding into rooms. Source winding uses triangle strips,
+  NOT fans; embedded lightmap UVs are already normalized (no 256/size scaling).
+  Editable JSON/PNG rebuild needs no native DIF/DTS/TER/MIS files. Six runtime
+  payloads reproduce byte-for-byte; a poster size edit changes exactly six
+  render corner positions without changing collision/terrain/textures/audio.
+  Run `verify_stonehenge.py local-assets/stonehenge-clone/installed` with the
+  private tools venv to repeat. See `docs/stonehenge-private-import.md` for
+  commands, actual validation and limitations. Source-derived art/geometry
+  remain private/ignored, NOT independently authored public assets.
 
----
+- Option 1 collection work: normal native client now offers `broadside-clone`
+  as a separate MapId when run from the workspace with
+  `local-assets/broadside-clone/compiled-donut-v1/map.json` installed. No env
+  override or source assets embedded. Raindance/Skybreak unchanged. This is
+  current client code, NOT the frozen Reference executable. Private clone is
+  rejected by dedicated-server startup/rotation. Inventory from the NEW
+  `tools/broadside_clone/inventory.py` found 84 extracted mission files; report
+  at `local-assets/broadside-clone/mission-inventory.json`. Inventory is not
+  conversion. Native T1/T2 importers for further maps remain to be implemented
+  under the new pipeline; don't invoke old converters without user approval.
 
-## 0.5 First, decide whether to build (triage before scaffolding anything)
+- First approved clone scene edit: `tools/broadside_clone/add_donut.py` adds a
+  donut picture on Base 1's entrance-hall wall between the ramps. Test app is
+  `PeakRunner-Broadside-Clone-Donut.app`; baseline apps unchanged. Two appended
+  triangles, one texture layer; original vertices and collision preserved.
+  Placement visually checked with GPU diagnostic; packaged renderer is still
+  the approved Reference executable. See new pipeline README for reproduction.
 
-**Classify the latest user message first — do not scaffold for cases 3 or 4.**
+- New user-requested `broadside-clone` pipeline is `tools/broadside_clone/`.
+  DO NOT reuse old map builders/converters for this task. New codec decodes the
+  approved Reference app's payloads to explicit editable JSON/JSONL and PNG mip
+  layers and independently recompiles all six binaries with exact hash matches.
+  `PeakRunner-Broadside-Clone.app` uses those compiled files and the byte-identical
+  approved executable. Three tests and package comparison/signature checks pass;
+  visual gameplay confirmation pending. See `tools/broadside_clone/README.md`.
+  This is exact reconstruction of converted runtime data, NOT a fresh native
+  DIF parser, not independently authored art, and not the old procedural map.
 
-1. **Clear build request** (`build a todo app`, `clone twitter`) → build it (§2).
-2. **Vague but clearly wants an app** (`something cool`) → pick ONE coherent,
-   broadly-appealing app, say in one line what it is, build it.
-3. **Trivial / empty / no signal** (`hi`, `1`, `.`, `test`) → **build nothing.**
-   One short line on what you can build, ask what they want, stop and wait.
-4. **Not a build request** — a question, or a find/explain/analyze ask →
-   **answer it** (web search if helpful).
+- 2026-09-21: The ONLY user-approved baseline is the complete existing
+  `PeakRunner-Broadside-Reference.app`, including its executable. An exact
+  `ditto` duplicate is `PeakRunner-Broadside-Working-Copy.app` (ignored/private).
+  Recursive file comparison and strict signature verification pass. Do NOT
+  substitute `cargo run`, a regenerated pack, or the procedural fortress.
+  The Reference binary SHA256 is
+  `a4b69054255fca7dfda70d570db755c9454e70a535121df5a26aec108a049a69`;
+  it differs from current target/release. Original pack payloads already match
+  the previous workshop: binary/render behavior still needs investigation.
+  Source revision for that binary is not established. The unchanged copy also
+  retains the Reference bundle ID and preferences path; use an explicit app
+  path to launch. No visual additions until the exact copy is confirmed.
+  This supersedes all experiment-selection instructions below.
 
-Never default to a specific app — especially a game — for an ambiguous or
-numeric/one-character prompt, and never turn a question into an app unless
-asked. Unsure between (2) and (3)? "What should I build?" is the one allowed
-clarifying question, because it is answerable in chat; otherwise never block on
-what the user *can't* provide (ports, paths, shell output, screenshots).
+- User rejected returning to the procedural fortress/docking prototype. Current
+  direction is SMALL ADDITIONS to the approved private Broadside baseline, not
+  swapping buildings. `scripts/build-broadside-entrance-lights.py OUTPUT` creates
+  a separate private pack with four original decorative markers (96 triangles).
+  `local-assets/broadside-entrance-lights-v1` is the current test copy. All old
+  vertices, collision and texture mip pixels are verified unchanged. Imported
+  assets still make this private-only. See `docs/broadside-workshop.md`.
 
-**Then decide auth and database — both are OFF by default.** This is a closed
-list, not a judgement call:
+- Optional original docking experiment: `scripts/build-skybreak.py OUTPUT --docking`
+  adds `scripts/assets/docking_bay.py` to both original bases, without changing
+  default Skybreak or imported Broadside. Test pack is under local-assets;
+  see `docs/floating-fortress.md`. Five asset tests and GPU interior capture pass;
+  human traversal and balance remain pending. This is not deployed.
 
-- **Auth ON** only if the ask names one of: accounts / sign-in / login / "my
-  profile" / per-user data / "save my …" across devices / sharing between users
-  / an explicitly identified leaderboard. Otherwise auth stays OFF. **A high
-  score in `localStorage` is not a reason to add auth.**
-- **Database ON, auth OFF** when the app needs durable data shared across
-  sessions or devices but no accounts: add `migrations/0002_*.sql` and keep the
-  rows unowned (no `user_id`, or one literal constant). **Do not import
-  `authMiddleware` / `requireUserId` in an auth-off app** — the dev user they
-  return is preview-only (the deployed flag is the platform's), so deployed
-  they reject every visitor and each such server function fails. Unowned rows
-  are world-readable and world-writable: never persist personal or sensitive
-  data in this mode, and omit destructive bulk mutations (delete-all,
-  overwrite-all) or propose sign-in instead.
-- **Neither** otherwise: no migrations, no `@/lib/db` import, no auth routes —
-  `localStorage` / zustand only — the common case (games, landing pages,
-  calculators, most one-shot asks).
+- Latest Broadside direction: **clone the working reference first, then modify**.
+  `scripts/build-broadside-workshop.py` creates ignored
+  `local-assets/broadside-workshop`, preserving all six reference payloads
+  byte-for-byte. Bundle with `sh scripts/bundle-broadside-reference.sh --workshop`;
+  play `PeakRunner-Broadside-Workshop.app`. Do not confuse this with original
+  Skybreak or the immutable Reference app. See `docs/broadside-workshop.md`.
+  Private editable exchange: `scripts/broadside-editable.py` exports one exact
+  fortress to OBJ plus a hash-locked sidecar; imports into a new private pack.
+  `scripts/test-broadside-editable.py` tests roundtrip/edit/rejection behavior.
+  Actual no-edit OBJ roundtrip preserves all six payloads byte-for-byte.
+  Revision 1 requires fixed topology/order/groups, retains baseline lightmaps,
+  and depends on the source workshop pack. Blender save/export is not yet
+  validated; do not claim a complete DCC pipeline or publish these assets.
+  Both source-derived apps are private-only; this is not a public asset change.
 
-Once the decision is ON, build from
-`.grok/references/data-and-auth.md` plus the `auth` / `neon` skills. **Auth ON ⇒
-`authMiddleware` on every server function and every query scoped by the
-verified `context.userId`** — never a client-sent id, never a demo/mock user.
+- Work in `/Users/jeffrywalsh/workspace/PeakRunner/peakrunner`. The original
+  checkout is on `map/skybreak-fortress`, based on main `8260f5b`, including
+  preferences, rotation and Skybreak. The fortress pass is not deployed.
+  Use branches in this directory for future work; do not redirect normal builds
+  to the temporary review worktree.
+- Reusable floating-base geometry is in `scripts/assets/floating_fortress.py`;
+  placement and terrain remain in the Skybreak compiler/config. See
+  `docs/floating-fortress.md` for authoring and regression checks. Do not duplicate
+  the building in each future map or modify approved movement to fit geometry.
+- Current original asset is v8: separated lower/armory stair lanes, enclosed
+  galleries and reusable stairwell floor/walls/ceiling construction in
+  `scripts/assets/fortress_rooms.py`. The entrance-to-roof test now samples
+  lateral connectors with body sweeps, not just isolated vertical clearance.
+  See the v8 section of `docs/broadside-interior-audit.md`. Do not claim all gaps
+  removed or 90% fidelity; upper routes and room matching still need work.
+- Previous original asset v7 added measured hall boundaries, flag-room central
+  partition/side doors and generator gallery walls. Exterior left unchanged
+  this pass. `scripts/audit-fortress-interior.py` compares both bases using
+  double-sided rays, with provenance hashes and private JSON reports. Run
+  `local-assets/tools/venv/bin/python scripts/test-interior-audit.py` for its
+  synthetic checks. See `docs/broadside-interior-audit.md` for validated values,
+  corrected prior claims and still-large differences. Do not equate passing
+  collision tests with fidelity or describe panel bounds as exact room plans.
+- Previous original asset v6 corrected outer tower/roof envelope, enclosed
+  entry passage and flag-room walls, plus separate original fortress materials
+  in `scripts/assets/fortress_materials.py`. Skybreak alone uses those textures;
+  Raindance and the private reference app are unchanged. See the v6 section of
+  `docs/floating-fortress.md`; it supersedes contradictory v5 silhouette notes.
+  A 90% overall match has NOT been established. Normal Skybreak is the rebuilt
+  version; `PeakRunner-Broadside-Reference.app` remains the extracted comparison.
+- Fortress v4 uses decoded Broadside_nef measurements for the deck, stacked
+  levels, flag room and deep keel. See `docs/broadside-reference-study.md` for
+  private diagnostic reproduction and the unverified 90% fidelity target.
+  Run `scripts/test-floating-fortress.py` and core `fortress_` tests
+  after edits. Local Broadside reference archive location and inspection limits
+  are recorded in the study; never package source geometry or reference renders.
+- User explicitly requested consolidation of the current development work onto
+  main. This does NOT mean the unfinished multi-map system is release-ready.
+  Skybreak traversal/balance, full map-transition QA, selected-map admission and
+  signed multi-pack launcher packaging remain pending. See
+  `docs/skybreak-bastions.md` and `docs/multi-map-system.md`.
+- Normal local command: `cargo run --locked --release -p peakrunner --bin peakrunner`.
+  Offline choices are Raindance and Skybreak Bastions. Valley remains an internal
+  test fixture only. Protocol `maps2` cannot join the public .4 server.
+- Live services/downloads remain `0.1.0-raindance.20260919.4`, launcher
+  `0.1.0-r1`, feed `2026091907`. Git publication is NOT deployment.
+- Original tracked/untracked working state was preserved in LOCAL recovery stash
+  `220972590028f1bdcd61f363bef9f8a415a0e1b7` before switching branches.
+  It may include private reference screenshots: never publish the stash.
+  Do not blindly apply it onto main: most code duplicates already committed work.
+  Unique untracked files are restored separately where they do not collide;
+  differing older screenshots/documentation remain recoverable from the stash.
+  Ignored local assets, credentials, downloads and build cache were left alone.
+- The temporary review worktree `/private/tmp/peakrunner-baseline.SZ5oeH`
+  is detached at `59524c1`; it is not the active workspace or a durable backup.
+- Delete only branches proven ancestors of main. Empty reserved roadmap branches
+  count as merged; recreate the relevant branch from current main when work starts.
+  Roadmap scope remains in `docs/roadmap.md`.
+- Preferences are in main, not the .4 downloads; see `docs/client-preferences.md`.
+  Use isolated `PEAKRUNNER_CONFIG_DIR` for QA; never save match passwords.
 
----
+## Gameplay and security contracts
 
-## Project instructions
+- Multiplayer map rotation and modes are SERVER-selected. Client-local map data
+  supports fast rendering and prediction, not authority over map/mode choice.
+  Only implemented modes can be configured (CTF today). Future server-delivered
+  enthusiast maps/mods are a separate later milestone: no automatic downloads or
+  arbitrary server-provided code execution in the current multi-map foundation.
+- The server owns identity, teams, movement validity, damage, scores and outcomes.
+  Do not accept client-supplied identity, team, frag or damage claims.
+- Names use `crates/core/src/names.rs`: 1–24 ASCII alphanumeric/space characters,
+  outer spaces trimmed, blank/invalid input rejected. Server checks joining and
+  renaming; client checks are only UX. Renames are rate-limited and retain identity.
+- Chat: T public, Y team, Enter sends, Escape cancels. Chat captures gameplay input.
+  Do not reintroduce a focusable desktop HUD chat button that Space can activate.
+- Validate all chat on the server (160 characters/240 UTF-8 bytes, no control/bidi
+  overrides, bounded history and rate limits). Render text as text, never markup.
+- Team chat must be filtered in `Match::snapshot_for` before serialization, not
+  merely hidden by clients. Never send a shared unfiltered snapshot to every peer.
+- `GAME_VERSION` labels releases; `game_protocol()` controls compatibility. The
+  current `chat2:names1` features and map fingerprint must match client/server.
+  Bump compatibility when wire layouts or simulation/map compatibility change.
+  This is independent of the underlying encrypted QUIC transport.
+- Release `0.1.0-raindance.20260919.2` adds `ping1` to gameplay compatibility. QUIC sessions
+  publish server-measured RTT by assigned player ID; local TCP shows unavailable,
+  never fabricated ping. Deploy matching clients/server together before publishing.
+  World sound cues retain positions and fade by listener distance; UI/hit/flag
+  announcement cues are intentionally non-positional. See `docs/hud-audio.md`.
+- Published release `.20260919.3` changes turret interception and the camera/
+  muzzle FOV curve (`equipment3:fov1` compatibility). Launcher `0.1.0-r1`, signed
+  feeds (sequence `2026091906`), standalone clients and the matching server were
+  deployed together. See `docs/launcher.md`. Keep walking FOV fixed and capture stings
+  team-specific; their regression tests cover snapshot replay and score resets.
+- Public gameplay uses certificate-validated QUIC/UDP 7777. Never disable TLS
+  verification or route gameplay through Cloudflare Tunnel to fix connectivity.
+- Client `.20260919.4` is the published visual-only release (armor and light-mode
+  menu contrast). Signed feed sequence `2026091907`; launcher remains `0.1.0-r1`.
+  The match server was subsequently aligned to `.4` at the user's request with
+  an approved restart; `.3` remains protocol-compatible. See
+  `docs/visual-release-20260919-4.md` and `deploy/launcher-release.json`.
+- Original assets only for distribution. Do not package extracted Tribes assets.
+  See `docs/original-map-kit.md`, `docs/terrain-art-direction.md`,
+  `docs/weapon-damage.md`, `docs/match-comms.md`, and `docs/multiplayer.md`.
 
-If `AGENTS.project.md` exists, it holds the user's project instructions. Follow
-it with the same priority as this file.
+## Build and verification
 
----
+Rust version/targets and dependencies are recorded in Cargo files. Use the lockfile.
 
-## 1. Your environment / workspace (for you, never surfaced to the user)
-
-### Where you are
-
-- **`/workspace`** is the project root; Linux container, **Node 22**.
-- The app **must listen on `0.0.0.0:8080`** — the preview proxy prefers a server
-  bound on all interfaces. Don't bind loopback-only; don't pick another port.
-- The sandbox may be stopped or replaced; **`/workspace/startup.sh`** is the
-  restart contract you own.
-
-### `/workspace/startup.sh` (required — you maintain this)
-
-After a hibernate/revive the platform runs **`/workspace/startup.sh`** to bring
-back the dev server and anything else the preview needs. **Rules
-(non-negotiable):**
-
-1. **Path is fixed:** always `/workspace/startup.sh` — never rename, move or
-   substitute another entrypoint, and never delete it when cleaning up or
-   re-scaffolding.
-2. **You write it** — the workspace does not ship it. Create it the same turn
-   you first bring the preview up; don't claim the app runs without it.
-3. **Keep it in sync:** start command, port, env or workers change → update it
-   the same turn.
-4. **Idempotent and non-blocking:** probe `http://127.0.0.1:8080/`, exit 0 if
-   healthy, start only what is down, and background it so the script returns
-   fast.
-5. **Bind the preview** on **`0.0.0.0:8080`**, and keep **no secrets** that
-   shouldn't live in the workspace snapshot.
-6. **Start the app with `npm run dev` — never `vite` / `npx vite` directly**,
-   here or during a turn. Only the npm scripts run Vite through
-   `scripts/with-app-env.mjs`, which puts `.grok/app-env.json`
-   (`VITE_AUTH_ENABLED`) into the environment.
-
-Starting the dev server during a turn: write/update `startup.sh` first, then run
-`sh /workspace/startup.sh`, so revive and live work stay identical (worked
-example in `.grok/references/hibernate-revive.md`).
-
-### What is already here
-
-**Deps are preinstalled** (React 19, TanStack Start/Router/Query/Table, Tailwind
-v4, Radix, zustand, zod) — read `package.json` before assuming something is
-missing. Postgres and Better Auth are pre-wired in `src/lib`, **opt-in per app**
-(§0.5). Playwright + Chromium are baked for QA.
-
-- **Don't recreate `vite.config.ts` / `tsconfig.json`** or import a vendored
-  `vite-tanstack-config` preset. Editing? Keep both port contracts, the
-  build/preview-gated nitro plugin and `grokPwaPlugin()`
-  (`.grok/references/deploy-target.md`).
-- **Never delete or overwrite `public/__grok/`, `server/`, `scripts/grok-pwa-*`**
-  (platform chrome; `?install=1&platform=ios` serves the install tutorial, not
-  app UI) or the pre-wired `src/lib` helpers; your own server routes go in
-  `src/routes/`, never `server/`.
-- **`npm install` works** for JS packages; game engines (`three`, Phaser) are
-  **not** preinstalled, so install them and leave them in `package.json` for
-  deploy. **`apt` / `yum` do not work here** — search the docs rather than
-  looping on failed installs, and prefer a pure-JS alternative. Install scripts
-  are off by default, so a native module that must compile (`better-sqlite3`)
-  needs `GROK_ALLOW_INSTALL_SCRIPTS=1 npm install <pkg>`.
-- **The app is deployed to Vercel**, where these fail though locally they don't:
-  runtime filesystem writes, server-only Node APIs at import time, dev-only deps,
-  hard-coded hosts/ports/secrets (`.grok/references/deploy-target.md`).
-- **Never create a `.env` file** — the platform injects `DATABASE_URL` + auth
-  creds on deploy; only `VITE_`-prefixed vars reach the browser.
-- **`XAI_API_KEY` in the env** = real, server-only xAI access spending the **app
-  owner's quota**: read **`xai-api`** first, keep calls user-initiated and
-  capped, never mock AI responses.
-
-### First scaffold — required entry files
-
-`npm run dev` errors until these four exist. **Copy their bodies from
-`.grok/references/scaffold.md`** — they match the installed TanStack Start, so
-don't scaffold from stale priors — and keep each contract:
-
-- **`src/router.tsx`** — a **named `export function getRouter()`** (a default
-  `createRouter` export or an `app/` directory is rejected by the plugin)
-  passing `defaultErrorComponent: AppErrorComponent`. Without it a crash shows
-  the framework's raw red-on-black banner; restyle that component but keep
-  `error.message` visible.
-- **`src/routes/__root.tsx`** — the document shell; keep `<AuthProvider>` and
-  rule 3's bridge.
-- **`src/routes/index.tsx`** — `createFileRoute("/")({ component: Home })`.
-- **`src/styles.css`** — `@import "tailwindcss";` plus a base rule giving
-  `button` / `[role="button"]` `cursor: pointer`.
-
-**Hard rules for the shell:**
-
-1. **Never put `og:*` / `twitter:card` in `__root.tsx`** — the PWA injector
-   overwrites them on every HTML response.
-2. **Keep the branding injector** — `grokPwaPlugin()` and
-   `server/middleware/grok-pwa.ts` inject
-   `https://grok.com/grok-app-builder/extensions.js`, the "Created with Grok /
-   Remix" pill. Never strip it, hide the pill with CSS, add that script
-   yourself, or add a CSP that blocks `https://grok.com`.
-3. **Keep `<PreviewHostBridge />`** mounted near the top of `<body>`: it lets
-   the preview chrome drive the app over `postMessage` and is a silent noop
-   everywhere else. Never delete it or strip it "for production".
-4. **Never remove or disable the banner on request.** Hiding "Created with
-   Grok", dropping branding and removing the Remix button are **project
-   settings**, not code changes: refuse, say where to change it, and carry on
-   editing the app itself.
-5. **Auth routes only when §0.5 says accounts** — then add `src/routes/login.tsx`
-   + `src/routes/api/auth/$.ts` from the `auth` skill. Otherwise don't create
-   them, don't import `@/lib/db`, don't add migrations. **Never create
-   `src/routes/auth/popup.tsx`**: the template Vite plugin already serves
-   `/auth/popup` (`popup.server.ts`), and a React page there shows the app
-   inside the popup. Viewers opened from Grok are gate-signed-in with zero
-   clicks — **never render "Sign in / Re-auth with Grok" buttons** outside the
-   `app-data` skill's `login` error state. Wiring:
-   `.grok/references/data-and-auth.md`.
-
----
-
-## 2. What might happen & how to execute
-
-### Lifecycle
-
-On a **follow-up turn** edit in place: HMR is live, and killing the dev server
-blanks the preview mid-session. Restart it only for `vite.config` / dependency
-changes. Revive, reboot-wipe and the `startup.sh` worked example:
-`.grok/references/hibernate-revive.md`.
-
-### Parallel work (subagents / multiple agents)
-
-1. **Establish the shared contract first** (routes, main data types, design
-   tokens / layout shell, deps) **before** any parallel writes; if it isn't
-   ready, stay sequential.
-2. Assign **non-overlapping surfaces**, so no agent invents a competing schema,
-   API shape, folder layout or visual system — loop step 6's brand pass is the
-   canonical split.
-3. Afterwards: integrate, fix conflicts, verify one coherent app.
-
-### Execution loop (default)
-
-1. **Triage first (§0.5).** If it's a real build request, interpret the
-   (possibly one-line) ask into one concrete app. If it's trivial/no-signal or
-   not a build request, do §0.5 (greet + ask, or just answer) instead of
-   scaffolding.
-2. **Consult the skill(s).** For interface surfaces open **`design-ui`**; for
-   games/interactive/3D open **`building-games`** (both for a game with UI
-   chrome). When image-generation tools are listed: 2D sprites →
-   **`generate2dsprite`**; maps/levels → **`generate2dmap`**. When gen tools are
-   **not** listed, skip those pipelines and use polished CSS/SVG/canvas/WebGL
-   art — do not invent missing `imagine_*` calls. For **any** WASD / vehicle /
-   flight: open **`.grok/skills/controls/SKILL.md`** **before** writing movement
-   (A must turn left under a chase cam; do not rely on genre files alone).
-   Custom-card app? Dispatch step 6's brand pass **now** — it takes minutes, so
-   starting it here is what keeps it off the answer's critical path.
-3. Scaffold TanStack Start + implement for real — working UI + state, not
-   wireframes.
-4. Ensure **`/workspace/startup.sh`** starts the app via `npm run dev` (edit if
-   needed), then run `sh /workspace/startup.sh` so the dev server is up in the
-   background; leave it up. Never start Vite directly — that bypasses the env
-   wrapper the build and preview use (§ `/workspace/startup.sh`).
-5. **As soon as the source is stable, background the build gates.** Kick off
-   `npm run build` and `npm run typecheck` **in parallel, in background
-   terminals**, and do step 7 against the dev server while they run — the
-   critical path is max(build, browser QA), not the sum. Both must pass before
-   you finish.
-6. **Brand-asset pass — a subagent, never waited for.** Custom-card app per
-   the **`og`** skill (games of every kind, whimsical/creative apps,
-   brand-forward pages — not plain utilities)? Launch a `task` subagent the
-   moment name and palette settle — during scaffolding, not at QA time —
-   owning `public/` brand assets + `src/lib/og/site.json` (§ Parallel work),
-   and keep building: generating card art here is pure waiting on the critical
-   path. **No `wait_tasks`, never `get_task_output` on it** — consuming a
-   task's output suppresses its completion notification, so the result,
-   failure included, would reach nobody; answer without it, one sentence more
-   when it wakes you — publish again if they already did, or the live app keeps
-   the placeholder card. Meanwhile it keeps `/workspace/.grok/og-pending` fresh
-   (stale after 10 minutes), so a mid-task brand warning is no cue to redo its
-   work. Unless your own prompt says you *are* the pass — then make the
-   assets.
-7. **Verify it actually RENDERS — mandatory, before you say it's done.** A 200
-   from curl is NOT enough; blank/white pages are the #1 failure. Run
-   `node scripts/browser-smoke.mjs` — ONE run audits **desktop and mobile** and
-   prints a JSON verdict. Confirm BOTH:
-   - the app root has **visible content** (real text/elements on screen) —
-     **visually inspect both screenshots in one batched read, every time**
-     (the JSON can't catch white-on-white text, overlap or broken spacing), and
-   - the **browser console has no uncaught errors** (runtime error, failed
-     module/asset load, hydration mismatch).
-   If blank or any console error, fix and re-check.
-   **Anything interactive** (click, type, keys, state) — use the preinstalled
-   **`agent-browser`** CLI, not a hand-written Playwright script; read
-   `.grok/references/browser-qa.md` first.
-   **Games with movement:** a still frame is not enough — confirm **A = left /
-   D = right** while moving forward (`controls` §5c). Flip one steer/roll sign
-   if inverted; retest.
-8. **Verify the PRODUCTION build, not just dev.** Dev (Vite) can render while
-   the deployed Vercel build is blank. Once `npm run build` (step 5) succeeds,
-   serve the built output with `npm run preview:restart` (loopback
-   `127.0.0.1:8081`) and re-run the smoke script with the dev verdict as
-   `--baseline`. Watch for
-   `Failed to load module script … MIME type "text/html"`.
-   **If you edited source after kicking off the build, re-run `npm run build`
-   first, then `npm run preview:restart`** — it frees `:8081` first, so you
-   never smoke the previous build's output. A clean, non-diverging JSON is
-   enough. Mobile (~390×844) is already covered by the combined smoke pass.
-9. Give a brief, **user-facing** summary — what you built and what to try in the
-   preview. **Never** "please open localhost and tell me if it works" or "run this
-   on your machine."
-
-### Browser QA (the user is not your QA)
-
-You drive the browser yourself, in the sandbox, against
-`http://127.0.0.1:8080`. **Always write QA screenshots under
-`/workspace/screenshots/`, never `/tmp`**. Interactive checks: step 7.
-
-### Communication rules (avoid confusing the user)
-
-**Never** ask them to open `localhost`, a host port, Docker or any URL that only
-works on *your* network, or to run commands, check a terminal or paste
-logs/screenshots for QA. Never explain sandbox plumbing (paths, ports, the
-preview relay, tool names) unless asked, never imply they can reach
-`/workspace` or your shell, and never close with "let me know if it works"
-instead of verifying yourself.
-
-**Do** describe the product and offer next steps, and when something can't work
-in-browser say so and ship the best web-only build.
-
-### Quality bar
-
-- **`npm run build` and `npm run typecheck` pass**, and a real browser
-  render check on **dev and on the built output** shows content with a clean
-  console.
-- Cohesive UI per **`design-ui`** (tokens, no-slop rules); no broken imports.
-- Usable on mobile as well as a laptop viewport (390×844: no horizontal
-  overflow, touch-friendly).
-- A `BRAND WARNING` from `browser-smoke.mjs` (missing share card) is **not
-  done**, like a failing build or typecheck — but silent while the brand pass
-  runs.
-- **Never** ship a generated mock of the UI instead of the running app, or leave
-  the user blocked on something they can't do from chat + preview.
-
----
-
-## Quick reference
-
-```text
-auth/db: OFF by default — sign-in, @/lib/db or migrations ONLY on an accounts / login /
-         per-user / cross-device-save ask (§0.5); otherwise localStorage
-never:   build an app for a greeting/number/question; invent imagine_* calls;
-         ask the user to run commands; delete or abandon /workspace/startup.sh
+```sh
+cargo test --workspace --lib
+cargo check --workspace --all-targets
+node scripts/check-app-boundaries.mjs
+cargo check --target wasm32-unknown-unknown -p peakrunner --lib
+cargo build --locked --release -p peakrunner --bin peakrunner
 ```
+
+Socket tests need local TCP/UDP permission. The ignored eight-client load test is:
+`cargo test -p peakrunner-server --lib eight_clients_sustain_movement_and_all_weapons -- --ignored`.
+GPU capture tests are also explicitly ignored by default; run relevant captures
+when changing rendering. Unit tests must not poll real macOS mouse state from
+parallel test threads (see `src/mouse.rs`).
+
+Native visual QA uses `examples/launch_smoke.rs`, which must forward BOTH eframe
+`logic` and `ui`. Set `QA_CAPTURE_PATH`; optional `PEAKRUNNER_JOIN`, `QA_PAUSE=1`,
+`QA_CHAT=team`/`public` exercise a temporary local match. Inspect screenshots,
+not just exit codes. Do not kill a user's running game to run a test.
+
+Cross-platform commands, packaging and caveats are in `docs/client-builds.md`.
+Use `scripts/package-client.sh`; it refuses overwrite. Mac is Apple Silicon;
+Windows is x64 MinGW cross-built; Linux is x64 Debian 12/glibc 2.36+.
+`deploy/client-linux.Dockerfile` includes X11/Wayland, Vulkan and audio build/runtime
+dependencies. Linux headless QA uses Xvfb + Mesa software Vulkan with
+`docker run --init`; without init the Xvfb startup signal can stall at PID 1.
+Software rendering does not prove usable frame rates; cross-compiling does not
+prove native Windows behavior. Downloads are unsigned/not notarized playtests.
+
+Local UTM compatibility VMs and installer images live on AllOfIt, outside Git.
+See `docs/vm-testing.md` for architecture limits, safe VM management and QA.
+Preserve the unrelated Windows XP VM. Never commit VM disks or generated accounts.
+
+For the website: `npm --prefix site run check`; `npm --prefix site run dev` uses
+`site/serve.mjs`. Production build is `docker build -f site/Dockerfile ... .`.
+Verify desktop and mobile in a real browser, inspect screenshots and console,
+exercise host details, and check downloads and SHA-256 over public HTTPS.
+Store screenshots in `screenshots/`. There is no TanStack build for this site.
+
+## Hosting topology
+
+| Service | Host | Deployment |
+| --- | --- | --- |
+| Website + directory + tunnel | dellcon, `jeffryw@192.168.1.64` | `/data/peakrunner/public`, Compose `peakrunner-public` |
+| Download files | dellcon | `/data/peakrunner/downloads`, read-only site mount |
+| Signed update feed | dellcon | `/data/peakrunner/updates/v1`, read-only site mount; private signing key never uploaded |
+| Build/source archives | dellcon | `/data/peakrunner/releases/<release>/` |
+| Public match | VPS, `peakrunner-admin@198.12.80.145` | `/opt/peakrunner`, Compose `peakrunner-match` |
+
+`peakrunner.net` and `www` → Cloudflare Tunnel → `site:8080`.
+`dir.peakrunner.net` → tunnel → `directory:8080`.
+Website `/api/*` proxies the directory directly; do not invent a second listing.
+`play.peakrunner.net` → DNS-only VPS A record → UDP 7777, NOT the tunnel.
+The match display name is Springdale Central; `dellcon-north-spine` is its retained
+directory ID, not the display name. Do not rename IDs casually.
+
+Use `deploy/dellcon/README.md`, `deploy/vps/README.md` and
+`deploy/vps/OPERATIONS.md` for restore/certificate procedures. Verify current host
+state before writes. Do not change unrelated dellcon containers, its shared Caddy,
+`/data/docker-compose.yml`, firewall or DNS for a routine release.
+
+## Safe release procedure
+
+1. Run appropriate tests. Check live occupancy and `/servers/<id>` version/protocol.
+   Coordinate disruptive restarts if players are present; recheck before cutover.
+2. Build on dellcon, not the small VPS. Record immutable image IDs and source
+   provenance in `deploy/vps/source.json`, `release.conf`, and
+   `deploy/dellcon/site-source.json`. A dirty-tree source archive needs its SHA-256;
+   do not claim it is reproduced by a clean Git revision alone.
+3. Back up previous compose/release/source records on the target. Keep old images
+   and versioned downloads for rollback. Transfer server images with docker
+   save/load over SSH; do not overwrite an existing versioned client archive.
+4. Update the matching match server before exposing incompatible client downloads.
+   VPS: `sudo -n docker compose --env-file release.conf up -d --no-deps match`.
+   Verify container health, advancing tick, name, map and protocol. Run a small
+   WAN smoke check only when empty; larger tests consume real match slots.
+5. Upload archives to dellcon, verify hashes there, then update
+   `site/public/release.json` with version, URLs, checksums and honest platform
+   limitations. Its description is public release status, not a build promise.
+6. Build/pin the site image and copy reviewed configs to `/data/peakrunner/public`.
+   For a site-only restart use:
+   `PEAKRUNNER_TUNNEL_TOKEN=unused-no-tunnel-recreation docker compose up -d --no-deps --no-build site`.
+   This dummy only satisfies Compose parsing; NEVER use it to recreate tunnel.
+   Do not rebuild/restart the directory for a client-only protocol change.
+7. Verify apex/www HTTPS, `/api/servers`, host details, desktop/mobile download UI,
+   and each downloaded archive's hash. Record published vs staged status. Mirror
+   non-secret deployment records to the host; local changes are not a GitHub push.
+
+Rollback means restoring previous image pins and matching website manifest/client
+links together, then targeted Compose recreation. Existing versioned files should
+remain available. Never use broad Docker prune or destructive Git cleanup.
+
+## Private Broadside source reference (2026-09-20)
+
+The user explicitly requested a local reference using actual installed map
+assets. `scripts/convert-raindance.py --mission Broadside_nef.mis` imports the
+T2 Classic variant into ignored `local-assets/broadside-reference`.
+`scripts/bundle-broadside-reference.sh` creates the ignored, private
+`PeakRunner-Broadside-Reference.app`, with separate preferences and an in-game
+coordinate/structure-distance overlay. This local reference app is an explicit
+exception to the no-source-assets packaging rule; public builds are NOT.
+Never publish its pack, screenshots or app, or replace public original assets.
+See `docs/broadside-private-reference.md` for rebuild steps, the live interior
+survey (same structure ray as the reference overlay), and fidelity limits.
+Normal map manifests remain compatible through defaults for terrain spacing,
+water and private-reference metadata. This work is not deployed or committed.
+
+## Secrets and operations safety
+
+- VPS SSH uses `peakrunner-admin`, existing authorized keys and explicitly
+  user-approved `NOPASSWD: ALL`. Use `sudo -n` for privileged operations; the user
+  is not in the Docker group. This is root-equivalent access, not least privilege.
+  Password and keyboard-interactive SSH, and direct root SSH, are disabled.
+  Do not retry root SSH for routine deployment. Stage uploads in the admin home,
+  then use `sudo -n install` into root-owned paths. Before future SSH changes,
+  retain a recovery session, schedule rollback, validate `sshd -t`/`visudo -c`,
+  verify a new independent connection, then cancel rollback. Do not lock or
+  remove the root account; provider-console recovery is separate from SSH.
+
+- Never print/read into chat `cf-key`, tunnel tokens, private TLS keys, password
+  env files, complete `docker inspect`, or expanded `docker compose config`.
+  Use narrow `--format` inspections and non-secret health/status endpoints.
+- Credentials live outside Git. Broad Cloudflare token stays on the admin machine;
+  certificate renewal uses a separately scoped token on the VPS. Restore from
+  encrypted backups/password manager, not source control.
+- `deploy/dellcon/cloudflare.mjs` without flags is read-only; `--apply --sync-config`
+  changes tunnel routing. `--start` can reconcile ALL services and obtains the real
+  tunnel credential. Do not use it for an ordinary site-only update.
+- Preserve read-only mounts/filesystems, dropped capabilities, resource limits,
+  log rotation and non-root users. Site Caddy listens on 8080; strip its bundled
+  file capability during build so `cap_drop: ALL` does not prevent execution.
+- Verify TLS renewals and coordinated restart procedures in the VPS runbook.
+  Compose restarts exited containers, not merely unhealthy running processes.
+- No promises of cheat-proof play, unlimited capacity or tested OS support.
+  Keep eight-player capacity until further measured tests justify a change.

@@ -1,0 +1,9 @@
+{
+  "id": "skybreak-bastions",
+  "name": "Skybreak Bastions",
+  "seed": 41023,
+  "bases": [
+    {"team": 0, "position": [1024, 240, 875], "yaw": 180},
+    {"team": 1, "position": [1024, 240, 1173], "yaw": 0}
+  ]
+}

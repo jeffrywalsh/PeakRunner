@@ -1,0 +1,473 @@
+{
+  "texture_count": 20,
+  "terrain_layers": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "sky_layers": [
+    14,
+    15,
+    16,
+    17,
+    18,
+    19
+  ],
+  "water_layer": 13,
+  "water": {
+    "position": "-384 -160 54",
+    "scale": "720 150 1"
+  },
+  "version": 1,
+  "id": "skybreak-bastions",
+  "name": "Skybreak Bastions",
+  "flags": [
+    [
+      1024.0,
+      255.05,
+      887.0
+    ],
+    [
+      1024.0,
+      255.05,
+      1161.0
+    ]
+  ],
+  "spawns": [
+    [
+      1033.0,
+      255.2,
+      887.0
+    ],
+    [
+      1015.0,
+      255.2,
+      1161.0
+    ]
+  ],
+  "exact_spawns": true,
+  "holes": [],
+  "entities": [
+    {
+      "id": "inventory-0",
+      "kind": "inventory",
+      "position": [
+        1037.0,
+        235,
+        874.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-1",
+      "kind": "inventory",
+      "position": [
+        1011.0,
+        235,
+        874.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-2",
+      "kind": "inventory",
+      "position": [
+        1033.0,
+        248,
+        866.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-3",
+      "kind": "inventory",
+      "position": [
+        1015.0,
+        248,
+        866.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "repair-4",
+      "kind": "repair",
+      "position": [
+        1024.0,
+        247.8,
+        887.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-5",
+      "kind": "inventory",
+      "position": [
+        1036.0,
+        266,
+        889.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-6",
+      "kind": "inventory",
+      "position": [
+        1012.0,
+        266,
+        889.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "generator-7",
+      "kind": "generator",
+      "position": [
+        1040.0,
+        280.5,
+        870.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 2.8,
+      "weapon": "bullet"
+    },
+    {
+      "id": "generator-8",
+      "kind": "generator",
+      "position": [
+        1008.0,
+        280.5,
+        870.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 2.8,
+      "weapon": "bullet"
+    },
+    {
+      "id": "turret-9",
+      "kind": "turret",
+      "position": [
+        1054.0,
+        293.8,
+        869.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 2.2,
+      "weapon": "plasma"
+    },
+    {
+      "id": "turret-10",
+      "kind": "turret",
+      "position": [
+        994.0,
+        293.8,
+        869.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 2.2,
+      "weapon": "plasma"
+    },
+    {
+      "id": "sensor-11",
+      "kind": "sensor",
+      "position": [
+        1024.0,
+        312.8,
+        875.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 2.8,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-12",
+      "kind": "inventory",
+      "position": [
+        1011.0,
+        235,
+        1174.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-13",
+      "kind": "inventory",
+      "position": [
+        1037.0,
+        235,
+        1174.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-14",
+      "kind": "inventory",
+      "position": [
+        1015.0,
+        248,
+        1182.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-15",
+      "kind": "inventory",
+      "position": [
+        1033.0,
+        248,
+        1182.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "repair-16",
+      "kind": "repair",
+      "position": [
+        1024.0,
+        247.8,
+        1161.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-17",
+      "kind": "inventory",
+      "position": [
+        1012.0,
+        266,
+        1159.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-18",
+      "kind": "inventory",
+      "position": [
+        1036.0,
+        266,
+        1159.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "generator-19",
+      "kind": "generator",
+      "position": [
+        1008.0,
+        280.5,
+        1178.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 2.8,
+      "weapon": "bullet"
+    },
+    {
+      "id": "generator-20",
+      "kind": "generator",
+      "position": [
+        1040.0,
+        280.5,
+        1178.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 2.8,
+      "weapon": "bullet"
+    },
+    {
+      "id": "turret-21",
+      "kind": "turret",
+      "position": [
+        994.0,
+        293.8,
+        1179.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 2.2,
+      "weapon": "plasma"
+    },
+    {
+      "id": "turret-22",
+      "kind": "turret",
+      "position": [
+        1054.0,
+        293.8,
+        1179.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 2.2,
+      "weapon": "plasma"
+    },
+    {
+      "id": "sensor-23",
+      "kind": "sensor",
+      "position": [
+        1024.0,
+        312.8,
+        1173.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 2.8,
+      "weapon": "bullet"
+    }
+  ],
+  "instances": [
+    {
+      "asset": "floating-fortress-v9",
+      "team": 0,
+      "position": [
+        1024,
+        240,
+        875
+      ],
+      "yaw": 180,
+      "anchors": {
+        "flag": [
+          1024.0,
+          255.05,
+          887.0
+        ],
+        "spawn": [
+          1033.0,
+          255.2,
+          887.0
+        ],
+        "entrances": [
+          [
+            1024.0,
+            241.2,
+            915.0
+          ],
+          [
+            1024.0,
+            241.2,
+            835.0
+          ]
+        ],
+        "hall": [
+          1024.0,
+          248.2,
+          867.0
+        ],
+        "loft": [
+          1039.0,
+          255.2,
+          857.0
+        ]
+      }
+    },
+    {
+      "asset": "floating-fortress-v9",
+      "team": 1,
+      "position": [
+        1024,
+        240,
+        1173
+      ],
+      "yaw": 0,
+      "anchors": {
+        "flag": [
+          1024.0,
+          255.05,
+          1161.0
+        ],
+        "spawn": [
+          1015.0,
+          255.2,
+          1161.0
+        ],
+        "entrances": [
+          [
+            1024.0,
+            241.2,
+            1133.0
+          ],
+          [
+            1024.0,
+            241.2,
+            1213.0
+          ]
+        ],
+        "hall": [
+          1024.0,
+          248.2,
+          1181.0
+        ],
+        "loft": [
+          1009.0,
+          255.2,
+          1191.0
+        ]
+      }
+    }
+  ],
+  "ambient_emitters": [],
+  "sky": {
+    "visibleDistance": "2500",
+    "fogDistance": "1500"
+  },
+  "asset_sha256": "7d4e5fc5281041ba11a3641bd1f8c2f4acf1089501cc32222f298180161340c6",
+  "material_source_sha256": "5006de556de87efa5985f4ad9ac5e001ecb39f65673e76cefb0dfa5dc55393ec",
+  "rooms_source_sha256": "ca42a11ab5cc86b886f3d3681931241ca0eb616fd0d60d713d2333d4c2369ba1",
+  "provenance": "PeakRunner original floating fortress geometry and original material kit; no extracted assets",
+  "definition_sha256": "ef6e5848697db065b77317146c874f0106c3963dca91df08881490a5e745290c",
+  "files": {
+    "height.bin": "db1ba80c1acd685420a3339fdc5f9f18020e189dfd751e829568d98d95f0a461",
+    "vertices.bin": "e06ded082e4097a6e1f138da3375149c0e15bdaf6fc61a0e15ab82285843536c",
+    "collision.bin": "2dd106adea06ef0055e2c3f5d16c88d2677586a1997226821af9cdd2db6fa0fe",
+    "weights.rgba": "7bfabfe337ec81050f89855788bcad8e2f28dfce59794f8e0ae17c77bd86d171",
+    "textures.rgba": "21cb0f22fbc38ac77fb776268f0def6cc3967c450bf17aa4dae437864d6ec75b",
+    "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e"
+  }
+}
