@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Copy only verified runtime payloads for the explicitly requested private test."""
+"""Copy verified runtime files for the four reference maps."""
 import hashlib
 import json
 import pathlib

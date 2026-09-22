@@ -18,7 +18,7 @@ impl Rotation {
         let maps = entries.into_iter().map(|e| {
             match e.mode { SupportedMode::Ctf => {} }
             let id = MapId::parse(&e.map).ok_or_else(|| format!("map is not installed: {}", e.map))?;
-            validate_private_map(id)?;
+            require_reference_pack(id)?;
             if !cfg!(test) && id == MapId::Valley { return Err("Valley is retired; use raindance or skybreak-bastions".to_string()); }
             Ok(id)
         }).collect::<Result<Vec<_>, _>>()?;
@@ -29,14 +29,9 @@ impl Rotation {
     pub fn reset(&mut self) -> MapId { self.cursor = 0; self.current() }
 }
 
-pub(crate) fn validate_private_map(map: MapId) -> Result<(), String> {
-    if map.is_private_clone() {
-        if std::env::var("PEAKRUNNER_PRIVATE_TEST").as_deref() != Ok("1") {
-            return Err("Imported clones require explicit PEAKRUNNER_PRIVATE_TEST=1".into());
-        }
-        if peakrunner_core::map_pack::on(map).is_none() {
-            return Err(format!("Private rotation map is not installed: {}", map.key()));
-        }
+pub(crate) fn require_reference_pack(map: MapId) -> Result<(), String> {
+    if map.is_private_clone() && peakrunner_core::map_pack::on(map).is_none() {
+        return Err(format!("Reference map is not installed: {}", map.key()));
     }
     Ok(())
 }
@@ -55,13 +50,14 @@ mod tests {
     #[test]
     fn invalid_policy_is_rejected_not_replaced() {
         for json in ["[]", "{}", r#"[{"map":"missing","mode":"ctf"}]"#,
-            r#"[{"map":"stonehenge-clone","mode":"ctf"}]"#,
-            r#"[{"map":"snowblind-clone","mode":"ctf"}]"#,
-            r#"[{"map":"desert-of-death-clone","mode":"ctf"}]"#,
-            r#"[{"map":"broadside-clone","mode":"ctf"}]"#,
             r#"[{"map":"valley","mode":"deathmatch"}]"#,
             r#"[{"map":"valley","mode":"ctf","script":"x"}]"#] {
-            assert!(Rotation::parse(json).is_err());
+            assert!(Rotation::parse(json).is_err(), "{json}");
+        }
+        for key in ["stonehenge-clone", "snowblind-clone", "desert-of-death-clone", "broadside-clone"] {
+            let json = format!(r#"[{{"map":"{key}","mode":"ctf"}}]"#);
+            let installed = peakrunner_core::map_pack::on(MapId::parse(key).unwrap()).is_some();
+            assert_eq!(Rotation::parse(&json).is_ok(), installed, "{key}");
         }
         assert!(Rotation::parse(&" ".repeat(8193)).is_err());
         assert!(Rotation::parse(&format!("[{}]", vec![r#"{"map":"valley","mode":"ctf"}"#;33].join(","))).is_err());

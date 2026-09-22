@@ -32,7 +32,7 @@ struct Peer {
 impl GameHost {
     pub fn bind(addr: &str, name: &str, max_players: u32, map: &str) -> io::Result<Self> {
         let map = MapId::parse(map).ok_or_else(|| invalid("unknown map: use raindance or skybreak-bastions"))?;
-        crate::rotation::validate_private_map(map).map_err(|e| invalid(&e))?;
+        crate::rotation::require_reference_pack(map).map_err(|e| invalid(&e))?;
         if !cfg!(test) && map == MapId::Valley { return Err(invalid("Valley is retired; use raindance or skybreak-bastions")); }
         if !(2..=MAX_PLAYERS as u32).contains(&max_players) { return Err(invalid("capacity must be 2–8")); }
         if name.is_empty() || name.len() > 64 || name.chars().any(char::is_control) { return Err(invalid("invalid match name")); }

@@ -8,8 +8,10 @@ even if its launcher closes. Standalone clients remain supported.
 
 ## Release status
 
-Six-map test `0.1.0-private.20260921.1`, feed `2026092102`, is published at the user's request; see
-[deployment steps](../AGENTS.md#active-deployment-request--six-map-private-test-2026-09-21).
+Six-map release `0.1.0-private.20260921.1`, feed `2026092102`, is published; see
+[the rotation notes](../AGENTS.md#six-map-rotation). The four extra maps are
+reference layouts. Current source no longer uses a private-test switch. The
+published server image still has the old check.
 Existing r1 supports `game/private-maps/<map-key>/` signed files. It rejects
 zero-byte files, so managed packages omit only empty `ambient.f32`; the game
 accepts absence only when the signed map manifest records the empty SHA-256.

@@ -23,23 +23,35 @@ The old checkout and legacy browser prototype remain at
   with canonical docs when changing release guidance.
 - Older commands assume the native workspace: execute from `src/`. Historical
   absolute PeakRunner/peakrunner paths and app locations are no longer current.
-- Git history/remotes/stashes retained. See `docs/workspace-layout.md`.
+- Git history is on `main` only. Local `main` and `origin/main` match.
+  There are no other branches, stashes, or worktrees. See `docs/workspace-layout.md`
+  for the directory move; ignore any older note there about a stash or review worktree.
 - Linux migration validation passed on dellcon (2026-09-21): release client
   build plus isolated Xvfb/Mesa local-match rendering smoke, visually checked.
   See workspace-layout for image provenance, capture and limitations. This was
   not a deployment; real GPU performance and audio playback remain untested.
 
-## Active deployment request — six-map private test (2026-09-21)
+## Six-map rotation
 
-This section supersedes older public-release, Raindance-only and private-clone
-offline-only deployment instructions below for **this explicitly requested test**.
-The user clarified: "we need to put all in rotation. this isn't a public server,
-this is a private test" and then "ignore trying to firewall this out for now".
-Do not ask again whether to keep only Raindance or add firewall/password gating.
-Use the existing dellcon/VPS deployment and existing site/launcher delivery path.
-Those endpoints remain publicly reachable; "private test" describes the intended
-audience, not an implemented access boundary. No firewall, DNS, SSH, tunnel or
-password change is requested. Preserve TLS verification and infrastructure hardening.
+Raindance, Skybreak Bastions, Broadside Clone, Stonehenge Clone, Snowblind
+Clone, and Desert of Death Clone are the server rotation. Raindance and
+Skybreak are original PeakRunner maps. The four clones are reference layouts
+brought in so the bases and routes start in the right place. The next work is
+to change their geometry and art until the maps are PeakRunner's own. Valley
+stays an internal fixture.
+
+There is no private-test switch. A dedicated server loads a reference map when
+its pack is installed and rejects that map when the pack is missing.
+`PEAKRUNNER_PRIVATE_MAPS_DIR/<map-key>` is where the server reads those packs.
+Packaged clients find them in `private-maps/` beside the executable, or in
+macOS `Contents/Resources/private-maps/`. Development builds also read
+`local-assets/<map-key>/`. Client packaging copies the four packs by default.
+
+The published game `0.1.0-private.20260921.1` was built before this removal.
+That server image still checks `PEAKRUNNER_PRIVATE_TEST`, and the running VPS
+Compose still sets it. This source change is not deployed. Do not add a
+firewall or password. The existing endpoints stay publicly reachable. Preserve
+TLS verification and infrastructure hardening.
 
 ### Scope and source
 
@@ -85,22 +97,24 @@ testing remain separate playtest work.
 
 ### Implementation and deployment steps
 
-1. Inspect Git status and preserve existing work. No new commit/push is requested.
-   Check live host health, version/protocol and occupancy through the existing
+1. Inspect Git status and preserve existing work. This release was later
+   committed and pushed as `a4d3f9b`. Check live host health, version/protocol
+   and occupancy through the existing
    directory/status endpoints and narrow Docker inspections.
-2. Enable imported rotation only with `PEAKRUNNER_PRIVATE_TEST=1` on the test
-   server. Fail startup for missing/invalid rotation packs. Load packs from
-   `PEAKRUNNER_PRIVATE_MAPS_DIR/<map-key>`; packaged clients also locate them
-   beside the executable in `private-maps/` or in macOS
+2. Load reference packs from `PEAKRUNNER_PRIVATE_MAPS_DIR/<map-key>`. Fail
+   startup when a configured reference pack is missing or invalid. Packaged
+   clients locate the same packs in `private-maps/` or in macOS
    `Contents/Resources/private-maps/`. Preserve existing local development paths.
+   Do not require `PEAKRUNNER_PRIVATE_TEST`.
 3. Include each installed imported pack's identity/fingerprint in gameplay
    compatibility so missing/mismatched test collections are rejected before a
    player slot is granted. `.20260919.4` / `map1` clients are incompatible.
    Do not present combined-collection compatibility as selected-map-only admission.
 4. Verify normal workspace library tests, all-target compilation, app boundaries,
    private collection rotation with connected clients, late joins and empty reset.
-   Socket tests require local networking. Private tests need an explicit absolute
-   `PEAKRUNNER_PRIVATE_MAPS_DIR`, since Cargo tests run from crate directories.
+   Socket tests require local networking. The connected rotation test needs an
+   explicit absolute `PEAKRUNNER_PRIVATE_MAPS_DIR`, since Cargo tests run from
+   crate directories.
    Render and inspect actual map transitions; keep human balance/traversal and
    platform limitations honest. Do not change approved movement physics.
 5. Stage maps with `python3 scripts/stage-private-maps.py ABSOLUTE_NEW_DIRECTORY`.
@@ -108,10 +122,10 @@ testing remain separate playtest work.
    Windows x64 and Linux x64 clients. Build Linux/server on dellcon, not the VPS.
    Record exact source archive hashes, build provenance and immutable image IDs.
    Keep private map transfer separate from the source-only Docker build context.
-6. Package standalone clients with `PEAKRUNNER_PRIVATE_TEST=1` and
-   `scripts/package-client.sh`; Mac maps must be copied before bundle signing.
-   Stage signed feeds with `PEAKRUNNER_PRIVATE_TEST=1` and
-   `scripts/stage-launcher-release.sh`. Managed layout is
+6. Package standalone clients with `scripts/package-client.sh`; the script
+   copies the four reference packs, and Mac maps must be copied before bundle
+   signing. Stage signed feeds with `scripts/stage-launcher-release.sh`.
+   Managed layout is
    `game/private-maps/<map-key>/`, external original Raindance is `map/`, and
    original Skybreak remains embedded. Signing key stays on the admin Mac.
    Launcher r1 rejects zero-byte files. Omit only empty `ambient.f32` files from
@@ -168,9 +182,12 @@ testing remain separate playtest work.
   `43efb09c5e449fe7d9266c6c0edf5d61bb7fa088fbac897e092d954b01d6f519`.
   Final website archive `site-final-r2.tar.gz` SHA-256:
   `c2bdbe7fc06367a89bc741d981d613710239087b69380710b29bbeea71410906`.
-  Source is a working-tree snapshot based on `a4f00b5`, not a clean committed
-  release. Later runbook/provenance updates and a code comment are not in that
-  build archive. No new commit or push was performed.
+  The deployed binaries were built from that working-tree archive, based on
+  `a4f00b5`, before the release was committed. Git records it on `main` at
+  `a4d3f9b` ("Record the deployed six-map private test"), pushed to
+  `origin/main`. That archive remains the build provenance; the image was not
+  built from a clean checkout of `a4d3f9b`. Guide edits after that commit are
+  not in the deployed image.
 - Linux final clients used the verified base
   `peakrunner-layout-validation:20260921` (ID recorded above), with the saved
   `final-client.Dockerfile` exporting only deliverables. Recipe SHA-256:
@@ -250,19 +267,28 @@ or directory application. Test-only dependencies are intentional. Verify with
 
 Next-work branch order and merge gates are in `docs/roadmap.md`. Keep each map
 and feature scoped separately; update branches from tested main between portions.
-Find a Rift preferences are documented in `docs/client-preferences.md`.
-They are not in the published `.20260919.4` binaries; never store passwords.
+Find a Rift preferences are in the published `.20260921.1` client. See
+`docs/client-preferences.md`. Never store passwords.
 
-## Resume checkpoint — original checkout restored
+## Historical build notes
+
+These notes record how the maps and the checkout were built. Current
+publication, rotation, and git state are in the six-map section above. `main`
+is the only branch, locally and on `origin`. There is no `map/skybreak-fortress`
+branch, no recovery stash, and no review worktree. The live game is
+`0.1.0-private.20260921.1`, launcher `0.1.0-r1`, feed `2026092102`. Sentences
+below that call the clones offline-only, say nothing is deployed, or name
+`.20260919.4` as the live download describe the state before that publication.
 
 - 2026-09-21 collection extension: **Snowblind Clone** and **Desert of Death
   Clone** are installed in the normal native game's wrapped map menu, at
   `local-assets/snowblind-clone/installed` and
   `local-assets/desert-of-death-clone/installed`. Both use the NEW native readers
-  and each has an original donut poster; they remain source-derived/private and
-  are rejected by public server startup/rotation via `MapId::is_private_clone()`.
-  No deployment, commit or public asset packaging. Broadside/Stonehenge installed
-  assets were not replaced. See `docs/collection-snowblind-desert.md` for builds,
+  and each has an original donut poster. They remain reference layouts.
+  Current code loads them when the packs are installed. The published server
+  image from before that change still has the old startup check.
+  Broadside/Stonehenge installed assets were not replaced by this extension.
+  See `docs/collection-snowblind-desert.md` for builds,
   validation, omitted source features and exact private-pack paths.
   `stonehenge.py --profile snowblind|desert-of-death` now supports profiles;
   editable exports record profile and fixed poster anchor. Three terrain layers
@@ -299,8 +325,9 @@ They are not in the published `.20260919.4` binaries; never store passwords.
   old conversion tools or approximate prefab buildings. Installed pack:
   `local-assets/stonehenge-clone/installed` (v6 material-flags correction,
   rebuilt from the previous editable export; prior pack preserved).
-  Normal client offers **Stonehenge Clone** without env overrides; private map
-  is rejected by dedicated-server startup and rotation. Nothing deployed.
+  Normal client offers **Stonehenge Clone** when its pack is installed.
+  Dedicated servers do the same, with no separate opt-in. The published
+  `0.1.0-private.20260921.1` image still has the old startup check.
   Seven building instances, 100 scenery instances, 18 equipment instances;
   88,925 render / 3,603 collision triangles. Source BSP clips 217 terrain cells
   to prevent hills intruding into rooms. Source winding uses triangle strips,
@@ -317,9 +344,9 @@ They are not in the published `.20260919.4` binaries; never store passwords.
   as a separate MapId when run from the workspace with
   `local-assets/broadside-clone/compiled-donut-v1/map.json` installed. No env
   override or source assets embedded. Raindance/Skybreak unchanged. This is
-  current client code, NOT the frozen Reference executable. Private clone is
-  rejected by dedicated-server startup/rotation. Inventory from the NEW
-  `tools/broadside_clone/inventory.py` found 84 extracted mission files; report
+  current client code, NOT the frozen Reference executable. Dedicated servers
+  load it when the pack is installed. Inventory
+  from the NEW `tools/broadside_clone/inventory.py` found 84 extracted mission files; report
   at `local-assets/broadside-clone/mission-inventory.json`. Inventory is not
   conversion. Native T1/T2 importers for further maps remain to be implemented
   under the new pipeline; don't invoke old converters without user approval.
@@ -384,11 +411,12 @@ They are not in the published `.20260919.4` binaries; never store passwords.
   validated; do not claim a complete DCC pipeline or publish these assets.
   Both source-derived apps are private-only; this is not a public asset change.
 
-- Work in `/Users/jeffrywalsh/workspace/PeakRunner/peakrunner`. The original
-  checkout is on `map/skybreak-fortress`, based on main `8260f5b`, including
-  preferences, rotation and Skybreak. The fortress pass is not deployed.
-  Use branches in this directory for future work; do not redirect normal builds
-  to the temporary review worktree.
+- Active checkout is `/Users/jeffrywalsh/workspace/peakrunner` on `main`.
+  `origin/main` is the same commit. `map/skybreak-fortress` was an ancestor of
+  `main` and has been deleted. The 19 September recovery stash was dropped
+  after its tracked code was already on `main`; its screenshots remain in
+  ignored `research/screenshots/`. The temporary review worktree has been
+  removed. Start the next change on a new branch from current `main`.
 - Reusable floating-base geometry is in `scripts/assets/floating_fortress.py`;
   placement and terrain remain in the Skybreak compiler/config. See
   `docs/floating-fortress.md` for authoring and regression checks. Do not duplicate
@@ -420,29 +448,17 @@ They are not in the published `.20260919.4` binaries; never store passwords.
   Run `scripts/test-floating-fortress.py` and core `fortress_` tests
   after edits. Local Broadside reference archive location and inspection limits
   are recorded in the study; never package source geometry or reference renders.
-- User explicitly requested consolidation of the current development work onto
-  main. This does NOT mean the unfinished multi-map system is release-ready.
-  Skybreak traversal/balance, full map-transition QA, selected-map admission and
-  signed multi-pack launcher packaging remain pending. See
-  `docs/skybreak-bastions.md` and `docs/multi-map-system.md`.
-- Normal local command: `cargo run --locked --release -p peakrunner --bin peakrunner`.
-  Offline choices are Raindance and Skybreak Bastions. Valley remains an internal
-  test fixture only. Protocol `maps2` cannot join the public .4 server.
-- Live services/downloads remain `0.1.0-raindance.20260919.4`, launcher
-  `0.1.0-r1`, feed `2026091907`. Git publication is NOT deployment.
-- Original tracked/untracked working state was preserved in LOCAL recovery stash
-  `220972590028f1bdcd61f363bef9f8a415a0e1b7` before switching branches.
-  It may include private reference screenshots: never publish the stash.
-  Do not blindly apply it onto main: most code duplicates already committed work.
-  Unique untracked files are restored separately where they do not collide;
-  differing older screenshots/documentation remain recoverable from the stash.
-  Ignored local assets, credentials, downloads and build cache were left alone.
-- The temporary review worktree `/private/tmp/peakrunner-baseline.SZ5oeH`
-  is detached at `59524c1`; it is not the active workspace or a durable backup.
-- Delete only branches proven ancestors of main. Empty reserved roadmap branches
-  count as merged; recreate the relevant branch from current main when work starts.
-  Roadmap scope remains in `docs/roadmap.md`.
-- Preferences are in main, not the .4 downloads; see `docs/client-preferences.md`.
+- Consolidation onto main is commit `a4f00b5`. The six-map release record is
+  `a4d3f9b`. Selected-map-only admission and independent Skybreak pack updates
+  remain future work. Skybreak traversal and balance still need human playtest.
+  See `docs/skybreak-bastions.md` and `docs/multi-map-system.md`.
+- Normal local command, from `src/`: `cargo run --locked --release -p peakrunner --bin peakrunner`.
+  Offline choices are Raindance, Skybreak Bastions, and the installed private
+  clones. Valley remains an internal test fixture only. `.20260919.4` clients
+  cannot join the published `maps2` server.
+- `main` is the only local and remote branch. Recreate a roadmap branch from
+  current `main` when that work starts. Roadmap scope remains in `docs/roadmap.md`.
+- Preferences ship in `.20260921.1`. See `docs/client-preferences.md`.
   Use isolated `PEAKRUNNER_CONFIG_DIR` for QA; never save match passwords.
 
 ## Gameplay and security contracts
@@ -479,11 +495,10 @@ They are not in the published `.20260919.4` binaries; never store passwords.
   team-specific; their regression tests cover snapshot replay and score resets.
 - Public gameplay uses certificate-validated QUIC/UDP 7777. Never disable TLS
   verification or route gameplay through Cloudflare Tunnel to fix connectivity.
-- Client `.20260919.4` is the published visual-only release (armor and light-mode
-  menu contrast). Signed feed sequence `2026091907`; launcher remains `0.1.0-r1`.
-  The match server was subsequently aligned to `.4` at the user's request with
-  an approved restart; `.3` remains protocol-compatible. See
-  `docs/visual-release-20260919-4.md` and `deploy/launcher-release.json`.
+- Release `.20260919.4` was the previous visual-only public client (armor and
+  light-mode menu contrast), feed `2026091907`, launcher `0.1.0-r1`. The live
+  game is `0.1.0-private.20260921.1`, feed `2026092102`. `.4` clients cannot
+  join it. See `docs/visual-release-20260919-4.md` and `docs/release-20260921-1.md`.
 - Original assets only for distribution. Do not package extracted Tribes assets.
   See `docs/original-map-kit.md`, `docs/terrain-art-direction.md`,
   `docs/weapon-damage.md`, `docs/match-comms.md`, and `docs/multiplayer.md`.
@@ -596,7 +611,8 @@ Never publish its pack, screenshots or app, or replace public original assets.
 See `docs/broadside-private-reference.md` for rebuild steps, the live interior
 survey (same structure ray as the reference overlay), and fidelity limits.
 Normal map manifests remain compatible through defaults for terrain spacing,
-water and private-reference metadata. This work is not deployed or committed.
+water and private-reference metadata. The Reference app and its pack stay
+private. They are not the published six-map client.
 
 ## Secrets and operations safety
 

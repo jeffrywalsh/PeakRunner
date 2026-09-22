@@ -1,8 +1,9 @@
 # Multi-map foundation — in progress
 
-The user explicitly authorized a fixed six-map test deployment on 2026-09-21,
-superseding the general deployment hold below for that test. See
-[release record](release-20260921-1.md) and the active section in AGENTS.md.
+The six-map rotation is published. See
+[release record](release-20260921-1.md) and the six-map section in AGENTS.md.
+Broadside, Stonehenge, Snowblind, and Desert of Death are reference layouts
+to rebuild. Current source loads them when their packs are installed.
 Collection-wide admission and signed delivery are verified for those six maps;
 the general installed-pack registry and selected-map-only admission remain open.
 

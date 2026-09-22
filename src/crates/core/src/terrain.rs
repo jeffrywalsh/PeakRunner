@@ -208,16 +208,16 @@ fn all_maps() -> [MapInfo; 7] {
             res: RAIN_N,
         },
         MapInfo { id: MapId::BroadsideClone, name: "broadside-clone",
-            note: "Private imported map · donut edit test", size:2295.,
+            note: "Reference fortress layout. Geometry starts here.", size:2295.,
             ember:Vec3::ZERO, glacier:Vec3::ZERO, res:RAIN_N },
         MapInfo { id: MapId::StonehengeClone, name: "Stonehenge Clone",
-            note: "Private imported map · fresh decoder · donut edit", size:RAIN_SIZE,
+            note: "Reference stone-ring layout. Geometry starts here.", size:RAIN_SIZE,
             ember:Vec3::ZERO, glacier:Vec3::ZERO, res:RAIN_N },
         MapInfo { id: MapId::SnowblindClone, name: "Snowblind Clone",
-            note: "Private imported snowy bunkers · donut edit", size:RAIN_SIZE,
+            note: "Reference snow-bunker layout. Geometry starts here.", size:RAIN_SIZE,
             ember:Vec3::ZERO, glacier:Vec3::ZERO, res:RAIN_N },
         MapInfo { id: MapId::DesertOfDeathClone, name: "Desert of Death Clone",
-            note: "Private imported desert ruins · donut edit", size:RAIN_SIZE,
+            note: "Reference desert-ruin layout. Geometry starts here.", size:RAIN_SIZE,
             ember:Vec3::ZERO, glacier:Vec3::ZERO, res:RAIN_N },
         MapInfo { id: MapId::Skybreak, name: "Skybreak Bastions",
             note: "Floating fortresses. Indoor flags, jet hatches and landing wings.",
@@ -245,7 +245,6 @@ pub fn info(id: MapId) -> MapInfo {
         result.size=pack.manifest.terrain_step*255.;
         if pack.manifest.private_reference {
             result.name=&pack.manifest.name;
-            result.note="Private source-game reference. Not for redistribution.";
         }
     }
     result

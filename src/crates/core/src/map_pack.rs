@@ -71,7 +71,8 @@ fn skybreak_asset(name: &str) -> Result<&'static [u8], String> {
 
 static PACK: OnceLock<Option<MapPack>> = OnceLock::new();
 
-/// Private test packages keep source-derived maps separate from public assets.
+/// Reference layouts live in their own packs, beside the executable or under
+/// `PEAKRUNNER_PRIVATE_MAPS_DIR`. Development builds also read `local-assets`.
 #[cfg(not(target_arch = "wasm32"))]
 fn private_pack_path(map: crate::terrain::MapId) -> PathBuf {
     if let Some(root) = std::env::var_os("PEAKRUNNER_PRIVATE_MAPS_DIR") {
@@ -123,7 +124,7 @@ pub fn on(map: crate::terrain::MapId) -> Option<&'static MapPack> {
                     let path=private_pack_path(map);
                     if path.join("map.json").is_file() {
                         let pack=MapPack::load(&path).expect("Invalid private collection pack");
-                        assert!(pack.manifest.private_reference,"Collection clones must remain private");
+                        assert!(pack.manifest.private_reference,"Reference pack marker missing");
                         return Some(pack);
                     }
                 }
@@ -138,7 +139,7 @@ pub fn on(map: crate::terrain::MapId) -> Option<&'static MapPack> {
                     let path=private_pack_path(map);
                     if path.join("map.json").is_file() {
                         let pack=MapPack::load(&path).expect("Invalid local stonehenge-clone pack");
-                        assert!(pack.manifest.private_reference,"Stonehenge clone must remain private");
+                        assert!(pack.manifest.private_reference,"Reference pack marker missing");
                         return Some(pack);
                     }
                 }
@@ -148,13 +149,13 @@ pub fn on(map: crate::terrain::MapId) -> Option<&'static MapPack> {
         crate::terrain::MapId::BroadsideClone => {
             static CLONE: OnceLock<Option<MapPack>> = OnceLock::new();
             CLONE.get_or_init(|| {
-                // Explicit local or packaged test install; never embedded.
+                // Installed reference pack. Skybreak stays embedded; these do not.
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     let path=private_pack_path(map);
                     if path.join("map.json").is_file() {
                         let pack=MapPack::load(&path).expect("Invalid local broadside-clone pack");
-                        assert!(pack.manifest.private_reference,"Broadside clone must remain private");
+                        assert!(pack.manifest.private_reference,"Reference pack marker missing");
                         return Some(pack);
                     }
                 }

@@ -31,7 +31,7 @@ mod tests {
         }
     }
     #[test]
-    #[ignore = "requires private collection and PEAKRUNNER_PRIVATE_TEST=1"]
+    #[ignore = "requires the four reference packs and PEAKRUNNER_PRIVATE_MAPS_DIR"]
     fn private_collection_rotates_connected_clients_and_resets() {
         use peakrunner_core::terrain::MapId;
         let maps = [MapId::Raindance, MapId::Skybreak, MapId::BroadsideClone,

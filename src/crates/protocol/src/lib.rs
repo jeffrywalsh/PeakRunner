@@ -13,8 +13,8 @@ pub fn game_protocol() -> String {
             peakrunner_core::map_pack::on(peakrunner_core::terrain::MapId::Skybreak).expect("Skybreak").fingerprint),
         None => format!("{PROTOCOL}:equipment3:blast3:chat2:names1:ping1:fov1"),
     };
-    // Private rotation requires the same complete collection on every peer.
-    // Missing or changed packs must be rejected before assigning a player slot.
+    // Installed reference packs join the compatibility marker. A missing or
+    // changed pack is rejected before a player slot is granted.
     use peakrunner_core::{map_pack, terrain::MapId};
     for map in [MapId::BroadsideClone, MapId::StonehengeClone,
         MapId::SnowblindClone, MapId::DesertOfDeathClone] {
