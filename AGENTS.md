@@ -40,12 +40,27 @@ brought in so the bases and routes start in the right place. The next work is
 to change their geometry and art until the maps are PeakRunner's own. Valley
 stays an internal fixture.
 
+**Tower Complex (source only, not deployed):** in source, the `broadside-clone`
+key/`MapId::BroadsideClone` slot is now the ORIGINAL Tower Complex, embedded like
+Skybreak from `src/assets/maps/tower-complex/` (no private pack, always listed).
+Gameplay compatibility is `maps3` with its fingerprint. Its terrain is original
+procedural rolling hills (`scripts/assets/tower_complex_terrain.py`); Broadside was
+studied for statistics only, privately, and none of its height data is used.
+Optional manifest `spawn_points` (per team `[x,y,z,yaw]`, centre 1.2 m above the
+floor) make the server pick a random spawn each respawn; maps without it are
+unchanged. Spawn centres must be 1.2 m above the floor: lower ones start the
+support ray inside the slab and leave players frictionless. Three private reference
+packs remain: Stonehenge, Snowblind, Desert of Death. The live server and
+published clients still run the old Broadside clone pack; deploying needs a
+full matching client/server release. See `docs/tower-complex.md`.
+
 There is no private-test switch. A dedicated server loads a reference map when
 its pack is installed and rejects that map when the pack is missing.
 `PEAKRUNNER_PRIVATE_MAPS_DIR/<map-key>` is where the server reads those packs.
 Packaged clients find them in `private-maps/` beside the executable, or in
 macOS `Contents/Resources/private-maps/`. Development builds also read
-`local-assets/<map-key>/`. Client packaging copies the four packs by default.
+`local-assets/<map-key>/installed`. Client packaging now copies the three
+remaining packs (it copied four for the published release).
 
 The published game `0.1.0-private.20260921.1` was built before this removal.
 That server image still checks `PEAKRUNNER_PRIVATE_TEST`, and the running VPS
@@ -493,6 +508,10 @@ below that call the clones offline-only, say nothing is deployed, or name
   feeds (sequence `2026091906`), standalone clients and the matching server were
   deployed together. See `docs/launcher.md`. Keep walking FOV fixed and capture stings
   team-specific; their regression tests cover snapshot replay and score resets.
+- Source-only `muzzle1` compatibility: player/bot shots start no farther than the
+  first surface between eye and viewmodel muzzle (wall-hugging shots used to spawn
+  past thin walls). Turrets need clear muzzle-to-chest line of sight each tick;
+  open aligned doorways are layout sight lines. See `docs/weapon-damage.md`.
 - Public gameplay uses certificate-validated QUIC/UDP 7777. Never disable TLS
   verification or route gameplay through Cloudflare Tunnel to fix connectivity.
 - Release `.20260919.4` was the previous visual-only public client (armor and
@@ -525,6 +544,18 @@ Native visual QA uses `examples/launch_smoke.rs`, which must forward BOTH eframe
 `logic` and `ui`. Set `QA_CAPTURE_PATH`; optional `PEAKRUNNER_JOIN`, `QA_PAUSE=1`,
 `QA_CHAT=team`/`public` exercise a temporary local match. Inspect screenshots,
 not just exit codes. Do not kill a user's running game to run a test.
+
+Tower Complex build/test, from `src/` (numpy venv):
+`../research/local-assets/tools/venv/bin/python scripts/build-tower-complex.py [OUTPUT]`
+(default output `assets/maps/tower-complex`, refuses overwrite; bakes lightmaps,
+`--no-bake` skips) and `scripts/test-tower-complex.py`. Builds are byte-identical.
+Its build places bases at z 820/1228 (408 m apart) over rolling terrain.
+
+Optional `QA_FLYCAM=x,y,z,yaw_deg,pitch_deg,fov_deg` (`src/drawlist.rs`) renders
+one frame from an arbitrary world-space camera instead of the player's actual
+position — a detached spectator view for capturing specific rooms/areas, not a
+movement-physics change. Absent the env var, rendering is unaffected. Combine
+with `QA_LOCAL=1 QA_MAP=<id>` to stand up a local match for the shot.
 
 Cross-platform commands, packaging and caveats are in `docs/client-builds.md`.
 Use `scripts/package-client.sh`; it refuses overwrite. Mac is Apple Silicon;

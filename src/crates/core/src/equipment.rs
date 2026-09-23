@@ -31,6 +31,79 @@ pub enum Kind { Inventory, Generator, Sensor, Turret, Repair }
 #[serde(rename_all="snake_case")]
 pub enum TurretWeapon { #[default] Bullet, Plasma }
 
+/// Detection and firing numbers for anything that acquires targets. Fixed map
+/// turrets and future player-placed turrets look up the same table.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TurretProfile {
+    /// Detection range without a powered same-team sensor.
+    pub range: f32,
+    /// Detection range while a same-team sensor is powered.
+    pub sensed_range: f32,
+    pub speed: f32,
+    pub life: f32,
+    pub cooldown: f32,
+    /// Aim at the constant-velocity intercept point instead of the target.
+    pub leads: bool,
+    pub fires: bool,
+    /// Projectile kind stored in `Disc::kind`.
+    pub projectile: u8,
+}
+
+pub const SENSOR_PROFILE: TurretProfile = TurretProfile {
+    range:260., sensed_range:260., speed:0., life:0., cooldown:0., leads:false, fires:false, projectile:0};
+pub const BULLET_TURRET_PROFILE: TurretProfile = TurretProfile {
+    range:80., sensed_range:150., speed:crate::sim::BOLT_SPEED, life:1., cooldown:0.22, leads:false, fires:true, projectile:1};
+pub const PLASMA_TURRET_PROFILE: TurretProfile = TurretProfile {
+    range:80., sensed_range:150., speed:80., life:3., cooldown:1.2, leads:true, fires:true, projectile:3};
+
+pub fn profile(kind:Kind, weapon:TurretWeapon)->Option<TurretProfile> {
+    match (kind,weapon) {
+        (Kind::Sensor,_)=>Some(SENSOR_PROFILE),
+        (Kind::Turret,TurretWeapon::Bullet)=>Some(BULLET_TURRET_PROFILE),
+        (Kind::Turret,TurretWeapon::Plasma)=>Some(PLASMA_TURRET_PROFILE),
+        _=>None,
+    }
+}
+
+/// Barrel clearance beyond the turret's body radius; LOS and shots start here.
+pub const MUZZLE_GAP: f32 = 0.6;
+/// Targets are sighted at the chest, not the feet.
+pub const CHEST_HEIGHT: f32 = 0.8;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Candidate { pub index: usize, pub team: u8, pub pos: Vec3, pub vel: Vec3 }
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Acquired {
+    pub index: usize,
+    /// Where the turret points (the intercept point for leading weapons).
+    pub aim_point: Vec3,
+    pub aim: Vec3,
+    pub muzzle: Vec3,
+}
+
+/// The one targeting rule: the nearest living enemy within range whose chest
+/// is visible from the barrel start. `clear(from,to)` is the caller's line of
+/// sight query, so callers can add blockers such as placed objects. Before
+/// firing, callers must also check `clear(acquired.muzzle, acquired.aim_point)`.
+pub fn acquire_target(origin:Vec3, radius:f32, team:u8, profile:&TurretProfile, sensed:bool,
+    candidates:impl IntoIterator<Item=Candidate>, mut clear:impl FnMut(Vec3,Vec3)->bool)->Option<Acquired> {
+    let range=if sensed {profile.sensed_range} else {profile.range};
+    let (_,index,target,velocity)=candidates.into_iter().filter(|c|c.team!=team)
+        .filter_map(|c| {
+            let target=c.pos+Vec3::Y*CHEST_HEIGHT;let delta=target-origin;
+            if delta.length()>range {return None;}
+            let start=origin+delta.normalize_or_zero()*(radius+MUZZLE_GAP);
+            clear(start,target).then_some((delta.length(),c.index,target,c.vel))
+        }).min_by(|a,b|a.0.total_cmp(&b.0))?;
+    let aim_point=if profile.leads {
+        intercept_time(target-origin,velocity,profile.speed,radius+MUZZLE_GAP,profile.life)
+            .map_or(target,|t|target+velocity*t)
+    } else {target};
+    let aim=(aim_point-origin).normalize_or_zero();
+    Some(Acquired {index,aim_point,aim,muzzle:origin+aim*(radius+MUZZLE_GAP)})
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Definition {
@@ -102,6 +175,62 @@ pub fn service(d:&Definition,s:&mut State,p:&mut Player,using:bool,dt:f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn enemy(index:usize,pos:Vec3)->Candidate {Candidate {index,team:1,pos,vel:Vec3::ZERO}}
+    fn open(_:Vec3,_:Vec3)->bool {true}
+
+    #[test]
+    fn profile_table_keeps_the_established_numbers() {
+        assert_eq!(profile(Kind::Sensor,TurretWeapon::Bullet).map(|p|(p.range,p.sensed_range,p.fires)),Some((260.,260.,false)));
+        let bullet=profile(Kind::Turret,TurretWeapon::Bullet).unwrap();
+        assert_eq!((bullet.range,bullet.sensed_range,bullet.speed,bullet.life,bullet.cooldown,bullet.leads,bullet.projectile),
+            (80.,150.,crate::sim::BOLT_SPEED,1.,0.22,false,1));
+        let plasma=profile(Kind::Turret,TurretWeapon::Plasma).unwrap();
+        assert_eq!((plasma.range,plasma.sensed_range,plasma.speed,plasma.life,plasma.cooldown,plasma.leads,plasma.projectile),
+            (80.,150.,80.,3.,1.2,true,3));
+        for kind in [Kind::Inventory,Kind::Generator,Kind::Repair] {assert!(profile(kind,TurretWeapon::Bullet).is_none());}
+    }
+
+    #[test]
+    fn acquire_target_respects_range_sensors_and_teams() {
+        let p=BULLET_TURRET_PROFILE;
+        let far=enemy(0,Vec3::new(100.,-0.8,0.));
+        assert!(acquire_target(Vec3::ZERO,1.,0,&p,false,[far],open).is_none(),"100 m is outside unsensed range");
+        assert_eq!(acquire_target(Vec3::ZERO,1.,0,&p,true,[far],open).map(|a|a.index),Some(0),"a powered sensor extends range");
+        let friend=Candidate {index:1,team:0,pos:Vec3::new(5.,-0.8,0.),vel:Vec3::ZERO};
+        assert!(acquire_target(Vec3::ZERO,1.,0,&p,false,[friend],open).is_none(),"teammates are never targets");
+    }
+
+    #[test]
+    fn acquire_target_picks_the_nearest_visible_enemy() {
+        let p=BULLET_TURRET_PROFILE;
+        let near=enemy(0,Vec3::new(10.,-0.8,0.));let farther=enemy(1,Vec3::new(30.,-0.8,0.));
+        assert_eq!(acquire_target(Vec3::ZERO,1.,0,&p,false,[farther,near],open).map(|a|a.index),Some(0));
+        let blocked_near=|_:Vec3,to:Vec3|to.x>20.;
+        assert_eq!(acquire_target(Vec3::ZERO,1.,0,&p,false,[farther,near],blocked_near).map(|a|a.index),Some(1),
+            "a blocked nearer enemy is skipped");
+        assert!(acquire_target(Vec3::ZERO,1.,0,&p,false,[near],|_,_|false).is_none());
+    }
+
+    #[test]
+    fn acquire_target_sights_from_the_barrel_to_the_chest() {
+        let mut seen=Vec::new();
+        let hit=acquire_target(Vec3::ZERO,1.5,0,&BULLET_TURRET_PROFILE,false,[enemy(0,Vec3::new(20.,-0.8,0.))],
+            |a,b|{seen.push((a,b));true}).unwrap();
+        assert_eq!(seen,vec![(Vec3::new(1.5+MUZZLE_GAP,0.,0.),Vec3::new(20.,0.,0.))]);
+        assert_eq!((hit.aim_point,hit.aim,hit.muzzle),(Vec3::new(20.,0.,0.),Vec3::X,Vec3::new(2.1,0.,0.)));
+    }
+
+    #[test]
+    fn leading_profiles_aim_at_the_intercept_point() {
+        let mover=Candidate {index:0,team:1,pos:Vec3::new(40.,-0.8,0.),vel:Vec3::new(0.,0.,20.)};
+        let plain=acquire_target(Vec3::ZERO,1.,0,&BULLET_TURRET_PROFILE,false,[mover],open).unwrap();
+        let led=acquire_target(Vec3::ZERO,1.,0,&PLASMA_TURRET_PROFILE,false,[mover],open).unwrap();
+        assert_eq!(plain.aim_point,Vec3::new(40.,0.,0.));
+        let t=intercept_time(Vec3::new(40.,0.,0.),mover.vel,80.,1.+MUZZLE_GAP,3.).unwrap();
+        assert_eq!(led.aim_point,Vec3::new(40.,0.,0.)+mover.vel*t);
+        assert!(led.aim.z>0.,"plasma leads a target moving across its line");
+    }
+
     #[test]
     fn always_on_circuits_need_no_fabricated_generator() {
         let d=Definition{id:"station".into(),kind:Kind::Inventory,position:[0.;3],team:0,

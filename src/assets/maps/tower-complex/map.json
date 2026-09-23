@@ -1,0 +1,638 @@
+{
+  "terrain_layers": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "sky_layers": [
+    14,
+    15,
+    16,
+    17,
+    18,
+    19
+  ],
+  "water_layer": 13,
+  "water": {
+    "position": "-384 -160 54",
+    "scale": "720 150 1"
+  },
+  "texture_count": 31,
+  "lightmap": {
+    "pages": 11,
+    "first_layer": 20,
+    "texel_m": 0.5,
+    "sun": [
+      -0.57735,
+      0.57735,
+      -0.57735
+    ],
+    "lamps": 130,
+    "baker_sha256": "66d1c04a0581f283b62d4a01a9229abd22fbd18a738474c8c5c148db84800fed"
+  },
+  "version": 1,
+  "id": "tower-complex",
+  "name": "Tower Complex",
+  "flags": [
+    [
+      1018.5,
+      247.35,
+      820.0
+    ],
+    [
+      1029.5,
+      247.35,
+      1228.0
+    ]
+  ],
+  "spawns": [
+    [
+      1028.2,
+      241.2,
+      811.5
+    ],
+    [
+      1019.8,
+      241.2,
+      1236.5
+    ]
+  ],
+  "exact_spawns": true,
+  "spawn_points": [
+    [
+      [
+        1028.2,
+        241.2,
+        811.5,
+        3.141592653589793
+      ],
+      [
+        1019.8,
+        241.2,
+        811.5,
+        3.141592653589793
+      ],
+      [
+        1027.5,
+        248.2,
+        827.5,
+        1.5707963267948966
+      ],
+      [
+        1019.8,
+        248.2,
+        827.5,
+        4.71238898038469
+      ],
+      [
+        1028.0,
+        255.2,
+        814.0,
+        3.141592653589793
+      ],
+      [
+        1020.0,
+        255.2,
+        813.0,
+        3.141592653589793
+      ],
+      [
+        1035.0,
+        241.2,
+        786.0,
+        3.141592653589793
+      ],
+      [
+        1019.0,
+        241.2,
+        786.0,
+        3.141592653589793
+      ]
+    ],
+    [
+      [
+        1019.8,
+        241.2,
+        1236.5,
+        0.0
+      ],
+      [
+        1028.2,
+        241.2,
+        1236.5,
+        0.0
+      ],
+      [
+        1020.5,
+        248.2,
+        1220.5,
+        4.71238898038469
+      ],
+      [
+        1028.2,
+        248.2,
+        1220.5,
+        1.5707963267948966
+      ],
+      [
+        1020.0,
+        255.2,
+        1234.0,
+        0.0
+      ],
+      [
+        1028.0,
+        255.2,
+        1235.0,
+        0.0
+      ],
+      [
+        1013.0,
+        241.2,
+        1262.0,
+        0.0
+      ],
+      [
+        1029.0,
+        241.2,
+        1262.0,
+        0.0
+      ]
+    ]
+  ],
+  "holes": [],
+  "entities": [
+    {
+      "id": "inventory-0",
+      "kind": "inventory",
+      "position": [
+        1029.2,
+        255,
+        827.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-1",
+      "kind": "inventory",
+      "position": [
+        1018.8,
+        255,
+        827.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "generator-2",
+      "kind": "generator",
+      "position": [
+        1032.0,
+        242.5,
+        791.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 2.8,
+      "weapon": "bullet"
+    },
+    {
+      "id": "turret-3",
+      "kind": "turret",
+      "position": [
+        1033.0,
+        242.8,
+        850.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 2.2,
+      "weapon": "bullet"
+    },
+    {
+      "id": "turret-4",
+      "kind": "turret",
+      "position": [
+        1015.0,
+        242.8,
+        850.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 2.2,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-5",
+      "kind": "inventory",
+      "position": [
+        1018.8,
+        255,
+        1221.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-6",
+      "kind": "inventory",
+      "position": [
+        1029.2,
+        255,
+        1221.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "generator-7",
+      "kind": "generator",
+      "position": [
+        1016.0,
+        242.5,
+        1257.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 2.8,
+      "weapon": "bullet"
+    },
+    {
+      "id": "turret-8",
+      "kind": "turret",
+      "position": [
+        1015.0,
+        242.8,
+        1198.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 2.2,
+      "weapon": "bullet"
+    },
+    {
+      "id": "turret-9",
+      "kind": "turret",
+      "position": [
+        1033.0,
+        242.8,
+        1198.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 2.2,
+      "weapon": "bullet"
+    }
+  ],
+  "instances": [
+    {
+      "asset": "tower-complex-v5",
+      "team": 0,
+      "position": [
+        1024,
+        240,
+        820
+      ],
+      "yaw": 180,
+      "anchors": {
+        "flag": [
+          1018.5,
+          247.35,
+          820.0
+        ],
+        "spawn": [
+          1028.2,
+          241.2,
+          811.5
+        ],
+        "entrances": [
+          [
+            1024.0,
+            240.2,
+            832.0
+          ],
+          [
+            1032.0,
+            240.2,
+            808.0
+          ],
+          [
+            1016.0,
+            240.2,
+            808.0
+          ],
+          [
+            1033.0,
+            240.2,
+            850.0
+          ],
+          [
+            1015.0,
+            240.2,
+            850.0
+          ]
+        ],
+        "generator": [
+          1032.0,
+          240,
+          791.0
+        ],
+        "ship_platform": [
+          1016.0,
+          240,
+          789.0
+        ],
+        "turret_left": [
+          1033.0,
+          240,
+          850.0
+        ],
+        "turret_right": [
+          1015.0,
+          240,
+          850.0
+        ],
+        "level1_view": [
+          1020.0,
+          240.2,
+          822.0
+        ],
+        "level2_view": [
+          1026.0,
+          247.2,
+          823.0
+        ],
+        "level3_view": [
+          1024.0,
+          254.2,
+          824.0
+        ],
+        "shaft_view": [
+          1020.0,
+          240.4,
+          820.0
+        ],
+        "bridge_left_view": [
+          1033.0,
+          240.4,
+          838.0
+        ]
+      }
+    },
+    {
+      "asset": "tower-complex-v5",
+      "team": 1,
+      "position": [
+        1024,
+        240,
+        1228
+      ],
+      "yaw": 0,
+      "anchors": {
+        "flag": [
+          1029.5,
+          247.35,
+          1228.0
+        ],
+        "spawn": [
+          1019.8,
+          241.2,
+          1236.5
+        ],
+        "entrances": [
+          [
+            1024.0,
+            240.2,
+            1216.0
+          ],
+          [
+            1016.0,
+            240.2,
+            1240.0
+          ],
+          [
+            1032.0,
+            240.2,
+            1240.0
+          ],
+          [
+            1015.0,
+            240.2,
+            1198.0
+          ],
+          [
+            1033.0,
+            240.2,
+            1198.0
+          ]
+        ],
+        "generator": [
+          1016.0,
+          240,
+          1257.0
+        ],
+        "ship_platform": [
+          1032.0,
+          240,
+          1259.0
+        ],
+        "turret_left": [
+          1015.0,
+          240,
+          1198.0
+        ],
+        "turret_right": [
+          1033.0,
+          240,
+          1198.0
+        ],
+        "level1_view": [
+          1028.0,
+          240.2,
+          1226.0
+        ],
+        "level2_view": [
+          1022.0,
+          247.2,
+          1225.0
+        ],
+        "level3_view": [
+          1024.0,
+          254.2,
+          1224.0
+        ],
+        "shaft_view": [
+          1028.0,
+          240.4,
+          1228.0
+        ],
+        "bridge_left_view": [
+          1015.0,
+          240.4,
+          1210.0
+        ]
+      }
+    },
+    {
+      "asset": "landing-pad-v1",
+      "team": 0,
+      "position": [
+        1119,
+        190,
+        904
+      ],
+      "yaw": 180,
+      "anchors": {
+        "deck": [
+          1119.0,
+          190,
+          904.0
+        ],
+        "deploy_slots": [
+          [
+            1125.5,
+            190,
+            910.5
+          ],
+          [
+            1112.5,
+            190,
+            910.5
+          ],
+          [
+            1125.5,
+            190,
+            897.5
+          ],
+          [
+            1112.5,
+            190,
+            897.5
+          ]
+        ],
+        "keel_tip": [
+          1119.0,
+          173,
+          904.0
+        ],
+        "edge_gaps": [
+          [
+            1119.0,
+            190,
+            916.0
+          ],
+          [
+            1119.0,
+            190,
+            892.0
+          ],
+          [
+            1131.0,
+            190,
+            904.0
+          ],
+          [
+            1107.0,
+            190,
+            904.0
+          ]
+        ]
+      }
+    },
+    {
+      "asset": "landing-pad-v1",
+      "team": 1,
+      "position": [
+        929,
+        190,
+        1144
+      ],
+      "yaw": 0,
+      "anchors": {
+        "deck": [
+          929.0,
+          190,
+          1144.0
+        ],
+        "deploy_slots": [
+          [
+            922.5,
+            190,
+            1137.5
+          ],
+          [
+            935.5,
+            190,
+            1137.5
+          ],
+          [
+            922.5,
+            190,
+            1150.5
+          ],
+          [
+            935.5,
+            190,
+            1150.5
+          ]
+        ],
+        "keel_tip": [
+          929.0,
+          173,
+          1144.0
+        ],
+        "edge_gaps": [
+          [
+            929.0,
+            190,
+            1132.0
+          ],
+          [
+            929.0,
+            190,
+            1156.0
+          ],
+          [
+            917.0,
+            190,
+            1144.0
+          ],
+          [
+            941.0,
+            190,
+            1144.0
+          ]
+        ]
+      }
+    }
+  ],
+  "ambient_emitters": [],
+  "sky": {
+    "visibleDistance": "2500",
+    "fogDistance": "1500"
+  },
+  "asset_sha256": "9b86db50ae4cf1718e7f4c1da19a9c3f16d5906d9d5a8b6de316c92e2935d072",
+  "pad_asset_sha256": "e08760880694f1e3903e43d2ed1761e8537bf477e8212b3cffddca00786a85d8",
+  "terrain_source_sha256": "b0eb73f41448b92fc1b37552b7c5e300eb4892e17d819966405cb5fdf3e7e72b",
+  "material_source_sha256": "ca7bd56bdacc2d21a61c1bb635e3fa902de6340766e498a698bf40784ff59918",
+  "provenance": "PeakRunner original tower-complex geometry, original procedural terrain and original material kit; no extracted assets or external height data",
+  "definition_sha256": "2c57b9bb44f141cadfec2f0f31aaff50ecd384f111a84699434cfac7bc8a7193",
+  "files": {
+    "height.bin": "c7cbbeee0459c9f4338a9336f6c11abdc472dd98f224672d1056edfdbdc429a6",
+    "vertices.bin": "ab94b7b270f50652923887cf5d1170829f255d61bc4cd5ed6b91f5b3fc764723",
+    "collision.bin": "684696223c1fd0be8ef6a0e62ef2d2f2d8864cfdcdb3fb809896d3864f52065c",
+    "weights.rgba": "2c0e11be87e32040a6133893c6ba22f07ea57ea0618175cf51ca7f32dfe14c77",
+    "textures.rgba": "e4c47dcdc64f46f9ffffe84754f835a9e909b2ec885ff7e295cdc939b84e10be",
+    "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e"
+  }
+}

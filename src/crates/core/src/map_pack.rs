@@ -43,10 +43,14 @@ pub struct Manifest {
     pub files: BTreeMap<String, String>,
     #[serde(default)]
     pub entities: Vec<crate::equipment::Definition>,
+    /// Optional per-team spawn list, `[x, y, z, yaw]` with the player's
+    /// centre and world yaw. Absent: the single `spawns` entry per team.
+    #[serde(default)]
+    pub spawn_points: Vec<Vec<[f32; 4]>>,
 }
 
 pub struct MapPack {
-    skybreak: bool,
+    embedded: Embedded,
     pub manifest: Manifest,
     pub root: PathBuf,
     pub fingerprint: String,
@@ -69,10 +73,33 @@ fn skybreak_asset(name: &str) -> Result<&'static [u8], String> {
     })
 }
 
+/// Original Tower Complex, built by `scripts/build-tower-complex.py`. It holds
+/// the `broadside-clone` rotation slot so existing server configs keep working.
+fn tower_complex_asset(name: &str) -> Result<&'static [u8], String> {
+    Ok(match name {
+        "map.json" => include_bytes!("../../../assets/maps/tower-complex/map.json"),
+        "vertices.bin" => include_bytes!("../../../assets/maps/tower-complex/vertices.bin"),
+        "collision.bin" => include_bytes!("../../../assets/maps/tower-complex/collision.bin"),
+        "height.bin" => include_bytes!("../../../assets/maps/tower-complex/height.bin"),
+        "weights.rgba" => include_bytes!("../../../assets/maps/tower-complex/weights.rgba"),
+        "textures.rgba" => include_bytes!("../../../assets/maps/tower-complex/textures.rgba"),
+        "ambient.f32" => include_bytes!("../../../assets/maps/tower-complex/ambient.f32"),
+        _ => return Err("Unknown Tower Complex asset".into()),
+    })
+}
+
+type Embedded = fn(&str) -> Result<&'static [u8], String>;
+
+fn embedded_pack(assets: Embedded, label: &str) -> MapPack {
+    let mut pack = MapPack::from_assets(Path::new(""), &|n,_|assets(n).map(|b|b.to_vec()))
+        .unwrap_or_else(|e| panic!("Built-in {label} pack failed validation: {e}"));
+    pack.embedded = assets; pack
+}
+
 static PACK: OnceLock<Option<MapPack>> = OnceLock::new();
 
 /// Reference layouts live in their own packs, beside the executable or under
-/// `PEAKRUNNER_PRIVATE_MAPS_DIR`. Development builds also read `local-assets`.
+/// `PEAKRUNNER_PRIVATE_MAPS_DIR`. Development builds also read `local-assets/<key>/installed`.
 #[cfg(not(target_arch = "wasm32"))]
 fn private_pack_path(map: crate::terrain::MapId) -> PathBuf {
     if let Some(root) = std::env::var_os("PEAKRUNNER_PRIVATE_MAPS_DIR") {
@@ -85,8 +112,7 @@ fn private_pack_path(map: crate::terrain::MapId) -> PathBuf {
             }
         }
     }
-    Path::new("local-assets").join(map.key()).join(
-        if map == crate::terrain::MapId::BroadsideClone { "compiled-donut-v1" } else { "installed" })
+    Path::new("local-assets").join(map.key()).join("installed")
 }
 
 pub fn active() -> Option<&'static MapPack> {
@@ -147,28 +173,12 @@ pub fn on(map: crate::terrain::MapId) -> Option<&'static MapPack> {
             }).as_ref()
         }
         crate::terrain::MapId::BroadsideClone => {
-            static CLONE: OnceLock<Option<MapPack>> = OnceLock::new();
-            CLONE.get_or_init(|| {
-                // Installed reference pack. Skybreak stays embedded; these do not.
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    let path=private_pack_path(map);
-                    if path.join("map.json").is_file() {
-                        let pack=MapPack::load(&path).expect("Invalid local broadside-clone pack");
-                        assert!(pack.manifest.private_reference,"Reference pack marker missing");
-                        return Some(pack);
-                    }
-                }
-                None
-            }).as_ref()
+            static TOWER: OnceLock<MapPack> = OnceLock::new();
+            Some(TOWER.get_or_init(|| embedded_pack(tower_complex_asset, "Tower Complex")))
         }
         crate::terrain::MapId::Skybreak => {
             static SKY: OnceLock<MapPack> = OnceLock::new();
-            Some(SKY.get_or_init(|| {
-                let mut pack = MapPack::from_assets(Path::new(""), &|n,_|skybreak_asset(n).map(|b|b.to_vec()))
-                    .expect("Built-in Skybreak pack failed validation");
-                pack.skybreak = true; pack
-            }))
+            Some(SKY.get_or_init(|| embedded_pack(skybreak_asset, "Skybreak")))
         }
     }
 }
@@ -221,6 +231,11 @@ impl MapPack {
         }
         if manifest.flags.iter().chain(manifest.spawns.iter()).flatten().any(|v| !v.is_finite() || v.abs()>10000.0) {
             return Err("Invalid map positions".into());
+        }
+        if !manifest.spawn_points.is_empty() && (manifest.spawn_points.len()!=2
+            || manifest.spawn_points.iter().any(|team| team.is_empty() || team.len()>32
+                || team.iter().flatten().any(|v| !v.is_finite() || v.abs()>10000.0))) {
+            return Err("Invalid spawn points".into());
         }
         if manifest.ambient_emitters.len()>32 || manifest.ambient_emitters.iter().any(|e|
             e.iter().any(|v|!v.is_finite()) || !(0.0..=1.0).contains(&e[3]) || e[4]<=0.0 || e[5]<=e[4]) {
@@ -283,7 +298,7 @@ impl MapPack {
             holes[i]=true;
         }
         crate::equipment::validate(&manifest.entities)?;
-        Ok(Self {skybreak:false,manifest,root:root.into(),fingerprint:format!("{:x}",Sha256::digest(&json)),triangles,buckets,holes,heights})
+        Ok(Self {embedded:builtin_asset,manifest,root:root.into(),fingerprint:format!("{:x}",Sha256::digest(&json)),triangles,buckets,holes,heights})
     }
 
     pub fn hole(&self,x:f32,z:f32)->bool {
@@ -296,7 +311,7 @@ impl MapPack {
         // Renderer/audio reopen only listed fixed assets. Recheck the digest so
         // editing a pack after startup cannot split visible and physical worlds.
         if name.contains(['/', '\\']) || !self.manifest.files.contains_key(name) {return Err("Unknown map asset".into());}
-        if self.root.as_os_str().is_empty() {return (if self.skybreak {skybreak_asset(name)} else {builtin_asset(name)}).map(|b|b.to_vec());}
+        if self.root.as_os_str().is_empty() {return (self.embedded)(name).map(|b|b.to_vec());}
         let path=self.root.join(name);
         if name == "ambient.f32" && self.manifest.files[name] == format!("{:x}",Sha256::digest([])) {
             match path.try_exists() {

@@ -75,12 +75,47 @@ test. This is binary cover, not a reproduction of T2's partial-coverage routine.
 - Weapon reloads, projectile speeds, inheritance, grenade arming/bounce/fuse
   behavior, and smoke trails are unchanged. This is not a full T2 weapon port.
 - Main turret plasma remains 55 direct damage, 6 m splash, slight knockback.
+- Walls: the viewmodel muzzle sits up to ~1.5 m (more at wide FOV) ahead of the
+  eye. Player and bot shots now start no farther than the first surface on the
+  eye-to-muzzle segment, so a wall-hugging shot hits the wall on the shooter's
+  side instead of spawning outside (`muzzle1` compatibility, source only).
+- Turrets and sensors acquire a target only with a clear segment from the muzzle
+  (radius + 0.6 m out) to the target's chest, re-checked every tick, against
+  terrain, pillars and the map collision mesh; the shot is re-checked before
+  firing and bolts collide with the same geometry. Aligned open doorways are real
+  sight lines: fix those in map layout, not by blinding turrets.
 - No Ascend damage numbers are mixed into this light-armour conversion.
 
 Tuning lives in `crates/core/src/combat.rs`; the shared authoritative explosion
 path is in `sim.rs`. The gameplay compatibility marker includes `blast3:chat1`, so
 old clients/servers cannot silently play together with different damage rules.
 The directory protocol is unchanged. Live deployments require matching builds.
+
+## Turret targeting
+
+Every sensor and turret uses one rule, `equipment::acquire_target` in
+`crates/core/src/equipment.rs`. It picks the nearest living enemy within range
+whose chest (`CHEST_HEIGHT` 0.8 m) is visible from the barrel start, which is
+body radius + `MUZZLE_GAP` 0.6 m toward the target. Leading weapons aim at the
+constant-velocity intercept point. Before firing, the caller re-checks the line
+from the muzzle to the aim point. Line of sight is a caller-supplied closure;
+`step_equipment` passes terrain, pillars and the map collision mesh.
+
+Numbers live in one table, `equipment::profile(kind, weapon)`:
+
+| Profile | Range | With powered sensor | Speed | Life | Cooldown | Leads |
+| --- | --- | --- | --- | --- | --- | --- |
+| Sensor (detects only) | 260 m | 260 m | — | — | — | no |
+| Bullet turret | 80 m | 150 m | 420 m/s | 1 s | 0.22 s | no |
+| Plasma turret | 80 m | 150 m | 80 m/s | 3 s | 1.2 s | yes |
+
+The table reproduces the numbers the inline code used; a test compares the old
+rule with the shared one across Tower Complex, Skybreak and Raindance. Future
+player-placed turrets should call the same function with their own profile row.
+They will also need placed objects added to the line-of-sight closure, so a
+deployed shield or turret blocks sight, and placement validation (clearance, no
+placing through walls or with a line straight into an enemy room). Neither
+exists yet.
 
 ## Verification
 

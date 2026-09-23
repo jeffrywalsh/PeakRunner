@@ -1,0 +1,45 @@
+{
+  "id": "tower-complex",
+  "name": "Tower Complex",
+  "seed": 52091,
+  "bases": [
+    {
+      "team": 0,
+      "position": [
+        1024,
+        240,
+        820
+      ],
+      "yaw": 180
+    },
+    {
+      "team": 1,
+      "position": [
+        1024,
+        240,
+        1228
+      ],
+      "yaw": 0
+    }
+  ],
+  "pads": [
+    {
+      "team": 0,
+      "position": [
+        1119,
+        190,
+        904
+      ],
+      "yaw": 180
+    },
+    {
+      "team": 1,
+      "position": [
+        929,
+        190,
+        1144
+      ],
+      "yaw": 0
+    }
+  ]
+}

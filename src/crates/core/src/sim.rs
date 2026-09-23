@@ -57,7 +57,9 @@ pub const VM_ANCHOR_DISC: Vec3 = Vec3::new(0.40, -0.30, -0.70);
 pub const VM_ANCHOR_BOLT: Vec3 = Vec3::new(0.32, -0.28, -0.62);
 pub const VM_MUZZLE_DISC: Vec3 = Vec3::new(0.0, 0.075, -0.79);
 pub const VM_MUZZLE_BOLT: Vec3 = Vec3::new(0.0, 0.02, -0.59);
-const BOLT_SPEED: f32 = 420.0;
+pub(crate) const BOLT_SPEED: f32 = 420.0;
+/// Collision radius of player discs, bolts and grenades against map geometry.
+const SHOT_RADIUS: f32 = 0.12;
 pub fn weapon_reload(kind: u8) -> f32 {
     match kind { 0 => DISC_RELOAD, 1 => 0.075, _ => 0.85 }
 }
@@ -230,6 +232,7 @@ pub struct World {
     network_inputs: Vec<Input>,
     predicting: bool,
     rng: u32,
+    last_spawn: [usize; 2],
 }
 
 struct Rng(u32);
@@ -333,6 +336,7 @@ impl World {
             predicting: false,
             feed: Vec::new(),
             rng: 0xC0FFEE,
+            last_spawn: [usize::MAX; 2],
         }
     }
 
@@ -362,6 +366,24 @@ impl World {
 
     fn stand(&self, ember: bool) -> Vec3 {
         crate::terrain::spawn_on(self.map, ember)
+    }
+
+    /// Server-chosen spawn among a map's authored points: random, avoiding
+    /// the point this team used last and points with a live enemy nearby when
+    /// any other choice exists. `None` keeps the legacy single-spawn path.
+    fn pick_spawn(&mut self, team: Team) -> Option<(Vec3, f32)> {
+        let points = crate::terrain::spawn_points_on(self.map, team == Team::Ember);
+        if points.is_empty() { return None; }
+        let last = self.last_spawn[team.idx()];
+        let safe = |p: Vec3, players: &[Player]| players.iter()
+            .all(|o| !o.alive || o.team == team || (o.pos - p).length() > 30.0);
+        let mut pool: Vec<usize> = (0..points.len())
+            .filter(|&i| i != last && safe(points[i].0, &self.players)).collect();
+        if pool.is_empty() { pool = (0..points.len()).filter(|&i| i != last).collect(); }
+        if pool.is_empty() { pool = vec![0]; }
+        let pick = pool[((self.rng() * pool.len() as f32) as usize).min(pool.len() - 1)];
+        self.last_spawn[team.idx()] = pick;
+        Some(points[pick])
     }
 
     pub fn set_paused(&mut self, paused: bool) {
@@ -395,7 +417,9 @@ impl World {
 
         // Face the valley, not the rim. Ember sits at low Z.
         let yaw = if ember { std::f32::consts::PI } else { 0.0 };
-        self.players.push(make_player(team, false, self.stand(ember), yaw, BotRole::Offense));
+        self.last_spawn = [usize::MAX; 2];
+        let (pos, face) = self.pick_spawn(team).unwrap_or((self.stand(ember), yaw));
+        self.players.push(make_player(team, false, pos, face, BotRole::Offense));
         self.player_id = 0;
         self.fill_match(ember, team, yaw);
     }
@@ -420,7 +444,9 @@ impl World {
         self.message_t = 2.4;
         self.events = "start".into();
         let yaw = if ember { std::f32::consts::PI } else { 0.0 };
-        self.players.push(make_player(team, false, self.stand(ember), yaw, BotRole::Offense));
+        self.last_spawn = [usize::MAX; 2];
+        let (pos, face) = self.pick_spawn(team).unwrap_or((self.stand(ember), yaw));
+        self.players.push(make_player(team, false, pos, face, BotRole::Offense));
         self.player_id = 0;
         self.place_flags();
     }
@@ -430,8 +456,9 @@ impl World {
             let o = Vec3::new((i as f32 - 0.5) * 6.0, 0.0, 4.0);
             let mut p = self.stand(ember) + o;
             p.y = self.ground(p.x, p.z) + 1.2;
+            let (p, face) = self.pick_spawn(team).unwrap_or((p, yaw));
             let role = if i == 0 { BotRole::Offense } else { BotRole::Defense };
-            self.players.push(make_player(team, true, p, yaw, role));
+            self.players.push(make_player(team, true, p, face, role));
         }
         let other = team.other();
         let other_ember = other == Team::Ember;
@@ -440,8 +467,9 @@ impl World {
             let o = Vec3::new((i as f32 - 1.0) * 5.5, 0.0, 3.0);
             let mut p = self.stand(other_ember) + o;
             p.y = self.ground(p.x, p.z) + 1.2;
+            let (p, face) = self.pick_spawn(other).unwrap_or((p, oyaw));
             let role = if i == 2 { BotRole::Defense } else { BotRole::Offense };
-            self.players.push(make_player(other, true, p, oyaw, role));
+            self.players.push(make_player(other, true, p, face, role));
         }
 
         self.place_flags();
@@ -603,32 +631,21 @@ impl World {
                     equipment::service(d,s,p,input,dt);
                 }
             }
-            if !s.powered || !matches!(d.kind,Kind::Sensor|Kind::Turret) {continue;}
-            let range=if d.kind==Kind::Sensor {260.} else if sensed.contains(&d.team) {150.} else {80.};
-            let target=self.players.iter().filter(|p|p.alive && p.team.idx()!=d.team as usize)
-                .filter_map(|p| {
-                    let target=p.pos+Vec3::Y*0.8;let delta=target-d.pos();
-                    if delta.length()>range {return None;}
-                    let start=d.pos()+delta.normalize_or_zero()*(d.radius+0.6);
-                    obstacle_hit(self.map,&self.pillars,start,target,0.).is_none().then_some((delta.length(),target,p.vel))
-                }).min_by(|a,b|a.0.total_cmp(&b.0));
-            if let Some((_,target,velocity))=target {
-                let plasma=d.weapon==equipment::TurretWeapon::Plasma;
-                let speed=if plasma {80.} else {BOLT_SPEED};
-                let life=if plasma {3.} else {1.};
-                let aim_target=if d.kind==Kind::Turret && plasma {
-                    equipment::intercept_time(target-d.pos(),velocity,speed,d.radius+0.6,life)
-                        .map_or(target,|t|target+velocity*t)
-                } else {target};
-                s.contacts=1;s.aim=(aim_target-d.pos()).normalize_or_zero();
-                if d.kind==Kind::Turret && s.cooldown<=0. && self.discs.len()<256 {
-                    let muzzle=d.pos()+s.aim*(d.radius+0.6);
-                    if obstacle_hit(self.map,&self.pillars,muzzle,aim_target,0.).is_some() {continue;}
-                    self.discs.push(Disc {pos:muzzle,vel:s.aim*speed,
-                        team:if d.team==0 {Team::Ember} else {Team::Glacier},owner:MAX_PLAYERS,
-                        life,kind:if plasma {3} else {1},spin:i as f32});
-                    s.cooldown=if plasma {1.2} else {0.22};
-                }
+            if !s.powered {continue;}
+            let Some(profile)=equipment::profile(d.kind,d.weapon) else {continue};
+            let (map,pillars)=(self.map,&self.pillars);
+            let clear=|a:Vec3,b:Vec3|obstacle_hit(map,pillars,a,b,0.).is_none();
+            let candidates=self.players.iter().enumerate().filter(|(_,p)|p.alive)
+                .map(|(index,p)|equipment::Candidate {index,team:p.team.idx() as u8,pos:p.pos,vel:p.vel});
+            let Some(hit)=equipment::acquire_target(d.pos(),d.radius,d.team,&profile,
+                sensed.contains(&d.team),candidates,clear) else {continue};
+            s.contacts=1;s.aim=hit.aim;
+            if profile.fires && s.cooldown<=0. && self.discs.len()<256 {
+                if !clear(hit.muzzle,hit.aim_point) {continue;}
+                self.discs.push(Disc {pos:hit.muzzle,vel:hit.aim*profile.speed,
+                    team:if d.team==0 {Team::Ember} else {Team::Glacier},owner:MAX_PLAYERS,
+                    life:profile.life,kind:profile.projectile,spin:i as f32});
+                s.cooldown=profile.cooldown;
             }
         }
         equipment::power(defs,&mut self.equipment);
@@ -1024,6 +1041,12 @@ impl World {
         let eye = p.pos + Vec3::Y * EYE;
         let spd = Vec3::new(p.vel.x, 0.0, p.vel.z).length();
         let origin = muzzle_origin(eye, dir, kind, camera_fov(spd));
+        // The viewmodel muzzle sits up to ~2 m ahead of the eye at wide FOV,
+        // farther than a wall is thick: never spawn a shot past a surface.
+        let origin = match obstacle_hit(self.map, &self.pillars, eye, origin, SHOT_RADIUS) {
+            Some(t) => eye.lerp(origin, (t - 0.05 / eye.distance(origin).max(0.05)).max(0.0)),
+            None => origin,
+        };
         // Leave the muzzle, but steer onto the crosshair so a close shot still hits.
         let aim = eye + dir * 80.0;
         let shot = (aim - origin).normalize_or_zero();
@@ -1097,7 +1120,7 @@ impl World {
                 let grav = if d.kind == 2 { 1.0 } else { 0.0 };
                 d.vel.y -= GRAVITY * grav * sdt;
                 let next = d.pos + d.vel * sdt;
-                let mut hit = obstacle_hit(map, &self.pillars, d.pos, next, if d.kind==3 {0.45} else {0.12});
+                let mut hit = obstacle_hit(map, &self.pillars, d.pos, next, if d.kind==3 {0.45} else {SHOT_RADIUS});
                 // Keep the actual boundary impact height, rather than moving
                 // an airborne explosion down onto the terrain.
                 for (a, b) in [(d.pos.x, next.x), (d.pos.z, next.z)] {
@@ -1323,10 +1346,16 @@ impl World {
 
     fn respawn(&mut self, i: usize) {
         let ember = self.players[i].team == Team::Ember;
-        let mut pos = self.stand(ember);
-        pos.x += (self.rng() - 0.5) * 8.0;
-        pos.z += (self.rng() - 0.5) * 6.0;
-        pos.y = crate::terrain::support_on(self.map,pos).0 + 1.2;
+        let (pos, yaw) = match self.pick_spawn(self.players[i].team) {
+            Some(spawn) => spawn,
+            None => {
+                let mut pos = self.stand(ember);
+                pos.x += (self.rng() - 0.5) * 8.0;
+                pos.z += (self.rng() - 0.5) * 6.0;
+                pos.y = crate::terrain::support_on(self.map,pos).0 + 1.2;
+                (pos, if ember { std::f32::consts::PI } else { 0.0 })
+            }
+        };
         let p = &mut self.players[i];
         p.pos = pos;
         p.vel = Vec3::ZERO;
@@ -1334,7 +1363,7 @@ impl World {
         p.energy = ENERGY_MAX;
         p.alive = true;
         p.carrying = None;
-        p.yaw = if ember { std::f32::consts::PI } else { 0.0 };
+        p.yaw = yaw;
         p.pitch = 0.0;
         p.cooldown = 0.4;
         p.skiing = false;
@@ -3059,5 +3088,328 @@ fn make_player(team: Team, bot: bool, pos: Vec3, yaw: f32, role: BotRole) -> Pla
         bot_goal: pos,
         bot_think: 0.0,
         coyote: 0.0,
+    }
+}
+
+#[cfg(test)]
+mod spawn_point_tests {
+    use super::*;
+
+    #[test]
+    fn tower_spawn_points_land_on_the_floor_and_walking_brakes() {
+        // Regression: a spawn centre only 0.2 m above a 1 m slab started the
+        // support ray inside the slab, so the player never counted as grounded
+        // and coasted without ground braking (the "slick" spawn).
+        let map = MapId::BroadsideClone;
+        let mut world = World::new();
+        world.set_map(map);
+        world.start_match(true);
+        world.players.truncate(1);
+        world.player_id = 0;
+        for ember in [true, false] {
+            let points = crate::terrain::spawn_points_on(map, ember);
+            assert!(points.len() >= 6);
+            for (pos, yaw) in points {
+                let floor = crate::terrain::support_on(map, pos).0;
+                assert!((pos.y - floor - 1.2).abs() < 0.01, "spawn {pos:?} support {floor}");
+                let p = &mut world.players[0];
+                p.pos = pos; p.vel = Vec3::ZERO; p.yaw = yaw; p.alive = true; p.health = 100.0;
+                p.on_ground = true; p.skiing = false; p.jetting = false;
+                world.input = Input::default();
+                for _ in 0..30 { world.step_players(STEP); }
+                let p = &world.players[0];
+                assert!(p.on_ground, "not grounded at {pos:?}");
+                assert!((p.pos.y - floor - PLAYER_RADIUS).abs() < 0.05, "sunk or floating at {pos:?}: {}", p.pos.y);
+                // Walk forward for half a second, release, and stop like flat ground.
+                let start = p.pos;
+                world.input.move_z = 1.0;
+                for _ in 0..30 { world.step_players(STEP); }
+                world.input.move_z = 0.0;
+                let released = world.players[0].pos;
+                for _ in 0..90 { world.step_players(STEP); }
+                let p = &world.players[0];
+                let coast = Vec2::new(p.pos.x - released.x, p.pos.z - released.z).length();
+                assert!(p.on_ground && coast < 2.2, "slides {coast} m after release from {start:?}");
+                assert!(Vec2::new(p.vel.x, p.vel.z).length() < 0.05);
+            }
+        }
+    }
+
+    #[test]
+    fn server_respawn_picks_varied_points_for_the_right_team() {
+        let map = MapId::BroadsideClone;
+        let mut world = World::new();
+        world.set_map(map);
+        world.start_match(true);
+        for team in [Team::Ember, Team::Glacier] {
+            let points = crate::terrain::spawn_points_on(map, team == Team::Ember);
+            let i = world.players.iter().position(|p| p.team == team).unwrap();
+            let mut used = std::collections::BTreeSet::new();
+            let mut last = None;
+            for _ in 0..60 {
+                world.respawn(i);
+                let p = &world.players[i];
+                let k = points.iter().position(|(pos, _)| *pos == p.pos).expect("respawned on an authored point");
+                assert_eq!(p.yaw, points[k].1);
+                assert_ne!(Some(k), last, "same point twice in a row");
+                last = Some(k);
+                used.insert(k);
+            }
+            assert!(used.len() >= points.len() - 1, "{team:?} used only {used:?}");
+        }
+        // Legacy single-spawn maps keep their old path (no spawn_points).
+        assert!(crate::terrain::spawn_points_on(MapId::Skybreak, true).is_empty());
+        assert!(crate::terrain::spawn_points_on(MapId::Raindance, false).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod line_of_sight_tests {
+    use super::*;
+    use crate::equipment::{self,Kind};
+
+    fn world(map:MapId)->World {
+        let mut w=World::new();w.set_map(map);w.start_rift(true);w.players.truncate(1);
+        w.players[0].team=Team::Glacier;w.players[0].alive=true;w.players[0].vel=Vec3::ZERO;w
+    }
+    fn spawns(map:MapId)->Vec<Vec3> {
+        let m=&crate::map_pack::on(map).unwrap().manifest;
+        let mut v:Vec<Vec3>=m.spawn_points.iter().flatten().map(|p|Vec3::new(p[0],p[1],p[2])).collect();
+        v.extend(m.spawns.iter().map(|p|Vec3::from_array(*p)));v
+    }
+    fn fired_by(w:&World,turret:usize)->bool {w.discs.iter().any(|d|d.owner==MAX_PLAYERS && d.spin==turret as f32)}
+
+    /// Every Ember turret, against a Glacier player at each Ember spawn it
+    /// cannot see: no track, no shot; a bolt aimed straight at the hidden
+    /// player dies in the wall and does no damage.
+    #[test]
+    fn tower_turrets_do_not_engage_or_hit_players_behind_walls() {
+        let map=MapId::BroadsideClone;
+        let pack=crate::map_pack::on(map).unwrap();
+        let defs=equipment::definitions(map);
+        let mut hidden=0;
+        for (i,d) in defs.iter().enumerate().filter(|(_,d)|d.kind==Kind::Turret && d.team==0) {
+            for spot in spawns(map) {
+                let target=spot+Vec3::Y*0.8;let delta=target-d.pos();
+                if delta.length()>80. {continue;}
+                let muzzle=d.pos()+delta.normalize()*(d.radius+0.6);
+                let Some((t,_))=pack.sweep(muzzle,target,0.) else {continue};
+                assert!(t<0.99);
+                hidden+=1;
+                let mut w=world(map);w.players[0].pos=spot;
+                w.step_equipment(STEP);
+                assert_eq!(w.equipment[i].contacts,0,"{} tracked a player behind a wall at {spot}",d.id);
+                assert!(!fired_by(&w,i),"{} fired at a player behind a wall at {spot}",d.id);
+                w.discs.push(Disc {pos:muzzle,vel:delta.normalize()*BOLT_SPEED,team:Team::Ember,owner:MAX_PLAYERS,life:1.,kind:1,spin:i as f32});
+                for _ in 0..30 {w.step_discs(STEP);}
+                assert!(w.discs.is_empty());
+                assert_eq!(w.players[0].health,100.,"bolt from {} passed a wall to {spot}",d.id);
+            }
+        }
+        assert!(hidden>=4,"too few hidden spawn cases ({hidden}) to mean anything");
+    }
+
+    /// Pod turrets must not see into the rooms they guard. Standable points in
+    /// the tower (all levels), the rear tunnels and both rear rooms are sampled
+    /// on a 1 m grid; none may have a clear line from a pod turret. Tolerance:
+    /// the 2 m entry vestibule between the tower's front wall and its baffles
+    /// (local z < -9.2 on Level 1), which is outside the rooms by design.
+    #[test]
+    fn pod_turrets_cannot_see_into_tower_rooms() {
+        let map=MapId::BroadsideClone;
+        let pack=crate::map_pack::on(map).unwrap();
+        let info=crate::terrain::info(map);
+        let defs=equipment::definitions(map);
+        // Local base frame: red faces +z (yaw 180), blue faces -z (yaw 0).
+        let to_world=|team:u8,lx:f32,y:f32,lz:f32| if team==0 {
+            Vec3::new(info.ember.x-lx,info.ember.y+y,info.ember.z-lz)
+        } else {Vec3::new(info.glacier.x+lx,info.glacier.y+y,info.glacier.z+lz)};
+        // (x0,x1,z0,z1,floor levels to probe from)
+        let rooms:[(f32,f32,f32,f32,&[f32]);5]=[
+            (-11.5,11.5,-11.5,11.5,&[0.,7.,14.]),   // tower L1-L3
+            (-10.,-6.,12.,26.,&[0.]),(6.,10.,12.,26.,&[0.]),   // tunnels
+            (-12.5,-3.5,26.5,35.5,&[0.]),(3.5,12.5,26.5,35.5,&[0.])];   // rear rooms
+        let (mut sampled,mut seen)=(0,Vec::new());
+        for (i,d) in defs.iter().enumerate().filter(|(_,d)|d.kind==Kind::Turret) {
+            let c=d.pos();
+            for (r,&(x0,x1,z0,z1,levels)) in rooms.iter().enumerate() {
+                let mut lx=x0; while lx<=x1 { let mut lz=z0; while lz<=z1 {
+                    for &level in levels {
+                        let probe=to_world(d.team,lx,level+5.5,lz);
+                        let Some((fy,_))=pack.floor(probe) else {continue};
+                        if fy<probe.y-6.9 {continue;}
+                        if levels.len()==3 && level==0. && lz< -9.2 {continue;}   // vestibule
+                        let pos=Vec3::new(probe.x,fy+1.2,probe.z);
+                        if pack.body_sweep(pos,pos+Vec3::Y*0.01).is_some() {continue;}
+                        let target=pos+Vec3::Y*0.8;let delta=target-c;
+                        if delta.length()>150. {continue;}
+                        sampled+=1;
+                        let start=c+delta.normalize_or_zero()*(d.radius+0.6);
+                        if obstacle_hit(map,&[],start,target,0.).is_none() {seen.push((r,i,lx,fy-info.ember.y,lz));}
+                    }
+                lz+=1.;} lx+=1.;}
+            }
+        }
+        assert!(sampled>2000,"too few interior samples ({sampled})");
+        let by_room:Vec<usize>=(0..5).map(|r|seen.iter().filter(|s|s.0==r).count()).collect();
+        assert!(seen.is_empty(),"{} interior points visible to pod turrets (tower, left tunnel, right tunnel, generator, ship: {by_room:?}), e.g. {:?}",seen.len(),&seen[..seen.len().min(12)]);
+    }
+
+    /// The entry baffles must not block the routes they sit on: each front
+    /// opening leads through the vestibule and a baffle gap into the room, and
+    /// the moved L1->L2 ramp foot is reachable from there.
+    #[test]
+    fn tower_entries_route_around_the_baffles() {
+        let map=MapId::BroadsideClone;
+        let pack=crate::map_pack::on(map).unwrap();
+        let info=crate::terrain::info(map);
+        for (base,s) in [(info.ember,-1.),(info.glacier,1.)] {
+            let at=|lx:f32,lz:f32| {
+                let p=Vec3::new(base.x+s*lx,base.y+3.,base.z+s*lz);
+                let (fy,_)=pack.floor(p).expect("floor under route point");
+                Vec3::new(p.x,fy+1.2,p.z)
+            };
+            // door -> vestibule -> gap -> room; for the left door, on to the ramp.
+            let routes:[&[(f32,f32)];3]=[
+                &[(-9.,-14.),(-9.,-10.6),(-5.1,-10.6),(-5.1,-7.8),(-9.,-7.8),(-9.,-2.)],
+                &[(0.,-11.2),(0.,-10.6),(5.1,-10.6),(5.1,-7.5),(3.,-6.)],
+                &[(9.,-14.),(9.,-10.6),(5.1,-10.6),(5.1,-7.5),(8.,-6.)]];
+            for lx in [-9.,0.,9.] {   // straight on from each opening hits a baffle
+                let (a,b)=(at(lx,-10.6),at(lx,-7.8));
+                assert!(pack.body_sweep(a+Vec3::Y*0.3,b+Vec3::Y*0.3).is_some(),"no baffle behind the opening at local x {lx}");
+            }
+            for route in routes {
+                for w in route.windows(2) {
+                    let (a,b)=(at(w[0].0,w[0].1),at(w[1].0,w[1].1));
+                    // Rise with the ramp in short steps, as movement would.
+                    let steps=((b-a).length()/0.25).ceil() as usize;
+                    for k in 0..steps {
+                        let p0=a.lerp(b,k as f32/steps as f32);let p1=a.lerp(b,(k+1) as f32/steps as f32);
+                        let lift=Vec3::Y*0.3;
+                        assert!(pack.body_sweep(p0+lift,p1+lift).is_none(),"route blocked between {p0} and {p1} ({:?} -> {:?})",w[0],w[1]);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tower_turrets_still_engage_a_player_on_their_bridge() {
+        let map=MapId::BroadsideClone;
+        let pack=crate::map_pack::on(map).unwrap();
+        let defs=equipment::definitions(map);
+        let flag=Vec3::from_array(pack.manifest.flags[0]);
+        for (i,d) in defs.iter().enumerate().filter(|(_,d)|d.kind==Kind::Turret && d.team==0) {
+            // Halfway along the bridge toward the tower, standing on its deck.
+            let probe=d.pos()+Vec3::new(0.,3.,(flag.z-d.pos().z).signum()*9.);
+            let (floor,_)=pack.floor(probe).expect("bridge deck below the probe");
+            let mut w=world(map);w.players[0].pos=Vec3::new(probe.x,floor+1.2,probe.z);
+            w.step_equipment(STEP);
+            assert_eq!(w.equipment[i].contacts,1,"{} ignored a player on its bridge",d.id);
+            assert!(fired_by(&w,i));
+        }
+    }
+
+    /// The viewmodel muzzle reaches ~1.5 m ahead of the eye, past a thin
+    /// wall. A shot must start on the shooter's side and stop there.
+    #[test]
+    fn point_blank_shots_never_spawn_past_a_wall() {
+        for map in [MapId::BroadsideClone,MapId::Skybreak] {
+            let pack=crate::map_pack::on(map).unwrap();
+            let mut cases=0;
+            for spot in spawns(map) {
+                for step in 0..72 {
+                    let yaw=step as f32*std::f32::consts::TAU/72.;
+                    let fwd=look_dir(yaw,0.);
+                    // Walk the real body into the wall, as movement would.
+                    let Some((t,_))=pack.body_sweep(spot,spot+fwd*6.) else {continue};
+                    let stand=spot+fwd*(t*6.-0.01);
+                    let eye=stand+Vec3::Y*EYE;
+                    let raw=muzzle_origin(eye,fwd,0,camera_fov(0.));
+                    if obstacle_hit(map,&[],eye,raw,SHOT_RADIUS).is_none() {continue;}
+                    let mut w=world(map);w.players[0].pos=stand;w.players[0].yaw=yaw;w.players[0].pitch=0.;w.players[0].weapon=0;
+                    w.shoot(0);
+                    let disc=w.discs.last().unwrap().pos;
+                    assert!(obstacle_hit(map,&[],eye,disc,0.).is_none(),"{map:?}: shot spawned past a wall at {stand} yaw {yaw}: eye {eye} raw {raw} disc {disc} pos {} rawhit {:?} dischit {:?} pillars {}",w.players[0].pos,obstacle_hit(map,&w.pillars,eye,raw,SHOT_RADIUS),obstacle_hit(map,&[],eye,disc,0.),w.pillars.len());
+                    cases+=1;
+                }
+                if cases>=6 {break;}
+            }
+            assert!(cases>0,"{map:?}: no wall-hugging case found; the test did not exercise the muzzle clamp");
+        }
+    }
+}
+
+#[cfg(test)]
+mod targeting_equivalence {
+    use super::*;
+    use crate::equipment::{self,Kind,Definition};
+
+    /// Verbatim copy of the inline targeting that `step_equipment` used before
+    /// `equipment::acquire_target`: (index, aim target, aim, fire line clear).
+    fn legacy(map:MapId, d:&Definition, sensed:bool, players:&[(u8,Vec3,Vec3)])->Option<(usize,Vec3,Vec3,bool)> {
+        let range=if d.kind==Kind::Sensor {260.} else if sensed {150.} else {80.};
+        let target=players.iter().enumerate().filter(|(_,p)|p.0 as usize!=d.team as usize)
+            .filter_map(|(i,p)| {
+                let target=p.1+Vec3::Y*0.8;let delta=target-d.pos();
+                if delta.length()>range {return None;}
+                let start=d.pos()+delta.normalize_or_zero()*(d.radius+0.6);
+                obstacle_hit(map,&[],start,target,0.).is_none().then_some((delta.length(),i,target,p.2))
+            }).min_by(|a,b|a.0.total_cmp(&b.0));
+        let (_,i,target,velocity)=target?;
+        let plasma=d.weapon==equipment::TurretWeapon::Plasma;
+        let speed=if plasma {80.} else {BOLT_SPEED};
+        let life=if plasma {3.} else {1.};
+        let aim_target=if d.kind==Kind::Turret && plasma {
+            equipment::intercept_time(target-d.pos(),velocity,speed,d.radius+0.6,life)
+                .map_or(target,|t|target+velocity*t)
+        } else {target};
+        let aim=(aim_target-d.pos()).normalize_or_zero();
+        let muzzle=d.pos()+aim*(d.radius+0.6);
+        Some((i,aim_target,aim,obstacle_hit(map,&[],muzzle,aim_target,0.).is_none()))
+    }
+
+    fn shared(map:MapId, d:&Definition, sensed:bool, players:&[(u8,Vec3,Vec3)])->Option<(usize,Vec3,Vec3,bool)> {
+        let profile=equipment::profile(d.kind,d.weapon)?;
+        let clear=|a:Vec3,b:Vec3|obstacle_hit(map,&[],a,b,0.).is_none();
+        let candidates=players.iter().enumerate()
+            .map(|(index,p)|equipment::Candidate {index,team:p.0,pos:p.1,vel:p.2});
+        let hit=equipment::acquire_target(d.pos(),d.radius,d.team,&profile,sensed,candidates,clear)?;
+        Some((hit.index,hit.aim_point,hit.aim,clear(hit.muzzle,hit.aim_point)))
+    }
+
+    #[test]
+    fn shared_targeting_matches_the_previous_inline_rule() {
+        let mut seed=0x9e37_79b9u32;
+        let mut rnd=move || {seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;(seed as f32/u32::MAX as f32)*2.-1.};
+        for map in [MapId::BroadsideClone,MapId::Skybreak,MapId::Raindance] {
+            let defs=equipment::definitions(map);
+            let (mut scenarios,mut acquired,mut leading,mut sensed_only)=(0,0,0,0);
+            for d in defs.iter().filter(|d|matches!(d.kind,Kind::Sensor|Kind::Turret)) {
+                for _ in 0..400 {
+                    let enemy=1-d.team.min(1);
+                    let mut players=Vec::new();
+                    for k in 0..3 {
+                        let r=[40.,120.,280.][k%3]*rnd().abs();
+                        let pos=d.pos()+Vec3::new(rnd()*r,rnd()*30.,rnd()*r);
+                        let vel=Vec3::new(rnd()*40.,rnd()*10.,rnd()*40.);
+                        players.push((if k==1 {d.team} else {enemy},pos,vel));
+                    }
+                    for sensed in [false,true] {
+                        let old=legacy(map,d,sensed,&players);
+                        let new=shared(map,d,sensed,&players);
+                        assert_eq!(old,new,"{map:?} {} sensed={sensed} players={players:?}",d.id);
+                        scenarios+=1;
+                        if let Some(o)=old {
+                            acquired+=1;
+                            if o.1!=players[o.0].1+Vec3::Y*0.8 {leading+=1;}
+                            if sensed && legacy(map,d,false,&players).is_none() {sensed_only+=1;}
+                        }
+                    }
+                }
+            }
+            assert!(acquired>0 && sensed_only>0,"{map:?}: {scenarios} scenarios, {acquired} acquired, {sensed_only} sensed-only");
+            if matches!(map,MapId::Skybreak|MapId::Raindance) {assert!(leading>0,"{map:?}: no plasma intercept case exercised");}
+        }
     }
 }

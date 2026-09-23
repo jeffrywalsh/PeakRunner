@@ -2,8 +2,11 @@
 
 The six-map rotation is published. See
 [release record](release-20260921-1.md) and the six-map section in AGENTS.md.
-Broadside, Stonehenge, Snowblind, and Desert of Death are reference layouts
-to rebuild. Current source loads them when their packs are installed.
+Stonehenge, Snowblind, and Desert of Death are reference layouts to rebuild.
+Current source loads them when their packs are installed. The Broadside Clone
+slot (key `broadside-clone`) is now the original, embedded Tower Complex in
+source; the published release still runs the old clone. See
+[tower-complex.md](tower-complex.md).
 Collection-wide admission and signed delivery are verified for those six maps;
 the general installed-pack registry and selected-map-only admission remain open.
 

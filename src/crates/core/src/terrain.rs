@@ -150,7 +150,7 @@ impl MapId {
         [Self::Valley, Self::Raindance, Self::Skybreak, Self::BroadsideClone, Self::StonehengeClone, Self::SnowblindClone, Self::DesertOfDeathClone].into_iter().find(|id| id.key().eq_ignore_ascii_case(key))
     }
     pub fn is_private_clone(self) -> bool {
-        matches!(self, Self::BroadsideClone | Self::StonehengeClone | Self::SnowblindClone | Self::DesertOfDeathClone)
+        matches!(self, Self::StonehengeClone | Self::SnowblindClone | Self::DesertOfDeathClone)
     }
 }
 
@@ -207,9 +207,10 @@ fn all_maps() -> [MapInfo; 7] {
             glacier: Vec3::new(800.0, 0.0, 1400.0),
             res: RAIN_N,
         },
-        MapInfo { id: MapId::BroadsideClone, name: "broadside-clone",
-            note: "Reference fortress layout. Geometry starts here.", size:2295.,
-            ember:Vec3::ZERO, glacier:Vec3::ZERO, res:RAIN_N },
+        // Original map in the former Broadside Clone slot; the key stays for rotations.
+        MapInfo { id: MapId::BroadsideClone, name: "Tower Complex",
+            note: "Floating towers over rolling hills. Turret pods, a central shaft and flags on level two.",
+            size: RAIN_SIZE, ember: Vec3::new(1024.,240.,820.), glacier: Vec3::new(1024.,240.,1228.), res: RAIN_N },
         MapInfo { id: MapId::StonehengeClone, name: "Stonehenge Clone",
             note: "Reference stone-ring layout. Geometry starts here.", size:RAIN_SIZE,
             ember:Vec3::ZERO, glacier:Vec3::ZERO, res:RAIN_N },
@@ -226,10 +227,7 @@ fn all_maps() -> [MapInfo; 7] {
 }
 
 pub fn maps() -> Vec<MapInfo> {
-    let mut maps=vec![info(MapId::Raindance),info(MapId::Skybreak)];
-    if crate::map_pack::on(MapId::BroadsideClone).is_some() {
-        maps.push(info(MapId::BroadsideClone));
-    }
+    let mut maps=vec![info(MapId::Raindance),info(MapId::Skybreak),info(MapId::BroadsideClone)];
     if crate::map_pack::on(MapId::StonehengeClone).is_some() {
         maps.push(info(MapId::StonehengeClone));
     }
@@ -336,6 +334,14 @@ pub fn normal_on(id: MapId, x: f32, z: f32) -> Vec3 {
     let hd = height_on(id, x, z - e);
     let hu = height_on(id, x, z + e);
     Vec3::new(hl - hr, 2.0 * e, hd - hu).normalize_or_zero()
+}
+
+/// Authored spawn points for a team, `(centre, world yaw)`. Empty when the
+/// pack only has the legacy single spawn.
+pub fn spawn_points_on(id: MapId, ember: bool) -> Vec<(Vec3, f32)> {
+    crate::map_pack::on(id).and_then(|pack| pack.manifest.spawn_points.get(usize::from(!ember)))
+        .map(|team| team.iter().map(|p| (Vec3::new(p[0], p[1], p[2]), p[3])).collect())
+        .unwrap_or_default()
 }
 
 pub fn spawn_on(id: MapId, ember: bool) -> Vec3 {
@@ -478,6 +484,45 @@ mod map_tests {
             assert!(pack.floor(flag).is_some(), "flag has solid deck");
         }
         assert_ne!(pack.fingerprint, crate::map_pack::active().unwrap().fingerprint);
+    }
+
+    #[test]
+    fn tower_complex_is_embedded_with_floating_decks_and_clear_spawns() {
+        let id = MapId::BroadsideClone;
+        assert!(!id.is_private_clone());
+        assert!(maps().iter().any(|m| m.id == id && m.name == "Tower Complex"));
+        let pack = crate::map_pack::on(id).expect("embedded Tower Complex");
+        assert!(!pack.manifest.private_reference);
+        assert_eq!(pack.manifest.name, "Tower Complex");
+        assert!(pack.asset("textures.rgba").unwrap().len() > 1_000_000);
+        for team in [true, false] {
+            let spawn = spawn_on(id, team);
+            let floor = support_on(id, spawn).0;
+            assert!((spawn.y-floor-1.2).abs() < 0.05, "spawn support {floor} {spawn:?}");
+            assert!(pack.sweep(spawn, spawn+Vec3::Y*2., PLAYER_RADIUS).is_none());
+            let flag = Vec3::from_array(pack.manifest.flags[usize::from(!team)]);
+            // Broadside-like flow: flags roughly 60-120 m over rolling ground.
+            let air=flag.y-height_on(id,flag.x,flag.z);
+            assert!((60.0..120.0).contains(&air), "flag {air} m over terrain");
+            assert!(pack.floor(flag).is_some(), "flag has solid deck");
+            assert!(pack.sweep(flag+Vec3::Y,flag+Vec3::Y*80.,0.).is_some(), "flag has solid roof");
+        }
+        for (team, points) in pack.manifest.spawn_points.iter().enumerate() {
+            let flag = Vec3::from_array(pack.manifest.flags[team]);
+            assert!(points.len() >= 6);
+            for p in points {
+                let spawn = Vec3::new(p[0], p[1], p[2]);
+                assert!((spawn - flag).length() < 60.0, "team {team} spawn {spawn:?} is not at its own base");
+                let floor = pack.floor(spawn).expect("spawn has a deck").0;
+                assert!((spawn.y - floor - 1.2).abs() < 0.01);
+                assert!(pack.body_sweep(spawn, spawn + Vec3::Y*0.2).is_none(), "spawn {spawn:?} head clearance");
+                assert!([Vec3::X,-Vec3::X,Vec3::Z,-Vec3::Z].iter().all(|d| pack.body_sweep(spawn, spawn + *d*0.5).is_none()),
+                    "spawn {spawn:?} boxed in");
+            }
+        }
+        for other in [MapId::Raindance, MapId::Skybreak] {
+            assert_ne!(pack.fingerprint, crate::map_pack::on(other).unwrap().fingerprint);
+        }
     }
 
     #[test]
