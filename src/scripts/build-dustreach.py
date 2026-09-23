@@ -171,9 +171,8 @@ def build(output, bake=True):
     heights = bytearray(struct.pack('<65536H', *[round(float(v)*32) for v in grid.ravel()]))
     weights = dustreach_terrain.weights(grid).tobytes()
     if sys.byteorder != 'little': mesh.vertices.byteswap(); mesh.collision.byteswap()
-    shared = ROOT/'assets/maps/raindance'
-    old = json.loads((shared/'map.json').read_text())
-    textures = bytearray((shared/'textures.rgba').read_bytes())
+    shared = kit.base_pack(); old = shared['manifest']
+    textures = bytearray(shared['textures'])
     count = old['texture_count']
     pack_writer.paint_materials(textures, count, list(dustreach_materials.MATERIALS),
                                 dustreach_materials.texture, definition['seed'], kit)

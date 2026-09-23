@@ -21,9 +21,14 @@ class OriginalMapTests(unittest.TestCase):
 
     def test_definition_and_compiled_hashes(self):
         kit.validate(self.definition)
-        digest=hashlib.sha256(json.dumps(self.definition,sort_keys=True).encode()).hexdigest()
-        self.assertEqual(digest,self.pack['definition_sha256'])
-        self.assertEqual(hashlib.sha256((ROOT/'scripts/build-original-map.py').read_bytes()).hexdigest(),self.pack['compiler_sha256'])
+        # The shipped pack comes from build-raindance.py (the kit layout plus
+        # the cleaned base); it records its definition and module sources.
+        sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
+        self.assertEqual(sha(ROOT/'maps/raindance.json'),self.pack['definition_sha256'])
+        for key,path in [('base_asset_sha256','scripts/assets/raindance_base.py'),
+                         ('structures_asset_sha256','scripts/assets/raindance_structures.py'),
+                         ('material_source_sha256','scripts/assets/raindance_materials.py')]:
+            self.assertEqual(sha(ROOT/path),self.pack[key],key)
         for name,digest in self.pack['files'].items():
             self.assertEqual(hashlib.sha256((self.root/name).read_bytes()).hexdigest(),digest,name)
 

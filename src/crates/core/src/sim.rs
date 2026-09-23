@@ -3100,7 +3100,7 @@ mod spawn_point_tests {
         // Regression: a spawn centre only 0.2 m above a 1 m slab started the
         // support ray inside the slab, so the player never counted as grounded
         // and coasted without ground braking (the "slick" spawn).
-        for map in [MapId::BroadsideClone, MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone] {
+        for map in [MapId::Raindance, MapId::BroadsideClone, MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone] {
         let mut world = World::new();
         world.set_map(map);
         world.start_match(true);
@@ -3144,7 +3144,7 @@ mod spawn_point_tests {
 
     #[test]
     fn server_respawn_picks_varied_points_for_the_right_team() {
-        let map = MapId::BroadsideClone;
+        for map in [MapId::BroadsideClone, MapId::Raindance] {
         let mut world = World::new();
         world.set_map(map);
         world.start_match(true);
@@ -3162,10 +3162,11 @@ mod spawn_point_tests {
                 last = Some(k);
                 used.insert(k);
             }
-            assert!(used.len() >= points.len() - 1, "{team:?} used only {used:?}");
+            assert!(used.len() >= points.len() - 1, "{map:?} {team:?} used only {used:?}");
         }
-        // Legacy single-spawn maps keep their old path (no spawn_points).
-        assert!(crate::terrain::spawn_points_on(MapId::Raindance, false).is_empty());
+        }
+        // Maps without spawn_points keep the legacy single-spawn path.
+        assert!(crate::terrain::spawn_points_on(MapId::Valley, false).is_empty());
     }
 }
 
@@ -3316,6 +3317,40 @@ mod line_of_sight_tests {
         let by_room:Vec<usize>=(0..5).map(|r|seen.iter().filter(|s|s.1==r).count()).collect();
         assert!(seen.is_empty(),"{} interior points visible to turrets (bunker, trench, hut, tower floor, landing: {by_room:?}), e.g. {:?}",
             seen.len(),&seen[..seen.len().min(8)]);
+    }
+
+    /// Same rule for Raindance's basement halls. The roof turrets sit beside
+    /// the ramp openings and the atrium; the roof must still hide every hall
+    /// floor point from them (and from the lookout towers).
+    #[test]
+    fn raindance_turrets_cannot_see_into_the_halls() {
+        let map=MapId::Raindance;
+        let pack=crate::map_pack::on(map).unwrap();
+        let defs=equipment::definitions(map);
+        let to_world=|team:u8,lx:f32,y:f32,lz:f32| if team==0 {
+            Vec3::new(1160.-lx,112.+y,480.-lz)} else {Vec3::new(800.+lx,112.+y,1400.+lz)};
+        let (mut sampled,mut seen)=(0,Vec::new());
+        for d in defs.iter().filter(|d|matches!(d.kind,Kind::Turret)) {
+            let profile=equipment::profile(d.kind,d.weapon).unwrap();
+            for team in [0u8,1] {
+                let mut lx=-29.; while lx<=29. { let mut lz=-25.; while lz<=25. {
+                    let probe=to_world(team,lx,-8.5,lz);
+                    if let Some((fy,_))=pack.floor(probe) {
+                        let pos=Vec3::new(probe.x,fy+1.2,probe.z);
+                        if (fy-102.).abs()<0.05 && pack.body_sweep(pos,pos+Vec3::Y*0.01).is_none() {
+                            sampled+=1;
+                            let enemy=equipment::Candidate {index:0,team:1-d.team,pos,vel:Vec3::ZERO};
+                            if let Some(a)=equipment::acquire_target(d.pos(),d.radius,d.team,&profile,true,[enemy],
+                                |a,b|obstacle_hit(map,&[],a,b,0.).is_none()) {
+                                seen.push((d.id.clone(),team,lx,lz,a.aim_point));
+                            }
+                        }
+                    }
+                lz+=1.5;} lx+=1.5;}
+            }
+        }
+        assert!(sampled>3000,"too few hall samples ({sampled})");
+        assert!(seen.is_empty(),"{} hall points visible to turrets, e.g. {:?}",seen.len(),&seen[..seen.len().min(8)]);
     }
 
     /// Same rule for Frostline and Dustreach, over the rooms their Python

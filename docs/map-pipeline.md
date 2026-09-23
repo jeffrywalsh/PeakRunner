@@ -48,9 +48,10 @@ without a review, take the concept's recommended answers and say which.
 Files, by analogy with `tower-complex` and `cairnhold`:
 
 - `maps/<id>.json`: id, name, seed, bases (team, position, yaw).
-- `scripts/build-<id>.py`: imports `build-original-map.py` as `kit`, uses
-  `pack_writer` for materials, the lightmap bake and the pack. Refuses to
-  overwrite; `--no-bake` skips baking.
+- `scripts/build-<id>.py`: imports `build-original-map.py` as `kit`, starts
+  from `kit.base_pack()` (shared textures, ambience, layer layout — never
+  another map's committed pack), and uses `pack_writer` for materials, the
+  lightmap bake and the pack. Refuses to overwrite; `--no-bake` skips baking.
 - `scripts/assets/<id>_*.py`: base, landmark, terrain, materials modules. Each
   `build(mesh, team, circuit)` returns local-space anchors (flag, spawn points,
   entrances, rooms, deploy slots).

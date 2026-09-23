@@ -46,6 +46,13 @@ Gameplay compatibility is `maps6` with the five map fingerprints and no
 clients still run `0.1.0-private.20260921.1` with Skybreak and the four clone
 packs; switching needs a full matching client/server release.
 
+- **Raindance:** the first original map, cleaned with the map pipeline
+  (`build-raindance.py`): same layout and terrain, no z-fighting box faces,
+  hall ramps that now climb through roof openings, sealed ramp undersides,
+  8 spawn points per team, own materials and baked lighting. The kit
+  (`build-original-map.py`) keeps generating the shared starting textures
+  that every other map paints over (`kit.base_pack()`); no map build reads
+  another map's pack. See `docs/original-map-kit.md`.
 - **Tower Complex:** floating towers over original rolling hills
   (`src/assets/maps/tower-complex/`). See `docs/tower-complex.md`.
 - **Cairnhold:** hillside bunkers, trench-linked flag towers, central ring
@@ -554,6 +561,10 @@ Native visual QA uses `examples/launch_smoke.rs`, which must forward BOTH eframe
 `QA_CHAT=team`/`public` exercise a temporary local match. Inspect screenshots,
 not just exit codes. Do not kill a user's running game to run a test.
 
+Raindance build/test, from `src/` (numpy venv):
+`../research/local-assets/tools/venv/bin/python scripts/build-raindance.py [OUTPUT] [--no-bake]`
+(default `assets/maps/raindance`, refuses overwrite) and `scripts/test-raindance.py`;
+`scripts/test-original-map.py` still checks the kit. Builds are byte-identical.
 Tower Complex build/test, from `src/` (numpy venv):
 `../research/local-assets/tools/venv/bin/python scripts/build-tower-complex.py [OUTPUT]`
 (default output `assets/maps/tower-complex`, refuses overwrite; bakes lightmaps,

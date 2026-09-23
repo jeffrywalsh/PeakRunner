@@ -21,7 +21,7 @@
     {"kind": "inventory", "position": [-8, -10, 4]},
     {"kind": "inventory", "position": [8, -10, 4]},
     {"kind": "repair", "position": [0, -10, -12]},
-    {"kind": "sensor", "position": [-23, 8.6, 18]},
+    {"kind": "sensor", "position": [-28, 8.6, 18]},
     {"kind": "turret", "position": [-23, 8.6, -19], "weapon": "plasma"},
     {"kind": "turret", "position": [23, 8.6, -19], "weapon": "plasma"}
   ],

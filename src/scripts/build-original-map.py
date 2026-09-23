@@ -302,6 +302,47 @@ def downsample(data,side):
     return bytes(out)
 
 
+def base_textures(seed):
+    """Every kit material plus the six sky faces, as a level-major mip chain."""
+    imgs=[texture(name,seed+i) for i,name in enumerate(MATERIALS)]+[sky(i) for i in range(6)]
+    texture_bytes=bytearray();side=256;level=imgs
+    while True:
+        texture_bytes.extend(b''.join(level))
+        if side==1:break
+        level=[downsample(im,side) for im in level];side//=2
+    return bytes(texture_bytes)
+
+
+def base_ambient(seed):
+    # Original filtered-noise wind/rain, not a recording or a sustained tone.
+    # Warm the filters over one identical period to make the loop continuous.
+    audio_rng=random.Random(seed+391);count=44100*4
+    white=[audio_rng.uniform(-1,1) for _ in range(count)]
+    samples=array('f');slow=fast=0.
+    for i in range(count*2):
+        n=white[i%count];slow=.995*slow+.005*n;fast=.6*fast+.4*n
+        if i>=count:samples.append((slow*.4+fast*.018)*(.7+.3*math.sin(math.tau*i/count)))
+    if sys.byteorder!='little':samples.byteswap()
+    return samples.tobytes()
+
+
+def layer_manifest(water_height):
+    return dict(texture_count=len(MATERIALS)+6,terrain_layers=[0,1,2,3],
+                sky_layers=list(range(len(MATERIALS),len(MATERIALS)+6)),water_layer=MATERIALS.index('water'),
+                water={'position':f'-384 -160 {water_height}','scale':'720 150 1'})
+
+
+# The shared starting textures, ambience and layer layout that the other
+# original maps paint over: the kit set generated with the first map's seed.
+BASE_SEED=84271
+BASE_WATER_HEIGHT=54
+
+
+def base_pack():
+    return dict(textures=base_textures(BASE_SEED),ambient=base_ambient(BASE_SEED),
+                manifest=layer_manifest(BASE_WATER_HEIGHT))
+
+
 def validate(spec):
     if spec.get('version')!=1: raise ValueError('Unsupported map definition')
     if len(spec['bases'])!=2 or sorted(b['team'] for b in spec['bases'])!=[0,1]: raise ValueError('Exactly two team bases required')
@@ -390,31 +431,16 @@ def build(spec,output):
         # Entrance mouth and small shoulders around the downward ramp.
         for x in [-21,21]:mesh.box((x,-.27,-40),(22,.6,24),'concrete')
         mesh.box((0,-.27,-54),(64,.6,4),'grate')
-    imgs=[texture(name,spec['seed']+i) for i,name in enumerate(MATERIALS)]+[sky(i) for i in range(6)]
-    texture_bytes=bytearray();side=256;level=imgs
-    while True:
-        texture_bytes.extend(b''.join(level))
-        if side==1:break
-        level=[downsample(im,side) for im in level];side//=2
-    # Original filtered-noise wind/rain, not a recording or a sustained tone.
-    # Warm the filters over one identical period to make the loop continuous.
-    audio_rng=random.Random(spec['seed']+391);count=44100*4
-    white=[audio_rng.uniform(-1,1) for _ in range(count)]
-    samples=array('f');slow=fast=0.
-    for i in range(count*2):
-        n=white[i%count];slow=.995*slow+.005*n;fast=.6*fast+.4*n
-        if i>=count:samples.append((slow*.4+fast*.018)*(.7+.3*math.sin(math.tau*i/count)))
-    if sys.byteorder!='little':mesh.vertices.byteswap();mesh.collision.byteswap();samples.byteswap()
+    texture_bytes=base_textures(spec['seed']);samples=base_ambient(spec['seed'])
+    if sys.byteorder!='little':mesh.vertices.byteswap();mesh.collision.byteswap()
     output.mkdir(parents=True)
     files={'height.bin':bytes(heights),'weights.rgba':bytes(weights),'vertices.bin':mesh.vertices.tobytes(),
-           'collision.bin':mesh.collision.tobytes(),'textures.rgba':bytes(texture_bytes),'ambient.f32':samples.tobytes()}
+           'collision.bin':mesh.collision.tobytes(),'textures.rgba':texture_bytes,'ambient.f32':samples}
     for name,data in files.items():(output/name).write_bytes(data)
-    e=spec['environment']; wy=e['water_height']
+    e=spec['environment']
     manifest=dict(version=1,name=spec['name'],provenance='PeakRunner original procedural kit v1; no extracted assets',
-                  flags=flags,spawns=spawns,holes=sorted(set(holes)),texture_count=len(imgs),terrain_layers=[0,1,2,3],
-                  sky_layers=list(range(len(MATERIALS),len(MATERIALS)+6)),water_layer=MATERIALS.index('water'),
+                  flags=flags,spawns=spawns,holes=sorted(set(holes)),**layer_manifest(e['water_height']),
                   sky={'visibleDistance':str(e['visibility']),'fogDistance':str(e['fog_start'])},
-                  water={'position':f'-384 -160 {wy}','scale':'720 150 1'},
                   ambient_emitters=[[1000,100,940,.35,200,2000]],entities=mesh.entities,instances=mesh.instances,
                   materials=list(MATERIALS),asset_catalog=list(ASSETS),
                   definition_sha256=hashlib.sha256(json.dumps(spec,sort_keys=True).encode()).hexdigest(),

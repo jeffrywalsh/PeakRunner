@@ -1,7 +1,38 @@
 {
+  "texture_count": 42,
+  "terrain_layers": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "sky_layers": [
+    14,
+    15,
+    16,
+    17,
+    18,
+    19
+  ],
+  "water_layer": 13,
+  "water": {
+    "position": "-384 -160 54",
+    "scale": "720 150 1"
+  },
+  "lightmap": {
+    "pages": 22,
+    "first_layer": 20,
+    "texel_m": 0.5,
+    "sun": [
+      -0.57735,
+      0.57735,
+      -0.57735
+    ],
+    "lamps": 142,
+    "baker_sha256": "66d1c04a0581f283b62d4a01a9229abd22fbd18a738474c8c5c148db84800fed"
+  },
   "version": 1,
   "name": "Raindance \u2014 PeakRunner original",
-  "provenance": "PeakRunner original procedural kit v1; no extracted assets",
   "flags": [
     [
       1160.0,
@@ -24,6 +55,108 @@
       848.0,
       112,
       1335.0
+    ]
+  ],
+  "spawn_points": [
+    [
+      [
+        1170.0,
+        103.2,
+        498.0,
+        0.0
+      ],
+      [
+        1150.0,
+        103.2,
+        498.0,
+        0.0
+      ],
+      [
+        1172.0,
+        103.2,
+        466.0,
+        3.141592653589793
+      ],
+      [
+        1148.0,
+        103.2,
+        466.0,
+        3.141592653589793
+      ],
+      [
+        1187.0,
+        103.2,
+        503.0,
+        0.0
+      ],
+      [
+        1133.0,
+        103.2,
+        503.0,
+        0.0
+      ],
+      [
+        1187.0,
+        121.8,
+        476.0,
+        3.141592653589793
+      ],
+      [
+        1133.0,
+        121.8,
+        476.0,
+        3.141592653589793
+      ]
+    ],
+    [
+      [
+        790.0,
+        103.2,
+        1382.0,
+        3.141592653589793
+      ],
+      [
+        810.0,
+        103.2,
+        1382.0,
+        3.141592653589793
+      ],
+      [
+        788.0,
+        103.2,
+        1414.0,
+        0.0
+      ],
+      [
+        812.0,
+        103.2,
+        1414.0,
+        0.0
+      ],
+      [
+        773.0,
+        103.2,
+        1377.0,
+        3.141592653589793
+      ],
+      [
+        827.0,
+        103.2,
+        1377.0,
+        3.141592653589793
+      ],
+      [
+        773.0,
+        121.8,
+        1404.0,
+        0.0
+      ],
+      [
+        827.0,
+        121.8,
+        1404.0,
+        0.0
+      ]
     ]
   ],
   "holes": [
@@ -204,29 +337,9 @@
     45670,
     45671
   ],
-  "texture_count": 20,
-  "terrain_layers": [
-    0,
-    1,
-    2,
-    3
-  ],
-  "sky_layers": [
-    14,
-    15,
-    16,
-    17,
-    18,
-    19
-  ],
-  "water_layer": 13,
   "sky": {
     "visibleDistance": "1350",
     "fogDistance": "450"
-  },
-  "water": {
-    "position": "-384 -160 54",
-    "scale": "720 150 1"
   },
   "ambient_emitters": [
     [
@@ -295,7 +408,7 @@
       "id": "sensor-4",
       "kind": "sensor",
       "position": [
-        1183.0,
+        1188.0,
         126.4,
         462.0
       ],
@@ -386,7 +499,7 @@
       "id": "sensor-11",
       "kind": "sensor",
       "position": [
-        777.0,
+        772.0,
         126.4,
         1418.0
       ],
@@ -484,7 +597,53 @@
         112,
         480
       ],
-      "yaw": 180
+      "yaw": 180,
+      "anchors": {
+        "flag": [
+          1160.0,
+          122.05,
+          466.0
+        ],
+        "spawn": [
+          1112.0,
+          112,
+          545.0
+        ],
+        "entrances": [
+          [
+            1160.0,
+            112,
+            532.0
+          ],
+          [
+            1182.0,
+            112.03,
+            532.0
+          ],
+          [
+            1138.0,
+            112.03,
+            532.0
+          ]
+        ],
+        "hall": [
+          1160.0,
+          103.2,
+          480.0
+        ],
+        "roof_openings": [
+          [
+            1180.0,
+            120.6,
+            465.5
+          ],
+          [
+            1140.0,
+            120.6,
+            465.5
+          ]
+        ]
+      }
     },
     {
       "asset": "base",
@@ -495,7 +654,53 @@
         112,
         1400
       ],
-      "yaw": 0
+      "yaw": 0,
+      "anchors": {
+        "flag": [
+          800.0,
+          122.05,
+          1414.0
+        ],
+        "spawn": [
+          848.0,
+          112,
+          1335.0
+        ],
+        "entrances": [
+          [
+            800.0,
+            112,
+            1348.0
+          ],
+          [
+            778.0,
+            112.03,
+            1348.0
+          ],
+          [
+            822.0,
+            112.03,
+            1348.0
+          ]
+        ],
+        "hall": [
+          800.0,
+          103.2,
+          1400.0
+        ],
+        "roof_openings": [
+          [
+            780.0,
+            120.6,
+            1414.5
+          ],
+          [
+            820.0,
+            120.6,
+            1414.5
+          ]
+        ]
+      }
     },
     {
       "id": "ember-landing",
@@ -505,7 +710,36 @@
         112,
         480
       ],
-      "team": 0
+      "team": 0,
+      "anchors": {
+        "deck": [
+          1224.0,
+          112.47,
+          480.0
+        ],
+        "deploy_slots": [
+          [
+            1218.5,
+            112.47,
+            474.5
+          ],
+          [
+            1229.5,
+            112.47,
+            474.5
+          ],
+          [
+            1218.5,
+            112.47,
+            485.5
+          ],
+          [
+            1228.5,
+            112.47,
+            484.5
+          ]
+        ]
+      }
     },
     {
       "id": "glacier-landing",
@@ -515,7 +749,36 @@
         112,
         1400
       ],
-      "team": 1
+      "team": 1,
+      "anchors": {
+        "deck": [
+          736.0,
+          112.47,
+          1400.0
+        ],
+        "deploy_slots": [
+          [
+            730.5,
+            112.47,
+            1394.5
+          ],
+          [
+            741.5,
+            112.47,
+            1394.5
+          ],
+          [
+            730.5,
+            112.47,
+            1405.5
+          ],
+          [
+            740.5,
+            112.47,
+            1404.5
+          ]
+        ]
+      }
     },
     {
       "id": "crossing",
@@ -2357,14 +2620,19 @@
     "tree",
     "rock"
   ],
-  "definition_sha256": "2817d9657048c6555e6fb265e28e8cd0ed1081d30b2784d6de2abc324ff36d06",
-  "compiler_sha256": "a0eb769d994fbc818cd22aaf176e81423f979b13b8a4bac1a2a9ec547f9a52d8",
+  "provenance": "PeakRunner original procedural kit v2 (cleaned Raindance); no extracted assets",
+  "base_asset": "raindance-base-v2",
+  "structures_asset": "raindance-structures-v2",
+  "base_asset_sha256": "45283b5a30c445025c939a89c9bb0515bfec0ae418864c0566fb4831872b3f20",
+  "structures_asset_sha256": "2168bd8af5ee259d70362d060f006095d3065f853be12cf5d512ade9a638067b",
+  "material_source_sha256": "fe226cf2d1f451356c001f0da50bebb734c1f8cc260864d3ba6b6f94a07ae8ad",
+  "definition_sha256": "34865844790943ae49e8545824f69b008a07f9ef0d969214be5b7a51e6da9f67",
   "files": {
     "height.bin": "7305d9f6ff06e086d7a831130da4116c42522d3e7606f28ebdf5d682bbf16eeb",
     "weights.rgba": "f8e2504e4779325a8afe4f46e269c02dbee2eaf61bbb06bbfbeb3d3eab8da19d",
-    "vertices.bin": "57bae5b54c44e8404caf674a71fa8d1e7ed556b09a556623ee075e0cc1409432",
-    "collision.bin": "301dfe888809688c2148fdd694e63a15c28d6888a418aefa8a5273fcb5a8fce7",
-    "textures.rgba": "842de2b5301dff2cc8aac5f3231c572879cdcbf43ee269471668645ec21042f6",
+    "vertices.bin": "3ee984bd3c82177ee304e1425a611a9fbb9e445b3a1ec47d2ab455d5cef85b03",
+    "collision.bin": "9b6cbfe641580e578f7a13c810df50478381dacd9c4af25f873acab291105417",
+    "textures.rgba": "a563b3d800024240e31c2b0842e1ad42e7c6e3bf98f21d2cc4fbc0d39ad556dd",
     "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e"
   }
 }

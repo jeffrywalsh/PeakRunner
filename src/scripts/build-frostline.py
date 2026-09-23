@@ -143,9 +143,8 @@ def build(output, bake=True):
     heights = bytearray(struct.pack('<65536H', *[round(float(v)*32) for v in grid.ravel()]))
     weights = frostline_terrain.weights(grid).tobytes()
     if sys.byteorder != 'little': mesh.vertices.byteswap(); mesh.collision.byteswap()
-    shared = ROOT/'assets/maps/raindance'
-    old = json.loads((shared/'map.json').read_text())
-    textures = bytearray((shared/'textures.rgba').read_bytes())
+    shared = kit.base_pack(); old = shared['manifest']
+    textures = bytearray(shared['textures'])
     count = old['texture_count']
     pack_writer.paint_materials(textures, count, ['meadow', 'rock', 'soil', 'moss', 'concrete', 'panel', 'grate', 'trim',
                                                   'ember', 'glacier', 'light', 'bark', 'leaf'],
@@ -157,7 +156,7 @@ def build(output, bake=True):
         vertices, textures, count, lightmap = pack_writer.bake_lightmaps(vertices, textures, count, mesh.lamps, kit)
     files = {'height.bin': bytes(heights), 'vertices.bin': vertices,
              'collision.bin': mesh.collision.tobytes(), 'weights.rgba': bytes(weights),
-             'textures.rgba': bytes(textures), 'ambient.f32': (shared/'ambient.f32').read_bytes()}
+             'textures.rgba': bytes(textures), 'ambient.f32': shared['ambient']}
     manifest = {k: old[k] for k in ['terrain_layers', 'sky_layers', 'water_layer', 'water']}
     manifest['texture_count'] = count
     if lightmap: manifest['lightmap'] = lightmap

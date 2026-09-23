@@ -103,10 +103,53 @@ Authoring rules for this first format:
 - Custom packs currently occupy the Raindance map slot. Arbitrary map dimensions,
   an in-game editor, multiple custom-map slots and glTF importing are not present.
 
-To replace the bundled original pack, compile into a fresh directory, run the
-checks, then copy its seven output files to `assets/maps/raindance` and rebuild.
-Never mix files from different builds. `map.json` records the definition/compiler
-hashes plus every binary asset's SHA-256 checksum.
+The shipped Raindance pack is no longer the kit's own output: it is built by
+`scripts/build-raindance.py` (below), which uses this kit's terrain, scenery
+placement and field assets but the cleaned base. The kit build is kept as the
+reference for custom definitions and for `test-original-map.py`. Never mix files
+from different builds. `map.json` records the definition and source hashes plus
+every binary asset's SHA-256 checksum.
+
+## Raindance cleanup (September 23, 2026)
+
+Raindance was re-checked with the map pipeline (`docs/map-pipeline.md`) and
+rebuilt as `raindance-base-v2` by `scripts/build-raindance.py`, with
+`scripts/assets/raindance_base.py`, `raindance_structures.py` and
+`raindance_materials.py`. The layout, terrain, holes, trees and rocks,
+flags and equipment are unchanged; `test-raindance.py` proves the heightfield,
+weights, ambience, holes and scenery are byte-identical to the kit build.
+The audit (private notes and before/after captures under ignored `research/`)
+found and fixed:
+
+- **Z-fighting:** hall walls, the roof and the bunker walls overlapped at their
+  outer faces (385 visible coplanar pairs, about 1,280 m²). Walls now meet at
+  the corners, the roof sits on the walls with eaves, and bunker walls stand on
+  their floor. No two structure boxes share a same-facing face any more.
+- **Dead-end ramps:** both hall ramps climbed into the solid roof and stopped
+  about 6 m short. They now rise through roof openings and end flush with the
+  roof; the roof sensor moved 5 m sideways, out of the opening. The outer
+  shoulder ramps end flush with the roof edge instead of a 0.3 m lip.
+- **Walk-under pockets:** the low ends of all four ramps are sealed where the
+  underside is lower than 2.4 m (about 1,200 sampled points before, none now).
+- **Hollow spire:** the service spire had no base and hung over a roof gap, so
+  a player could jet up inside it. It is now capped.
+- **Spawns:** 8 authored spawn points per team (hall, corridors, roof), 1.2 m
+  above the floor; the server picks among them.
+- **Look:** Raindance's own rain-streaked concrete, slate, grating, steel and
+  team enamel; dressed and lit hall walls in place of floating wall lights;
+  baked lighting. Zero-area canopy triangles are dropped before the bake.
+
+Turrets could not see into the halls before and still cannot (Python and Rust
+tests). Every other map used to start from Raindance's committed textures and
+ambience; they now take the identical bytes from `kit.base_pack()`, so changing
+Raindance cannot change another map. All four other packs rebuilt byte-identical.
+
+```sh
+../research/local-assets/tools/venv/bin/python scripts/build-raindance.py [OUTPUT] [--no-bake]
+../research/local-assets/tools/venv/bin/python scripts/test-raindance.py
+```
+
+Human traversal and balance of the new ramp exits are not playtested.
 
 ## Verification and boundaries
 
