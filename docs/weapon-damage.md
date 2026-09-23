@@ -117,6 +117,61 @@ deployed shield or turret blocks sight, and placement validation (clearance, no
 placing through walls or with a line straight into an enemy room). Neither
 exists yet.
 
+## Equipment shields and hit bars
+
+Sensors and fixed turrets carry a shield projected by their circuit's
+generator. Generators, inventory stations and repair pads have none: the
+generator is what attackers go for. Numbers live in
+`equipment::durability(kind)` (`crates/core/src/equipment.rs`):
+
+| Kind | Hull | Shield | Regen delay | Regen rate | Bullets vs. shield |
+| --- | --- | --- | --- | --- | --- |
+| Turret | 250 | 450 | 5 s | 60/s | 50% |
+| Sensor | 150 | 300 | 5 s | 45/s | 50% |
+| Generator | 500 | none | — | — | — |
+| Inventory / repair | 300 | none | — | — | — |
+
+- Damage hits the shield first; overflow reaches the hull. Shields take half
+  of bullet damage (chaingun and bullet turrets), explosives in full.
+- A shield regrows only while its circuit is powered, the hull is above zero,
+  and `shield_regen_delay` has passed since the last hit.
+- When the generator goes down the circuit loses power: shields drop to zero
+  at once, cannot regrow, and the equipment stops working. Its hull can then be
+  destroyed directly. Repairing the generator restores power, and shields regrow
+  after the delay.
+- `always-on` circuits (maps without generators) count as permanently powered,
+  so their equipment keeps a regenerating shield.
+- Repair is unchanged: holding E restores hull only, never shield.
+- All of this is server-authoritative. Snapshots carry `shield`; the regen timer
+  (`since_hit`) stays on the server.
+
+Effort to destroy, direct hits, no regen interruptions (disc 75.8, 1.05 s
+reload; grenade 72.7; chaingun 8 per bullet at 13.3 rounds/s):
+
+| Target | Before | Now, powered | Now, generator down |
+| --- | --- | --- | --- |
+| Turret | 4 discs / ~2.3 s chaingun | 10 discs (~10 s solo, ~5 s for a pair) / ~11 s chaingun | 4 discs |
+| Sensor | 2 discs / ~1.4 s chaingun | 6 discs / ~7 s chaingun | 2 discs |
+| Generator | 7 discs | 7 discs (unchanged) | — |
+
+A regen delay of 5 s means one attacker who keeps up disc fire never lets a
+shield recover; an attacker who breaks off for 5 s loses progress at 60/s.
+
+**Hit bars.** The client draws a bar above every generator, turret and sensor
+within 120 m and in line of sight: a thin shield strip (pale violet) above a
+hull bar that turns green, amber, red and is framed in the owning team's
+colour. An unpowered shield shows as a dashed grey strip with OFFLINE; a
+destroyed object says DESTROYED. Bars flash white when the object takes damage,
+and name the object within 45 m (`src/world_overlay.rs`).
+
+**Name tags.** Other living players get their name above their head: blue for
+teammates up to 150 m, red for enemies up to 80 m, fading near the limit. The
+colour is relative to the viewer, not Ember/Glacier. Tags need the head on
+screen and a clear line of sight from the camera through the same terrain and
+map-collision query the server uses (`World::sight_clear`). That check is
+cosmetic: every player position already arrives in snapshots, so hiding tags
+behind walls neither reveals nor protects anything.
+
 ## Verification
 
 Regression tests cover exact peaks, half-radius and edge damage, outside-radius

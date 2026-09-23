@@ -309,6 +309,8 @@ impl MapPack {
         Ok(Self {embedded:builtin_asset,manifest,root:root.into(),fingerprint:format!("{:x}",Sha256::digest(&json)),triangles,buckets,holes,heights})
     }
 
+    pub fn triangle_count(&self)->usize {self.triangles.len()}
+
     pub fn hole(&self,x:f32,z:f32)->bool {
         let x=(x/self.manifest.terrain_step).floor().clamp(0.0,255.0) as usize;
         let z=(z/self.manifest.terrain_step).floor().clamp(0.0,255.0) as usize;

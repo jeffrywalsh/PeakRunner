@@ -36,7 +36,7 @@ apart (z 820 and 1228) and the flags sit about 88–95 m above the ground:
 - **Keels.** Every hull has a tapered keel with thruster nozzles.
 
 Blue mirrors Red. Each base has about 7,550 render and 2,070 collision triangles
-(the collision budget is under 3,000).
+(the collision budget was then 3,000; now 4,500, see `map-pipeline.md`).
 
 ### Terrain
 

@@ -60,6 +60,11 @@ pub fn clip_correct(proj: Mat4) -> Mat4 {
 /// QA-only: override the render camera from `QA_FLYCAM=x,y,z,yaw_deg,pitch_deg,fov_deg`,
 /// a free camera decoupled from the player entity's position/physics, used only by
 /// capture tooling (see AGENTS.md). Absent the env var, rendering is unaffected.
+/// The camera the frame is rendered from, so screen overlays line up with it.
+pub(crate) fn view_camera(world: &World) -> (Vec3, Vec3, f32) {
+    qa_flycam_override().unwrap_or_else(|| world.camera())
+}
+
 fn qa_flycam_override() -> Option<(Vec3, Vec3, f32)> {
     let raw = std::env::var("QA_FLYCAM").ok()?;
     let v: Vec<f32> = raw.split(',').filter_map(|s| s.trim().parse().ok()).collect();
@@ -73,7 +78,7 @@ fn qa_flycam_override() -> Option<(Vec3, Vec3, f32)> {
 }
 
 pub fn build_frame(world: &World, aspect: f32, dt: f32) -> DrawFrame {
-    let (eye, dir, fov) = qa_flycam_override().unwrap_or_else(|| world.camera());
+    let (eye, dir, fov) = view_camera(world);
     let view = Mat4::look_to_rh(eye, dir, Vec3::Y);
     let size = crate::terrain::info(world.map).size;
     let far = (size * 1.05).max(480.0);

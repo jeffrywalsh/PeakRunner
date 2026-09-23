@@ -4,6 +4,7 @@ import importlib.util
 import math
 from pathlib import Path
 import unittest
+from assets import budgets
 from assets import tower_complex
 from assets import tower_complex_materials
 
@@ -114,7 +115,7 @@ class TowerComplexTests(unittest.TestCase):
         self.assertEqual(sum(e['kind']=='turret' for e in b.entities),2)
         self.assertEqual(sum(e['kind']=='generator' for e in b.entities),1)
         self.assertEqual(len(moved['entrances']),5)
-        self.assertLess(len(b.collision)//9,3000)
+        self.assertLess(len(b.collision)//9, budgets.COLLISION_TRIS_PER_BASE)
 
     def test_two_instances_have_unique_equipment_ids_and_independent_power(self):
         mesh=kit.Mesh();tower_complex.build(mesh,0,'red')
@@ -189,7 +190,7 @@ class TowerComplexTests(unittest.TestCase):
 
     def test_collision_budget(self):
         mesh=kit.Mesh(); tower_complex.build(mesh,0,'one')
-        self.assertLess(len(mesh.collision)//9,3000)
+        self.assertLess(len(mesh.collision)//9, budgets.COLLISION_TRIS_PER_BASE)
 
     def test_lightmap_bake_is_deterministic_valid_and_shadows(self):
         import numpy as np

@@ -65,6 +65,33 @@ pub fn profile(kind:Kind, weapon:TurretWeapon)->Option<TurretProfile> {
     }
 }
 
+/// Hull and generator-powered shield numbers per kind. Shields only exist on
+/// sensors and fixed turrets: generators are the thing attackers go for, and
+/// stations stay as they were. A shield soaks damage before the hull, refills
+/// after `shield_regen_delay` seconds without damage while its circuit is
+/// powered, and drops to zero the moment the circuit loses power.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Durability {
+    pub hull: f32,
+    pub shield_max: f32,
+    pub shield_regen_delay: f32,
+    /// Shield points per second once regeneration starts.
+    pub shield_regen_rate: f32,
+    /// Fraction of bullet (chaingun and bullet-turret) damage a shield takes;
+    /// shields shrug off small arms, explosives hit them in full.
+    pub shield_bullet_factor: f32,
+}
+
+pub fn durability(kind:Kind)->Durability {
+    let unshielded=|hull|Durability {hull,shield_max:0.,shield_regen_delay:0.,shield_regen_rate:0.,shield_bullet_factor:1.};
+    match kind {
+        Kind::Turret=>Durability {hull:250.,shield_max:450.,shield_regen_delay:5.,shield_regen_rate:60.,shield_bullet_factor:0.5},
+        Kind::Sensor=>Durability {hull:150.,shield_max:300.,shield_regen_delay:5.,shield_regen_rate:45.,shield_bullet_factor:0.5},
+        Kind::Generator=>unshielded(500.),
+        Kind::Inventory|Kind::Repair=>unshielded(300.),
+    }
+}
+
 /// Barrel clearance beyond the turret's body radius; LOS and shots start here.
 pub const MUZZLE_GAP: f32 = 0.6;
 /// Targets are sighted at the chest, not the feet.
@@ -118,7 +145,8 @@ pub struct Definition {
 }
 impl Definition {
     pub fn pos(&self)->Vec3 {Vec3::from_array(self.position)}
-    pub fn max_health(&self)->f32 {match self.kind {Kind::Generator=>500.,Kind::Turret=>250.,Kind::Sensor=>150.,_=>300.}}
+    pub fn max_health(&self)->f32 {durability(self.kind).hull}
+    pub fn max_shield(&self)->f32 {durability(self.kind).shield_max}
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -128,6 +156,39 @@ pub struct State {
     pub cooldown: f32,
     pub aim: Vec3,
     pub contacts: u8,
+    pub shield: f32,
+    /// Seconds since this object last took damage. Server-side regen timer;
+    /// not sent to clients, which never simulate equipment.
+    #[serde(skip, default)]
+    pub since_hit: f32,
+}
+
+impl State {
+    pub fn new(d:&Definition)->Self {
+        State {health:d.max_health(),powered:true,cooldown:0.,aim:Vec3::NEG_Z,contacts:0,shield:d.max_shield(),since_hit:f32::INFINITY}
+    }
+    /// Damage soaks into the shield first, the overflow reaches the hull.
+    pub fn damage(&mut self, d:&Definition, amount:f32, bullet:bool) {
+        if !amount.is_finite() || amount<=0. || self.health<=0. {return;}
+        self.since_hit=0.;
+        let factor=if bullet {durability(d.kind).shield_bullet_factor} else {1.};
+        let mut rest=amount;
+        if self.shield>0. && factor>0. {
+            let absorbed=(rest*factor).min(self.shield);
+            self.shield-=absorbed;rest-=absorbed/factor;
+        }
+        self.health=(self.health-rest).max(0.);
+        if self.health<=0. {self.shield=0.;}
+    }
+    /// Advance shield regeneration. Call after `power` for the tick.
+    pub fn regen(&mut self, d:&Definition, dt:f32) {
+        let spec=durability(d.kind);
+        self.since_hit+=dt;
+        if !self.powered || self.health<=0. {self.shield=0.;return;}
+        if self.since_hit>=spec.shield_regen_delay {
+            self.shield=(self.shield+spec.shield_regen_rate*dt).min(spec.shield_max);
+        }
+    }
 }
 
 pub fn validate(defs:&[Definition])->Result<(),String> {
@@ -150,13 +211,15 @@ pub fn definitions(map:MapId)->&'static [Definition] {
     crate::map_pack::on(map).map_or(&[],|p|p.manifest.entities.as_slice())
 }
 pub fn fresh(map:MapId)->Vec<State> {
-    definitions(map).iter().map(|d|State {health:d.max_health(),powered:true,cooldown:0.,aim:Vec3::NEG_Z,contacts:0}).collect()
+    definitions(map).iter().map(State::new).collect()
 }
 pub fn power(defs:&[Definition],states:&mut [State]) {
     let live: Vec<_>=defs.iter().zip(states.iter()).filter(|(d,s)|d.kind==Kind::Generator && s.health>0.)
         .map(|(d,_)|(d.team,d.circuit.as_str())).collect();
     for (d,s) in defs.iter().zip(states) {
         s.powered=s.health>0. && (d.circuit=="always-on" || live.contains(&(d.team,d.circuit.as_str())));
+        // Shields are projected by the generator: no power, no shield.
+        if !s.powered {s.shield=0.;}
     }
 }
 pub fn service(d:&Definition,s:&mut State,p:&mut Player,using:bool,dt:f32) {
@@ -236,7 +299,7 @@ mod tests {
         let d=Definition{id:"station".into(),kind:Kind::Inventory,position:[0.;3],team:0,
             circuit:"always-on".into(),radius:1.5,weapon:TurretWeapon::Bullet};
         assert!(validate(&[d.clone()]).is_ok());
-        let mut states=vec![State{health:100.,powered:false,cooldown:0.,aim:Vec3::ZERO,contacts:0}];
+        let mut states=vec![State{health:100.,powered:false,cooldown:0.,aim:Vec3::ZERO,contacts:0,shield:0.,since_hit:0.}];
         power(&[d.clone()],&mut states);assert!(states[0].powered);
         states[0].health=0.;power(&[d.clone()],&mut states);assert!(!states[0].powered);
         let mut invalid=d;invalid.circuit="missing-generator".into();assert!(validate(&[invalid]).is_err());
@@ -258,10 +321,65 @@ mod tests {
         let make=|id:&str,kind,team|Definition {id:id.into(),kind,team,circuit:format!("base{team}"),position:[0.;3],radius:2.,weapon:TurretWeapon::Bullet};
         let defs=vec![make("a",Kind::Generator,0),make("b",Kind::Inventory,0),make("c",Kind::Generator,1)];
         assert!(validate(&defs).is_ok());
-        let mut states:Vec<_>=defs.iter().map(|d|State{health:d.max_health(),powered:true,cooldown:0.,aim:Vec3::ZERO,contacts:0}).collect();
+        let mut states:Vec<_>=defs.iter().map(|d|State::new(d)).collect();
         states[0].health=0.;power(&defs,&mut states);
         assert!(!states[0].powered && !states[1].powered && states[2].powered);
         states[0].health=1.;power(&defs,&mut states);assert!(states[1].powered);
+    }
+    fn def(id:&str,kind:Kind,circuit:&str)->Definition {
+        Definition {id:id.into(),kind,team:0,circuit:circuit.into(),position:[0.;3],radius:2.,weapon:TurretWeapon::Bullet}
+    }
+    #[test]
+    fn only_sensors_and_turrets_are_shielded() {
+        assert!(durability(Kind::Turret).shield_max>0. && durability(Kind::Sensor).shield_max>0.);
+        for kind in [Kind::Generator,Kind::Inventory,Kind::Repair] {assert_eq!(durability(kind).shield_max,0.);}
+        assert_eq!(def("t",Kind::Turret,"a").max_health(),250.,"hull numbers are unchanged");
+        assert_eq!(def("g",Kind::Generator,"a").max_health(),500.);
+        assert_eq!(def("s",Kind::Sensor,"a").max_health(),150.);
+    }
+    #[test]
+    fn shield_absorbs_before_hull_and_bullets_are_halved() {
+        let d=def("t",Kind::Turret,"a");let mut s=State::new(&d);
+        s.damage(&d,100.,false);assert_eq!((s.shield,s.health),(350.,250.));
+        s.damage(&d,8.,true);assert_eq!((s.shield,s.health),(346.,250.),"shields take half of bullet damage");
+        s.damage(&d,400.,false);assert_eq!((s.shield,s.health),(0.,196.),"overflow reaches the hull");
+        s.shield=2.;s.damage(&d,8.,true);assert_eq!((s.shield,s.health),(0.,192.),"bullet overflow is counted at full value");
+        s.damage(&d,1000.,false);assert_eq!((s.shield,s.health),(0.,0.));
+        let hp=s.health;s.damage(&d,5.,false);assert_eq!(s.health,hp,"destroyed objects take no more damage");
+    }
+    #[test]
+    fn shields_regen_only_after_the_delay_while_powered() {
+        let d=def("t",Kind::Turret,"a");let spec=durability(d.kind);let mut s=State::new(&d);
+        s.damage(&d,300.,false);let hit=s.shield;
+        for _ in 0..((spec.shield_regen_delay-0.5)*10.) as usize {s.regen(&d,0.1);}
+        assert_eq!(s.shield,hit,"no regen during the delay");
+        for _ in 0..200 {s.regen(&d,0.1);}
+        assert_eq!(s.shield,spec.shield_max,"regenerates to full while powered");
+        s.damage(&d,300.,false);s.powered=false;
+        for _ in 0..200 {s.regen(&d,0.1);}
+        assert_eq!(s.shield,0.,"an unpowered object has no shield and cannot regen");
+    }
+    #[test]
+    fn generator_loss_drops_shields_and_leaves_the_hull_exposed() {
+        let defs=vec![def("g",Kind::Generator,"a"),def("t",Kind::Turret,"a"),def("s",Kind::Sensor,"a")];
+        let mut states:Vec<_>=defs.iter().map(State::new).collect();
+        states[0].damage(&defs[0],1000.,false);assert_eq!(states[0].health,0.);
+        power(&defs,&mut states);
+        assert!(!states[1].powered && !states[2].powered);
+        assert_eq!((states[1].shield,states[2].shield),(0.,0.));
+        states[1].damage(&defs[1],100.,false);assert_eq!(states[1].health,150.,"damage goes straight to the hull");
+        // Repairing the generator brings power back; the shield regrows after the delay.
+        states[0].health=1.;power(&defs,&mut states);
+        for _ in 0..200 {for (d,s) in defs.iter().zip(&mut states) {s.regen(d,0.1);}}
+        assert!(states[1].powered && states[1].shield==durability(Kind::Turret).shield_max);
+    }
+    #[test]
+    fn always_on_equipment_keeps_a_regenerating_shield() {
+        let d=def("t",Kind::Turret,"always-on");assert!(validate(&[d.clone()]).is_ok());
+        let mut states=vec![State::new(&d)];
+        states[0].damage(&d,300.,false);power(std::slice::from_ref(&d),&mut states);
+        for _ in 0..200 {states[0].regen(&d,0.1);}
+        assert_eq!(states[0].shield,durability(Kind::Turret).shield_max);
     }
     #[test]
     fn rejects_missing_generator_and_duplicate_ids() {

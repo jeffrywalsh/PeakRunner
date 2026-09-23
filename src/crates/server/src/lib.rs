@@ -244,7 +244,9 @@ mod tests {
     #[test]
     #[ignore = "12-second real-socket load test"]
     fn eight_clients_sustain_movement_and_all_weapons() {
-        let host = GameHost::bind("127.0.0.1:0", "Load test", 8, "Raindance").unwrap();
+        // PEAKRUNNER_LOAD_MAP picks another map key, e.g. for collision-budget checks.
+        let map = std::env::var("PEAKRUNNER_LOAD_MAP").unwrap_or_else(|_| "Raindance".into());
+        let host = GameHost::bind("127.0.0.1:0", "Load test", 8, &map).unwrap();
         let port = host.local_addr().port();
         let _host = host.spawn();
         let clients: Vec<_> = (0..8).map(|i| connect("127.0.0.1", port, &format!("P{i}")).unwrap()).collect();

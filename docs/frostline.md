@@ -78,7 +78,7 @@ takes about 20 s with the bake, and two builds are byte-identical.
 | Over 45° | 26% | 38% |
 | Flag distance | 816 m | 970 m |
 
-- **Collision:** 1,610 triangles per base (budget 3,000), 124 for the beacon,
+- **Collision:** 1,610 triangles per base (budget then 3,000; now 4,500, see `map-pipeline.md`), 124 for the beacon,
   about 2,000 for the 112 pines' trunks.
 - **Render:** 17,668 triangles in total.
 - **Pack:** 11 lightmap pages, about 14 MB.

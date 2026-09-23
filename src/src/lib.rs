@@ -1,6 +1,8 @@
 mod app;
 mod audio;
 mod flag_hud;
+mod world_overlay;
+mod qa_overrides;
 #[cfg(not(target_arch = "wasm32"))]
 mod online;
 #[cfg(not(target_arch = "wasm32"))]

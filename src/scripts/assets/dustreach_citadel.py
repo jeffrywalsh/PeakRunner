@@ -1,19 +1,33 @@
 """Original Dustreach team base: a ruined sandstone citadel on a raised
-terrace. A keep with twin pylon towers holds the spawn hall, inventories and
-the generator; behind it an arcaded courtyard surrounds the sunken flag court,
-open to the sky. A watch tower carries the sentry turret and sensor, a broken
-watch ruin on the right flank carries the plasma turret, and a raised caravan
-dais on the left flank is the landing and deploy pad.
+terrace. A keep with twin pylon towers holds the spawn hall and inventories;
+behind it an arcaded courtyard surrounds the sunken flag court, open to the
+sky. A watch tower carries the sentry turret and sensor, a broken watch ruin
+on the right flank carries the plasma turret, and a raised caravan dais on
+the left flank is the landing and deploy pad.
+
+v2 adds a second building and an underground level:
+- A cistern under the keep holds the generator. It has exactly two ways in:
+  a ramp down from the keep hall and one tunnel door.
+- The service tunnel runs from that door under the terrace, north then west,
+  into a room in the base of the watch tower. A ramp climbs from there to a
+  door in the tower's back face.
+- A two-level storehouse on the right, joined to the courtyard by a bridge
+  through a gate in the curtain, holds a third inventory and two spawns.
+Capping stays on the surface: the flag court is untouched and the tunnel only
+links the generator to the tower.
 
 No source mesh, texture, lightmap or parser is used by this builder. Local
 X/Z are horizontal, Y is up, the surrounding ground is Y=0. -Z is the front
 (field-facing) side; facing the field, the right hand is +X.
 
-Nothing is dug into the terrain: the build blends the ground to Y=-0.1 under
-every structure and every outer wall runs 3 m below that.
+The build blends the ground to Y=-0.1 under every structure and every outer
+wall runs 3 m below that. The underground level sits in terrain holes (HOLES,
+whole 8 m cells). Every hole cell lies under the terrace or the tower, so no
+lid is exposed and the cut's edge stays at the flat site height.
 
-Sightlines: both keep doors open into a vestibule closed by a baffle, so no
-turret outside has a straight line into the spawn hall.
+Sightlines: every door into a room opens into a vestibule closed by a baffle,
+so no turret outside has a straight line into a hall, the storehouse, the
+tower room or the cistern.
 
 Dressing is render-only and stays within the 0.52 m player radius of a solid
 surface. If the caller's mesh has a `lamps` list, light fixtures add bake
@@ -23,7 +37,7 @@ import math
 
 from assets.structure_kit import Builder
 
-ASSET_ID = 'dustreach-citadel-v1'
+ASSET_ID = 'dustreach-citadel-v2'
 
 TER = 5.0                                   # terrace top
 TX, TZ0, TZ1 = 21.2, -18.0, 30.0            # terrace half-width and depth
@@ -53,8 +67,9 @@ PLINTH = .3
 # Access ramps from the ground: front to the keep door, back through the breach.
 FRONT_RAMP = (-4.0, 4.0, -34.0, TZ0)        # x0, x1, z at ground, z at terrace
 BACK_RAMP = (-4.0, 4.0, 46.0, TZ1)
-# Watch tower at the back-left corner.
-TOWER = (-30.0, -TX, 20.0, 29.5)
+# Watch tower at the back-left corner. Its base is a hollow room at the
+# tunnel's end; the rest is solid up to the sentry deck.
+TOWER = (-32.0, -TX, 15.0, 31.0)
 TOWER_TOP = 20.0
 SENTRY, SENSOR = (-24.2, 26.0), (-27.0, 22.8)
 # Watch ruin on the right flank, forward.
@@ -69,6 +84,36 @@ PAD_SLOTS = ((-6.5, -6.5), (6.5, -6.5), (-6.5, 6.5), (6.5, 6.5))
 DRUMS = ((-26.0, -46.0, 1.3), (-21.0, -50.0, 1.1), (30.0, -40.0, 1.2))
 FRONT_RUIN = (18.0, -52.0, 10.0)            # centre x, z, length along x
 SPAWN_LIFT = 1.2
+
+# --- Underground level (v2) ---------------------------------------------------
+# Terrain holes: whole 8 m cells. With the base origins used in maps/dustreach.json,
+# local x must be a multiple of 8 and local z one less than a multiple of 8.
+CIS_FLOOR, CIS_CEIL = -2.0, TER-1.0        # cistern floor top; underside of the terrace paving
+CIS = (-13.2, 13.2, -16.2, 6.2)            # cistern interior (walls to the hole edge)
+GEN = (0.0, CIS_FLOOR, -5.0)
+COLUMNS = ((-7.0, -12.0), (7.0, -12.0), (-7.0, 1.0), (7.0, 1.0))
+HALL_HOLE = (9.3, 13.2, -8.5, -1.5)        # railed opening in the hall floor
+STAIR = (9.3, 13.2, -14.0, -1.5)           # x0, x1, z at the cistern floor, z at the hall floor
+TUN_CEIL = CIS_FLOOR+4.5
+TUN_DOOR = (-13.2, -9.0)                   # the cistern's only tunnel door, in its north wall
+TUNNEL_N = (-16.0, -8.0, 7.0, 23.0)        # cells; the tunnel runs 0.8 m inside them
+TUNNEL_W = (-24.0, -16.0, 15.0, 23.0)
+TOWER_HOLE = (-32.0, -24.0, 15.0, 31.0)
+TOWER_ROOM_TOP = 4.5
+TOWER_RAMP = (-31.2, -27.2, 22.5, 26.5)    # x0, x1, z at the room floor, z at the landing
+LANDING = -0.1
+TOWER_DOOR = (-30.5, -26.5)                # in the tower's back (+Z) face
+HOLES = {'cistern': (-16.0, 16.0, -17.0, 7.0), 'tunnel north': TUNNEL_N,
+         'tunnel west': TUNNEL_W, 'tower': TOWER_HOLE}
+# --- Storehouse (v2): right of the courtyard, two floors ------------------------
+STORE = (28.0, 48.0, 2.0, 22.0)
+STORE_UP, STORE_ROOF = TER, 10.0           # upper floor top (bridge level), roof top
+STORE_RAMP = (43.4, 47.2, 19.0, 9.0)       # x0, x1, z at the ground floor, z at the upper floor
+STORE_HOLE = (43.4, 47.2, 9.0, 16.5)       # opening in the upper floor over the ramp
+STORE_DOOR_W, STORE_DOOR_N = (8.0, 12.0), (36.0, 40.0)
+STORE_INV = (38.0, STORE_UP, 5.2)
+CRATES = ((38.0, 12.0, 1.6), (35.0, 16.5, 1.4))
+GATE_Z, GATE_TOP = (13.5, 17.5), TER+4.5   # curtain gate and bridge onto the upper floor
 
 HULL, INTERIOR, DECK, TIMBER, METAL, GLOW = 'concrete', 'bark', 'panel', 'grate', 'trim', 'light'
 
@@ -85,6 +130,9 @@ def ramp_y(ramp, z, y_a, y_b):
 
 def front_ramp_y(z): return ramp_y(FRONT_RAMP, z, 0.0, TER)
 def back_ramp_y(z): return ramp_y(BACK_RAMP, z, 0.0, TER)
+def stair_y(z): return ramp_y(STAIR, z, CIS_FLOOR, TER)
+def tower_ramp_y(z): return ramp_y(TOWER_RAMP, z, CIS_FLOOR, LANDING)
+def store_ramp_y(z): return ramp_y(STORE_RAMP, z, 0.0, STORE_UP)
 
 
 def pit_y(z):
@@ -108,7 +156,9 @@ def sites():
     ('rect', x0, x1, z0, z1) or ('disc', x, z, r) in local coordinates."""
     px, pz = PAD; rx, rz = RUIN
     flat = lambda x, z: -.1
+    sx0, sx1, sz0, sz1 = STORE
     out = [('citadel', ('rect', TOWER[0]-4, TX+4, FRONT_RAMP[2]-4, BACK_RAMP[2]+4), flat, 20),
+           ('storehouse', ('rect', TX, sx1+4, sz0-4, sz1+4), flat, 16),
            ('ruin', ('disc', rx, rz, RUIN_R+9), flat, 14),
            ('ruin ramp', ('rect', rx-8, rx+8, rz, ruin_ramp()[2]+6), flat, 12),
            ('pad', ('rect', px-PAD_HALF-6, px+PAD_HALF+6, pz-PAD_HALF-6, pz+PAD_HALF+6), flat, 14),
@@ -171,10 +221,16 @@ def build(mesh, team, circuit):
     # Outer walls from below the ground up to the terrace top, and the paving,
     # tiled without overlaps round the hole of the sunken flag court.
     wall(-TX, TX, TZ0, TZ0+1, FOOT, TER-1, HULL)
-    for s in (-1, 1): wall(s*(TX-1), s*TX, TZ0+1, BACK_WALL[0], FOOT, TER-1, HULL)
+    wall(TX-1, TX, TZ0+1, BACK_WALL[0], FOOT, TER-1, HULL)
+    # The west side wall lets the service tunnel through into the tower.
+    tw0, tw1 = TUNNEL_W[2]+.8, TUNNEL_W[3]-.8
+    for za, zb in ((TZ0+1, tw0), (tw1, BACK_WALL[0])): wall(-TX, -(TX-1), za, zb, FOOT, TER-1, HULL)
+    wall(-TX, -(TX-1), tw0, tw1, TUN_CEIL, TER-1, HULL)
     wall(-TX, TX, BACK_WALL[0], TZ1, FOOT, TER-1, HULL)
     z0, z1 = PIT_Z
-    for x0, x1, za, zb in [(-TX, TX, TZ0, KZ1), (-TX, -PIT_X, KZ1, TZ1), (PIT_X, TX, KZ1, TZ1),
+    hx0, hx1, hz0, hz1 = HALL_HOLE
+    for x0, x1, za, zb in [(-TX, hx0, TZ0, KZ1), (hx1, TX, TZ0, KZ1), (hx0, hx1, TZ0, hz0), (hx0, hx1, hz1, KZ1),
+                           (-TX, -PIT_X, KZ1, TZ1), (PIT_X, TX, KZ1, TZ1),
                            (-PIT_X, PIT_X, KZ1, z0), (-PIT_X, PIT_X, z1, TZ1)]:
         slab(x0, x1, za, zb, TER, DECK)
 
@@ -231,14 +287,16 @@ def build(mesh, team, circuit):
     b.ceiling_strip('x', (iz0+FRONT_BAFFLE_Z[0])/2, -ix+1, ix-1, CEIL, .45)
     b.ceiling_strip('x', (BACK_BAFFLE_Z[1]+iz1)/2, -ix+1, ix-1, CEIL, .45)
     for x in (-6, 6): b.ceiling_strip('z', x, FRONT_BAFFLE_Z[1]+1, BACK_BAFFLE_Z[0]-1, CEIL, .7)
-    # Hall cover, inventories and the generator.
+    # Hall cover and inventories. The generator is below, in the cistern.
     wall(-.8, .8, -6.8, -5.2, TER, TER+2.6, HULL)
     wall(-.9, .9, -6.9, -5.1, TER+2.6, TER+2.74, METAL, False)
     wall(-.84, .84, -6.84, -5.16, TER+1.6, TER+1.78, accent, False)
     for z in (-10.0, -4.5): mesh.equipment('inventory', (-10, TER, z), team, circuit)
-    generator = (10.0, TER, -6.0)
-    mesh.equipment('generator', generator, team, circuit)
-    wall(generator[0]-3.0, generator[0]+3.0, -8.6, -3.4, TER, TER+.03, TIMBER, False)
+    # Railed opening in the hall floor over the stair down to the cistern.
+    wall(hx0-.4, hx0, hz0-.4, hz1, TER, TER+1.1, METAL)
+    wall(hx0, hx1, hz0-.4, hz0, TER, TER+1.1, METAL)
+    wall(hx0-.46, hx0+.06, hz0-.46, hz1, TER+1.1, TER+1.18, accent, False)
+    b.face_box('z', hz1, 1, hx0, hx1, TER-.02, TER+.02, .3, METAL)   # iron lip at the stair head
     # Roof: parapet with broken crenels, and the roof turret.
     t = .5
     wall(-KX, KX, KZ0, KZ0+t, ROOF, ROOF+.6, HULL)
@@ -292,10 +350,18 @@ def build(mesh, team, circuit):
         # Curtain: runs from the keep's side to the back wall, broken tops.
         a, c = sorted((s*CURTAIN, s*TX))
         seg = (BACK_WALL[0]-KZ0)/len(CURTAIN_TOPS)
+        gate = [GATE_Z] if s > 0 else []   # the east curtain opens onto the storehouse bridge
         for i, top in enumerate(CURTAIN_TOPS if s > 0 else CURTAIN_TOPS[::-1]):
             za, zb = KZ0+i*seg, KZ0+(i+1)*seg
-            wall(a, c, za, zb, TER-1, top, HULL)
-        b.dress('x', s*CURTAIN, -s, [(KZ1, BACK_WALL[0])], TER, ARCADE_ROOF-.6, pilasters=False)
+            for ra, rb in _runs_without(za, zb, gate): wall(a, c, ra, rb, TER-1, top, HULL)
+            for ga, gb in gate:
+                if za < ga and gb < zb: wall(a, c, ga, gb, GATE_TOP, top, HULL)
+        b.dress('x', s*CURTAIN, -s, _runs_without(KZ1, BACK_WALL[0], gate), TER, ARCADE_ROOF-.6, pilasters=False)
+    # Gate frame on both faces of the east curtain.
+    for plane, into in ((CURTAIN, -1), (TX, 1)):
+        b.face_box('x', plane, into, GATE_Z[0]-.35, GATE_Z[0], TER, GATE_TOP, .12, METAL)
+        b.face_box('x', plane, into, GATE_Z[1], GATE_Z[1]+.35, TER, GATE_TOP, .12, METAL)
+        b.face_box('x', plane, into, GATE_Z[0]-.35, GATE_Z[1]+.35, GATE_TOP, GATE_TOP+.35, .12, METAL)
     # Back wall with the breach, jagged either side of it.
     bz0, bz1 = BACK_WALL
     for x0, x1, top in [(-TX, -9.0, 12.0), (-9.0, BREACH[0], 9.5), (BREACH[1], 9.0, 10.5), (9.0, TX, 12.8)]:
@@ -315,7 +381,33 @@ def build(mesh, team, circuit):
 
     # --- Watch tower ----------------------------------------------------------
     wx0, wx1, wz0, wz1 = TOWER
-    wall(wx0, wx1, wz0, wz1, FOOT, TOWER_TOP, HULL)
+    w = WALL
+    # Hollow base: the tunnel's end room, a ramp up to a landing and a door in
+    # the back (+Z) face. Solid from the room ceiling to the sentry deck.
+    slab(*TOWER_HOLE, CIS_FLOOR, DECK)
+    wall(wx0, wx1, wz0, wz0+w, FOOT, TOWER_ROOM_TOP, HULL)
+    for a, c in _runs_without(wx0, wx1, [TOWER_DOOR]): wall(a, c, wz1-w, wz1, FOOT, TOWER_ROOM_TOP, HULL)
+    wall(*TOWER_DOOR, wz1-w, wz1, FOOT, LANDING, HULL)
+    wall(wx0, wx0+w, wz0+w, wz1-w, FOOT, TOWER_ROOM_TOP, HULL)
+    wall(wx1-w, wx1, tw1, wz1-w, FOOT, TOWER_ROOM_TOP, HULL)
+    wall(wx1-w, wx1, tw0, tw1, TUN_CEIL, TOWER_ROOM_TOP, HULL)
+    rx = TOWER_HOLE[1]
+    wall(rx-w, rx, tw1, wz1-w, CIS_FLOOR, TOWER_ROOM_TOP, HULL)        # closes the pocket over solid ground
+    wall(rx-w, rx, tw0, tw1, TUN_CEIL, TOWER_ROOM_TOP, HULL)           # header over the tunnel mouth
+    wall(rx, wx1-w, tw1, TUNNEL_W[3], CIS_FLOOR, TUN_CEIL, HULL)       # tunnel's north wall inside the tower
+    wall(wx0, wx1, wz0, wz1, TOWER_ROOM_TOP, TOWER_TOP, HULL)
+    r0, r1, rz0, rz1 = TOWER_RAMP
+    mesh.ramp((r0+r1)/2, r1-r0, rz0, rz1, CIS_FLOOR, LANDING, TIMBER)
+    closed_side(r1, rz0, rz1, tower_ramp_y, bottom=CIS_FLOOR)
+    wall(wx0+w, rx-w, rz1, wz1-w, CIS_FLOOR, LANDING, DECK)            # landing inside the door
+    for into, x in ((1, wx0+w), (-1, rx-w)):
+        b.dress('x', x, into, [(wz0+w, wz1-w)] if into > 0 else [(tw1, wz1-w)], CIS_FLOOR, TOWER_ROOM_TOP, stripe=False)
+    b.dress('z', wz0+w, 1, [(wx0+w, rx-w)], CIS_FLOOR, TOWER_ROOM_TOP, stripe=False)
+    b.ceiling_strip('z', (wx0+rx)/2, wz0+2, wz1-2, TOWER_ROOM_TOP, .55)
+    for x in TOWER_DOOR:
+        b.face_box('z', wz1, 1, x-.35 if x == TOWER_DOOR[0] else x, x if x == TOWER_DOOR[0] else x+.35,
+                   LANDING, TOWER_ROOM_TOP, .12, METAL)
+    b.lamp(((TOWER_DOOR[0]+TOWER_DOOR[1])/2, 4.0, wz1+2.0), .45)
     t = .5
     for x0, x1, za, zb in [(wx0, wx1, wz0, wz0+t), (wx0, wx1, wz1-t, wz1), (wx0, wx0+t, wz0+t, wz1-t),
                            (wx1-t, wx1, wz0+t, wz1-t)]:
@@ -325,13 +417,137 @@ def build(mesh, team, circuit):
     for y in (TER+.4, 12.5, TOWER_TOP-.6):
         b.face_box('z', wz0, -1, wx0, wx1, y, y+.35, .15, METAL)
         b.face_box('x', wx0, -1, wz0, wz1, y, y+.35, .15, METAL)
-    mesh.quad((wx0-.05, 8.0, wz1-2.5), (wx0-.05, 17.5, wz1-2.5), (wx0-.05, 17.5, wz0+2.5),
-              (wx0-.05, 8.0, wz0+2.5), accent, False)
+    bz = (wz0+wz1)/2
+    mesh.quad((wx0-.05, 8.0, bz+3.2), (wx0-.05, 17.5, bz+3.2), (wx0-.05, 17.5, bz-3.2),
+              (wx0-.05, 8.0, bz-3.2), accent, False)
     sentry = (SENTRY[0], TOWER_TOP, SENTRY[1])
     mesh.equipment('turret', sentry, team, circuit)
     collar(*sentry, 2.2)
     mesh.equipment('sensor', (SENSOR[0], TOWER_TOP, SENSOR[1]), team, circuit)
     b.prism(SENSOR[0], SENSOR[1], 1.95, 1.8, TOWER_TOP, TOWER_TOP+1.1, 8, HULL, solid=False, cap=False)
+
+    # --- Cistern: the generator room under the keep ---------------------------
+    # Two ways in: the stair from the hall and the tunnel door. Nothing else.
+    cx0, cx1, cz0, cz1 = CIS
+    hole = HOLES['cistern']
+    slab(*hole, CIS_FLOOR, DECK)
+    wall(hole[0], hole[1], hole[2], cz0, CIS_FLOOR, CIS_CEIL, HULL)
+    for a, c in _runs_without(hole[0], hole[1], [TUN_DOOR]): wall(a, c, cz1, hole[3], CIS_FLOOR, CIS_CEIL, HULL)
+    wall(*TUN_DOOR, cz1, hole[3], TUN_CEIL, CIS_CEIL, HULL)
+    for s in (-1, 1): wall(s*cx1, s*(cx1+WALL), cz0, cz1, CIS_FLOOR, CIS_CEIL, HULL)
+    # Stair from the hall: a straight ramp under the railed opening, closed
+    # beneath so nothing can be walked into under its low end.
+    sx0_, sx1_, sz_lo, sz_hi = STAIR
+    mesh.ramp((sx0_+sx1_)/2, sx1_-sx0_, sz_lo, sz_hi, CIS_FLOOR, TER, TIMBER)
+    closed_side(sx0_, sz_lo, sz_hi, stair_y, bottom=CIS_FLOOR)
+    for x, z in COLUMNS:
+        b.prism(x, z, .9, .9, CIS_FLOOR, CIS_CEIL, 8, HULL, phase=math.pi/8)
+        b.prism(x, z, 1.1, 1.1, CIS_FLOOR, CIS_FLOOR+.4, 8, METAL, phase=math.pi/8, solid=False)
+        b.prism(x, z, 1.15, .95, CIS_CEIL-.5, CIS_CEIL, 8, METAL, phase=math.pi/8, solid=False, cap=False)
+    mesh.equipment('generator', GEN, team, circuit)
+    gx, _, gz = GEN
+    b.prism(gx, gz, 4.6, 4.6, CIS_FLOOR+.01, CIS_FLOOR+.03, 20, METAL, solid=False)   # basin ring
+    b.prism(gx, gz, 4.2, 4.2, CIS_FLOOR+.03, CIS_FLOOR+.04, 20, accent, solid=False)
+    b.dress('z', cz0, 1, [(cx0, cx1)], CIS_FLOOR, CIS_CEIL)
+    b.dress('z', cz1, -1, _runs_without(cx0, cx1, [TUN_DOOR]), CIS_FLOOR, CIS_CEIL)
+    b.dress('x', cx0, 1, [(cz0, cz1)], CIS_FLOOR, CIS_CEIL)
+    b.dress('x', cx1, -1, [(cz0, STAIR[2]), (STAIR[3], cz1)], CIS_FLOOR, CIS_CEIL)
+    for x in (-8.0, 0.0, 5.0): b.ceiling_strip('z', x, cz0+1.5, cz1-1.5, CIS_CEIL, .7)
+    for x0 in (TUN_DOOR[0], TUN_DOOR[1]):
+        for into in (-1, 1):
+            b.face_box('z', cz1 if into < 0 else hole[3], into, x0-.3 if x0 == TUN_DOOR[0] else x0,
+                       x0 if x0 == TUN_DOOR[0] else x0+.3, CIS_FLOOR, TUN_CEIL, .12, METAL)
+    b.face_box('z', cz1, -1, TUN_DOOR[0]-.3, TUN_DOOR[1]+.3, TUN_CEIL, TUN_CEIL+.3, .14, METAL)
+    b.face_box('z', cz1, -1, TUN_DOOR[0]+.4, TUN_DOOR[1]-.4, TUN_CEIL+.5, TUN_CEIL+.8, .06, accent)
+
+    # --- Service tunnel: cistern -> north under the terrace -> west to the tower
+    n0, n1, nz0, nz1 = TUNNEL_N
+    slab(*TUNNEL_N, CIS_FLOOR, DECK)
+    wall(n0, n0+WALL, nz0, tw0, CIS_FLOOR, TUN_CEIL, HULL)
+    wall(n1-WALL, n1, nz0, nz1, CIS_FLOOR, TUN_CEIL, HULL)
+    wall(n0, n1-WALL, tw1, nz1, CIS_FLOOR, TUN_CEIL, HULL)
+    slab(*TUNNEL_N, TUN_CEIL+.5, HULL, .5)
+    slab(*TUNNEL_W, CIS_FLOOR, DECK)
+    wall(-(TX-1), n0, TUNNEL_W[2], tw0, CIS_FLOOR, TUN_CEIL, HULL)
+    wall(-(TX-1), n0, tw1, TUNNEL_W[3], CIS_FLOOR, TUN_CEIL, HULL)
+    slab(*TUNNEL_W, TUN_CEIL+.5, HULL, .5)
+    ni0, ni1 = n0+WALL, n1-WALL
+    b.dress('x', ni0, 1, [(nz0, tw0)], CIS_FLOOR, TUN_CEIL)
+    b.dress('x', ni1, -1, [(nz0, tw1)], CIS_FLOOR, TUN_CEIL)
+    b.dress('z', tw1, -1, [(TUNNEL_W[0], ni1)], CIS_FLOOR, TUN_CEIL)
+    b.dress('z', tw0, 1, [(-(TX-1), n0)], CIS_FLOOR, TUN_CEIL)
+    b.ceiling_strip('z', (ni0+ni1)/2, nz0+1, tw1-1, TUN_CEIL, .5, spacing=5)
+    b.ceiling_strip('x', (tw0+tw1)/2, TUNNEL_W[0]+.5, n0-.5, TUN_CEIL, .5, spacing=5)
+
+    # --- Storehouse: two floors right of the courtyard ------------------------
+    s0, s1, sz0, sz1 = STORE
+    i0, i1, iz0, iz1 = s0+WALL, s1-WALL, sz0+WALL, sz1-WALL
+    top = STORE_ROOF-1
+    slab(s0, s1, sz0, sz1, 0.0, DECK)
+    # West wall: ground door toward the terrace, upper door onto the bridge.
+    for za, zb in _runs_without(sz0, sz1, [STORE_DOOR_W, GATE_Z]): wall(s0, i0, za, zb, 0.0, top, HULL)
+    wall(s0, i0, *STORE_DOOR_W, 4.0, top, HULL)
+    wall(s0, i0, *GATE_Z, 0.0, STORE_UP, HULL)
+    wall(i1, s1, sz0, sz1, 0.0, top, HULL)
+    wall(i0, i1, sz0, iz0, 0.0, top, HULL)
+    for xa, xb in _runs_without(i0, i1, [STORE_DOOR_N]): wall(xa, xb, iz1, sz1, 0.0, top, HULL)
+    wall(*STORE_DOOR_N, iz1, sz1, 4.0, top, HULL)
+    hx0s, hx1s, hz0s, hz1s = STORE_HOLE
+    for x0, x1, za, zb in ((i0, hx0s, iz0, iz1), (hx0s, i1, iz0, hz0s), (hx0s, i1, hz1s, iz1)):
+        slab(x0, x1, za, zb, STORE_UP, DECK)
+    slab(s0, s1, sz0, sz1, STORE_ROOF, HULL)
+    # Ramp between the floors, closed beneath, railed round its opening.
+    r0, r1, rzg, rzt = STORE_RAMP
+    mesh.ramp((r0+r1)/2, r1-r0, rzg, rzt, 0.0, STORE_UP, TIMBER)
+    closed_side(r0, rzt, rzg, store_ramp_y, bottom=0.0)
+    wall(hx0s-.4, hx0s, hz0s, hz1s+.4, STORE_UP, STORE_UP+1.1, METAL)
+    wall(hx0s, hx1s, hz1s, hz1s+.4, STORE_UP, STORE_UP+1.1, METAL)
+    # Baffles inside every door.
+    wall(i0+2.4, i0+2.8, STORE_DOOR_W[0]-2.0, STORE_DOOR_W[1]+2.0, 0.0, 4.0, HULL)
+    wall(STORE_DOOR_N[0]-2.0, STORE_DOOR_N[1]+2.0, iz1-2.8, iz1-2.4, 0.0, 4.0, HULL)
+    wall(i0+2.4, i0+2.8, GATE_Z[0]-1.5, GATE_Z[1]+1.5, STORE_UP, top, HULL)
+    for x, z, h in CRATES:
+        wall(x-h/2, x+h/2, z-h/2, z+h/2, 0.0, h, TIMBER)
+        wall(x-h/2-.04, x+h/2+.04, z-h/2-.04, z+h/2+.04, h*.45, h*.55, METAL, False)
+    mesh.equipment('inventory', STORE_INV, team, circuit)
+    # Dressing: liners on both floors, light strips, the team stripe.
+    for y0, y1 in ((0.0, STORE_UP-1), (STORE_UP, top)):
+        b.dress('z', iz0, 1, [(i0, i1)], y0, y1)
+        b.dress('x', i1, -1, [(iz0, iz1)], y0, y1)
+        door = STORE_DOOR_W if y0 == 0 else GATE_Z
+        b.dress('x', i0, 1, _runs_without(iz0, iz1, [door]), y0, y1)
+        b.dress('z', iz1, -1, _runs_without(i0, i1, [STORE_DOOR_N] if y0 == 0 else []), y0, y1)
+        for x in (35.0, 41.0): b.ceiling_strip('z', x, iz0+1.5, iz1-1.5, y1, .6, spacing=5)
+    # Exterior: iron bands, a parapet, banners on the field and courtyard faces.
+    for y in (.4, STORE_UP-.3, top-.5):
+        b.face_box('z', sz0, -1, s0, s1, y, y+.35, .15, METAL)
+        b.face_box('x', s1, 1, sz0, sz1, y, y+.35, .15, METAL)
+        for za, zb in _runs_without(sz0, sz1, [STORE_DOOR_W, GATE_Z]):
+            b.face_box('x', s0, -1, za, zb, y, y+.35, .15, METAL)
+    t = .5
+    for x0, x1, za, zb in [(s0, s1, sz0, sz0+t), (s0, s1, sz1-t, sz1), (s0, s0+t, sz0+t, sz1-t), (s1-t, s1, sz0+t, sz1-t)]:
+        wall(x0, x1, za, zb, STORE_ROOF, STORE_ROOF+.6, HULL)
+    crenels('x', sz0, sz0+t, s0+.5, s1-.5, STORE_ROOF+.6, (.9, .9, 0, .9))
+    crenels('z', s1-t, s1, sz0+.8, sz1-.8, STORE_ROOF+.6, (.9, 0, .9, .9))
+    mid = (s0+s1)/2
+    mesh.quad((mid-2.2, 1.5, sz0-.05), (mid-2.2, top-.8, sz0-.05), (mid+2.2, top-.8, sz0-.05),
+              (mid+2.2, 1.5, sz0-.05), accent, False)
+    for zz in (STORE_DOOR_W, GATE_Z):
+        y0, y1 = (0.0, 4.0) if zz == STORE_DOOR_W else (STORE_UP, top)
+        b.face_box('x', s0, -1, zz[0]-.35, zz[0], y0, y1, .12, METAL)
+        b.face_box('x', s0, -1, zz[1], zz[1]+.35, y0, y1, .12, METAL)
+        b.face_box('x', s0, -1, zz[0]-.35, zz[1]+.35, y1-.35, y1, .14, METAL)
+        b.lamp((s0-2.0, y1-.6, (zz[0]+zz[1])/2), .45)
+    b.face_box('z', sz1, 1, STORE_DOOR_N[0]-.35, STORE_DOOR_N[1]+.35, 3.65, 4.0, .14, METAL)
+    b.lamp(((STORE_DOOR_N[0]+STORE_DOOR_N[1])/2, 3.4, sz1+2.0), .45)
+    # Bridge from the curtain gate to the upper door.
+    slab(TX, s0, GATE_Z[0], GATE_Z[1], STORE_UP, TIMBER, .6)
+    for za, zb in ((GATE_Z[0]-.4, GATE_Z[0]), (GATE_Z[1], GATE_Z[1]+.4)):
+        wall(TX, s0, za, zb, STORE_UP-.6, STORE_UP+1.1, METAL)
+    for zc in GATE_Z:
+        b.prism((TX+s0)/2, zc, .14, .14, STORE_UP+1.1, STORE_UP+2.2, 6, METAL, solid=False)
+        b.prism((TX+s0)/2, zc, .22, .22, STORE_UP+2.2, STORE_UP+2.45, 8, GLOW, solid=False)
+        b.lamp(((TX+s0)/2, STORE_UP+2.4, zc), .4)
 
     # --- Watch ruin, right flank ----------------------------------------------
     cx, cz = RUIN
@@ -401,12 +617,17 @@ def build(mesh, team, circuit):
         'spawn': (-4.0, TER+lift, -10.5),
         # (x, y, z, local yaw): yaw 0 faces the base front (-Z). Hall spawns
         # face along the hall toward the far baffle, never the near one.
+        # No spawns in the cistern (generator room), so it can't be camped.
         'spawn_points': [(-4.0, TER+lift, -10.5, math.pi), (4.0, TER+lift, -10.5, math.pi),
                          (-4.0, TER+lift, -2.5, 0.0), (4.0, TER+lift, -2.5, 0.0),
-                         (18.2, TER+lift, 15.5, math.pi/2), (-18.2, TER+lift, 15.5, -math.pi/2),
-                         (px-5, PAD_TOP+lift, pz+4, 0.0), (px+5, PAD_TOP+lift, pz+4, 0.0)],
-        'entrances': [(0.0, TER+.2, KZ0), (0.0, TER+.2, KZ1), (0.0, .2, FRONT_RAMP[2]), (0.0, .2, BACK_RAMP[2])],
-        'generator': generator,
+                         (36.0, STORE_UP+lift, 9.0, -math.pi/2), (34.0, STORE_UP+lift, 18.0, -math.pi/2),
+                         (-18.2, TER+lift, 15.5, -math.pi/2), (px-5, PAD_TOP+lift, pz+4, 0.0)],
+        'entrances': [(0.0, TER+.2, KZ0), (0.0, TER+.2, KZ1), (0.0, .2, FRONT_RAMP[2]), (0.0, .2, BACK_RAMP[2]),
+                      (STORE[0], .2, sum(STORE_DOOR_W)/2), (sum(STORE_DOOR_N)/2, .2, STORE[3]),
+                      (sum(TOWER_DOOR)/2, LANDING+.2, TOWER[3])],
+        'generator': GEN,
+        'gen_entrances': [((HALL_HOLE[0]+HALL_HOLE[1])/2, TER+.2, HALL_HOLE[3]),
+                          (sum(TUN_DOOR)/2, CIS_FLOOR+.2, CIS[3])],
         'roof_turret': roof_turret,
         'sentry': sentry,
         'ruin_turret': ruin_turret,
@@ -415,5 +636,12 @@ def build(mesh, team, circuit):
         'hall_view': (-11.5, TER+1.7, -11.8),
         'court_view': (-17.5, TER+1.7, 26.5),
         'exterior_view': (-46.0, 16.0, -78.0),
+        'cistern_view': (-12.4, CIS_FLOOR+1.8, -15.4),
+        'tunnel_view': (-12.0, CIS_FLOOR+1.7, 8.0),
+        'tower_room_view': (-30.6, CIS_FLOOR+1.8, 16.4),
+        'tower_exit': (sum(TOWER_DOOR)/2, LANDING, TOWER[3]),
+        'store_view': (46.4, STORE_UP+1.7, 20.4),
+        'store_ground_view': (46.4, 1.7, 3.6),
+        'store_inventory': STORE_INV,
     }
 

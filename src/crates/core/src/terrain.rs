@@ -538,6 +538,27 @@ mod map_tests {
             crate::map_pack::on(MapId::DesertOfDeathClone).unwrap().fingerprint);
     }
 
+    /// Dustreach's generators sit underground: in the cistern under each keep,
+    /// on a floor 2 m below the ground, in cut terrain cells.
+    #[test]
+    fn dustreach_generators_are_underground_in_cut_cells() {
+        let id = MapId::DesertOfDeathClone;
+        let pack = crate::map_pack::on(id).unwrap();
+        let info = info(id);
+        let gens: Vec<_> = crate::equipment::definitions(id).iter()
+            .filter(|d| d.kind == crate::equipment::Kind::Generator).collect();
+        assert_eq!(gens.len(), 2);
+        assert_eq!(pack.manifest.holes.len(), 34);
+        for d in gens {
+            let home = if d.team == 0 { info.ember } else { info.glacier };
+            let p = d.pos();
+            assert!(pack.hole(p.x, p.z), "generator {} is not over a cut cell", d.id);
+            // The entity point is 2.5 m up the model; probe just above the floor.
+            let floor = pack.floor(p - Vec3::Y * 2.4).expect("generator floor").0;
+            assert!((floor - (home.y - 2.0)).abs() < 0.01, "generator {} floor {floor}, base {home:?}", d.id);
+        }
+    }
+
     #[test]
     fn cairnhold_is_embedded_with_grounded_spawns_and_flag_decks() {
         let id = MapId::StonehengeClone;

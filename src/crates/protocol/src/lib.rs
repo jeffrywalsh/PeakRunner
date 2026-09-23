@@ -14,12 +14,14 @@ pub fn game_protocol() -> String {
         // Cairnhold, Frostline and Dustreach hold the four former clone slots;
         // no private reference packs remain.
         // muzzle1: player shots are clamped to the shooter's side of walls.
-        Some(pack) => format!("{PROTOCOL}:equipment3:blast3:chat2:names1:ping1:fov1:muzzle1:maps6:{}:{}:{}:{}:{}",pack.fingerprint,
+        // equipment4: sensors and fixed turrets carry generator-powered shields,
+        // and equipment snapshots include shield state.
+        Some(pack) => format!("{PROTOCOL}:equipment4:blast3:chat2:names1:ping1:fov1:muzzle1:maps6:{}:{}:{}:{}:{}",pack.fingerprint,
             map_pack::on(MapId::BroadsideClone).expect("Tower Complex").fingerprint,
             map_pack::on(MapId::StonehengeClone).expect("Cairnhold").fingerprint,
             map_pack::on(MapId::SnowblindClone).expect("Frostline").fingerprint,
             map_pack::on(MapId::DesertOfDeathClone).expect("Dustreach").fingerprint),
-        None => format!("{PROTOCOL}:equipment3:blast3:chat2:names1:ping1:fov1:muzzle1"),
+        None => format!("{PROTOCOL}:equipment4:blast3:chat2:names1:ping1:fov1:muzzle1"),
     }
 }
 
@@ -45,6 +47,16 @@ pub enum ServerMsg {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn equipment_shield_state_survives_the_wire() {
+        let mut m=peakrunner_core::sim::Match::new(peakrunner_core::terrain::MapId::Raindance);
+        assert!(!m.world.equipment.is_empty(),"Raindance has equipment");
+        m.world.equipment[0].shield=123.5;m.world.equipment[0].health=40.;
+        let text=serde_json::to_string(&super::ServerMsg::Snapshot{state:m.snapshot()}).unwrap();
+        let super::ServerMsg::Snapshot{state}=serde_json::from_str(&text).unwrap() else {panic!()};
+        assert_eq!((state.equipment[0].shield,state.equipment[0].health),(123.5,40.));
+        assert!(!text.contains("since_hit"),"the server-side regen timer is not sent");
+    }
     #[test]
     fn chat_cannot_supply_identity_or_frag_outcomes() {
         for text in [r#"{"op":"chat","text":"hello","sender":"Admin"}"#,

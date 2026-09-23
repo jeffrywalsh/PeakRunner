@@ -12,6 +12,7 @@ import unittest
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
+from assets import budgets
 from assets import cairnhold_base as base
 from assets import cairnhold_materials
 from assets import cairnhold_ring
@@ -215,7 +216,7 @@ class CairnholdTests(unittest.TestCase):
         kinds = sorted(e['kind'] for e in b.entities)
         self.assertEqual(kinds, ['generator', 'inventory', 'inventory', 'sensor', 'turret', 'turret', 'turret'])
         self.assertEqual(sorted(e['weapon'] for e in b.entities if e['kind'] == 'turret'), ['bullet', 'bullet', 'plasma'])
-        self.assertLess(len(b.collision)//9, 3000)
+        self.assertLess(len(b.collision)//9, budgets.COLLISION_TRIS_PER_BASE)
 
     def test_two_instances_have_unique_ids_and_independent_circuits(self):
         mesh = kit.Mesh(); base.build(mesh, 0, 'red')

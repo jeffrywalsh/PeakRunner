@@ -12,7 +12,9 @@ Gate. Long crescent dunes run diagonally across the whole field: a gentle
 windward face and a steeper lee face, warped so no two crests line up.
 
 Structures sit in "sites": the ground is blended toward an authored surface
-around each one. Nothing is cut out of the terrain.
+around each one. The only cuts are the whole-cell holes under each citadel's
+underground level (dustreach_citadel.HOLES); every one lies under the terrace
+or the tower, so the heights here are never pinned.
 """
 from functools import lru_cache
 

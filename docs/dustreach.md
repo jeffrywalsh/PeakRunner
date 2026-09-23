@@ -20,11 +20,13 @@ idea and nothing else:
   exposed, sunken flag; forward and flank turret ruins; a monumental ruined
   arch on the central saddle; scattered ruin cover in the field.
 - **New:** everything built. Each team's citadel stands on a raised terrace:
-  a keep with twin pylon towers (spawn hall, two inventories, generator,
-  baffles behind both doors), an arcaded courtyard round a sunken flag court
+  a keep with twin pylon towers (spawn hall, two inventories, baffles
+  behind both doors), an arcaded courtyard round a sunken flag court
   open to the sky, a watch tower with the sentry turret and sensor, a broken
   watch ruin carrying the plasma turret on the right flank, and a caravan dais
-  landing pad with four deploy slots on the left flank. The Sun Gate is a new
+  landing pad with four deploy slots on the left flank. v2 adds a cistern
+  level under the keep (the generator), a service tunnel to the watch tower,
+  and a two-level storehouse (see below). The Sun Gate is a new
   triumphal arch whose 12 m opening the flag lane passes straight through.
   Sandstone, terracotta, bleached timber and blued iron materials, team
   banners with a sun motif, a clear desert sky and a synthesized wind loop.
@@ -75,19 +77,54 @@ From `src/` with the numpy venv:
 ../research/local-assets/tools/venv/bin/python scripts/test-dustreach.py
 ```
 
-The default output is ignored `local-assets/dustreach`; the build refuses to
-overwrite. Baked builds are byte-identical. 2,056 collision triangles per
-citadel (budget 3,000), 1,248 for the gate and ruins, 11,508 render triangles,
-8 lightmap pages, pack about 12 MB.
+The default output is the embedded `assets/maps/dustreach`; the build refuses
+to overwrite. Baked builds are byte-identical. 3,442 collision triangles per
+citadel (budget 4,500, see `map-pipeline.md`), 1,248 for the gate and ruins,
+19,200 render triangles, 34 terrain holes, 13 lightmap pages, pack about 15 MB.
 
-The 18 tests cover floors and headroom, every ramp (open sky, closed
+The 24 tests cover floors and headroom, every ramp (open sky, closed
 undersides), the engine's standing-support ray over every walkable region, no
 accidental slopes, no overlapping floor plates, spawn validity, the sunken
 flag open to the sky, transform invariance and the collision budget, unique
 equipment IDs and circuits, deterministic distinct materials and sky, turret
-sightlines into both keeps, terrain symmetry and slope bounds, ground under
+sightlines into the hall, cistern, tunnel, tower room and both storehouse
+floors, the underground and storehouse floors and headroom, the three new
+ramps, exactly two ways into the generator room, hole cells on the grid and
+covered with flat cut edges, the bridge route through the curtain gate,
+terrain symmetry and slope bounds, ground under
 every structure, gate symmetry and the open lane, bake determinism, the wind
 loop and byte-identical rebuilds.
+
+## v2: underground level and storehouse
+
+Built from the Tribes: Ascend research (`research/ascend-study/`): flag
+outside, generator inside behind exactly two entrances, tunnels linking a
+team's own buildings, and a second building to split the fight. Nothing of
+Ascend's maps is copied. All dimensions are local to a base, mirrored for blue.
+
+- **Cistern (generator room):** 26.4 × 22.4 m under the keep, floor 2 m below
+  the ground, 6 m tall, four columns, generator on a ringed basin. Exactly two
+  ways in: a 29° stair from the keep hall (a railed opening in the hall floor)
+  and one tunnel door (4.2 m wide, 4.5 m high) in its north wall. No spawns
+  down there.
+- **Service tunnel:** 6.4 m wide, 4.5 m headroom, lamp strips every ~5 m.
+  It runs about 16 m north under the terrace, then 8 m west, into a room in
+  the base of the enlarged watch tower. A ramp climbs to a landing and a door
+  in the tower's back face. The tunnel is a defender and infiltrator route
+  between the generator and the tower; capping stays on the surface.
+- **Storehouse:** 20 × 20 m, two floors (0 and 5 m), roof at 10 m, right of
+  the courtyard. A bridge at terrace level crosses from a new gate in the east
+  curtain to its upper door. It has a third inventory station, two of the eight
+  spawns (upper floor), a railed ramp between floors, crates, and baffles
+  inside all three doors.
+- **Terrain holes:** 17 whole 8 m cells per base (`HOLES` in
+  `dustreach_citadel.py`), all under the terrace or the tower. No lid is
+  exposed, and the cut's edge keeps the flat site height.
+- **Routes:** a Rust test sweeps the engine's full player body along
+  hall → stair → cistern → tunnel → tower → back door and courtyard → gate →
+  bridge → storehouse → its ramp and doors, for both teams
+  (`dustreach_underground_and_storehouse_routes_are_walkable`). Another checks
+  both generators stand in cut cells, 2 m below the ground.
 
 ## Known gaps
 
@@ -95,4 +132,10 @@ loop and byte-identical rebuilds.
 - Kit sensor, inventory and generator models are shared; turrets now use the
   kit's mount plus the client's runtime head.
 - No real glow: lit surfaces are bright textures.
-- Nobody has walked, skied or played it yet.
+- Nobody has walked, skied or played it yet, including the new underground
+  routes. Bots don't use the stair or the tunnel.
+- The generator may turn out too easy to hold: four of the eight spawns are in
+  the keep hall next to the stair. Watch this in playtests; moving hall
+  spawns out to the storehouse is the first lever.
+- The tower's back door has no baffle. No turret can see in (the tests prove
+  it), but players outside can look straight up the exit ramp.

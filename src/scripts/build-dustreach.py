@@ -95,6 +95,25 @@ def terrain_sites(definition):
     return out
 
 
+def holes(definition):
+    """Terrain cells cut under the underground level (cistern, tunnel, tower
+    room): sorted cell indices. Every rect must lie on the 8 m grid; every
+    cell lies under the terrace or the tower, so the ground at the cut's edge
+    keeps the flat site height and nothing needs pinning."""
+    step = dustreach_terrain.STEP
+    cells = set()
+    for base in definition['bases']:
+        for name, (x0, x1, z0, z1) in dustreach_citadel.HOLES.items():
+            (ax, az), (bx, bz) = to_world(base, x0, z0), to_world(base, x1, z1)
+            wx0, wx1, wz0, wz1 = min(ax, bx), max(ax, bx), min(az, bz), max(az, bz)
+            for v in (wx0, wx1, wz0, wz1):
+                if abs(v/step-round(v/step)) > 1e-9: raise ValueError(f'{name} is not on the 8 m grid')
+            for iz in range(round(wz0/step), round(wz1/step)):
+                for ix in range(round(wx0/step), round(wx1/step)):
+                    cells.add((ix, iz))
+    return sorted(iz*256+ix for ix, iz in cells)
+
+
 def terrain_grid(definition):
     return dustreach_terrain.heights(definition['seed'], terrain_sites(definition))
 
@@ -189,7 +208,7 @@ def build(output, bake=True):
     if lightmap: manifest['lightmap'] = lightmap
     gx, gy, gz = definition['gate']['position']
     manifest.update(version=1, id=definition['id'], name=definition['name'], flags=flags, spawns=spawns,
-        exact_spawns=True, spawn_points=spawn_points, holes=[], entities=mesh.entities,
+        exact_spawns=True, spawn_points=spawn_points, holes=holes(definition), entities=mesh.entities,
         instances=instances, ambient_emitters=[[gx, gy+20, gz, .25, 400, 2400]],
         sky={'visibleDistance': '2600', 'fogDistance': '1500', 'fogColor': '0.80 0.69 0.52'},
         asset_sha256=pack_writer.source_hash(dustreach_citadel.__file__),
@@ -204,6 +223,7 @@ def build(output, bake=True):
     pack_writer.write_pack(output, files, manifest)
     print(f'Built {definition["name"]}: {len(mesh.collision)//9} solid triangles '
           f'({base_triangles//2} per citadel, {len(mesh.collision)//9-base_triangles} gate and ruins), '
+          f'{len(manifest["holes"])} terrain holes, '
           f'{len(mesh.vertices)//36} render triangles'
           + (f', {lightmap["pages"]} lightmap pages' if lightmap else ', unbaked'))
 

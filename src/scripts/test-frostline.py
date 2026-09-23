@@ -12,6 +12,7 @@ import unittest
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
+from assets import budgets
 from assets import frostline_beacon as beacon
 from assets import frostline_flora as flora
 from assets import frostline_materials as materials
@@ -225,7 +226,7 @@ class FrostlineTests(unittest.TestCase):
         self.assertEqual(kinds, ['generator', 'inventory', 'inventory', 'inventory', 'repair', 'sensor',
                                  'turret', 'turret', 'turret'])
         self.assertEqual(sorted(e['weapon'] for e in b.entities if e['kind'] == 'turret'), ['bullet', 'bullet', 'plasma'])
-        self.assertLess(len(b.collision)//9, 3000)
+        self.assertLess(len(b.collision)//9, budgets.COLLISION_TRIS_PER_BASE)
         self.assertEqual(len(anchors['deploy_slots']), 4)
 
     def test_two_instances_have_unique_ids_and_independent_circuits(self):

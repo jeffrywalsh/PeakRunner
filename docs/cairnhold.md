@@ -109,7 +109,7 @@ helpers live in `scripts/assets/structure_kit.py`.
 - holes and wall coverage of the pinned boundary, ground under decks and the Ring
 - Ring symmetry, bake determinism and byte-identical rebuilds
 
-Collision: 2,336 triangles per base (budget 3,000), 256 for the Ring; about 6,250 render triangles per base.
+Collision: 2,336 triangles per base (budget then 3,000; now 4,500, see `map-pipeline.md`), 256 for the Ring; about 6,250 render triangles per base.
 
 ## Validation done, and gaps
 

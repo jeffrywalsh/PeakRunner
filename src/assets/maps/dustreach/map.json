@@ -18,9 +18,9 @@
     "position": "-384 -160 54",
     "scale": "720 150 1"
   },
-  "texture_count": 28,
+  "texture_count": 33,
   "lightmap": {
-    "pages": 8,
+    "pages": 13,
     "first_layer": 20,
     "texel_m": 0.5,
     "sun": [
@@ -28,7 +28,7 @@
       0.57735,
       -0.57735
     ],
-    "lamps": 97,
+    "lamps": 185,
     "baker_sha256": "66d1c04a0581f283b62d4a01a9229abd22fbd18a738474c8c5c148db84800fed"
   },
   "version": 1,
@@ -86,10 +86,16 @@
         3.141592653589793
       ],
       [
-        1005.8,
+        988.0,
         136.2,
-        663.5,
-        4.71238898038469
+        670.0,
+        1.5707963267948966
+      ],
+      [
+        990.0,
+        136.2,
+        661.0,
+        1.5707963267948966
       ],
       [
         1042.2,
@@ -99,12 +105,6 @@
       ],
       [
         1113.0,
-        135.2,
-        701.0,
-        3.141592653589793
-      ],
-      [
-        1103.0,
         135.2,
         701.0,
         3.141592653589793
@@ -136,10 +136,16 @@
         0.0
       ],
       [
-        1042.2,
+        1060.0,
         136.2,
-        1384.5,
-        1.5707963267948966
+        1378.0,
+        4.71238898038469
+      ],
+      [
+        1058.0,
+        136.2,
+        1387.0,
+        4.71238898038469
       ],
       [
         1005.8,
@@ -152,16 +158,45 @@
         135.2,
         1347.0,
         0.0
-      ],
-      [
-        945.0,
-        135.2,
-        1347.0,
-        0.0
       ]
     ]
   ],
-  "holes": [],
+  "holes": [
+    20867,
+    21121,
+    21122,
+    21123,
+    21377,
+    21630,
+    21631,
+    21632,
+    21633,
+    21886,
+    21887,
+    21888,
+    21889,
+    22142,
+    22143,
+    22144,
+    22145,
+    43390,
+    43391,
+    43392,
+    43393,
+    43646,
+    43647,
+    43648,
+    43649,
+    43902,
+    43903,
+    43904,
+    43905,
+    44158,
+    44412,
+    44413,
+    44414,
+    44668
+  ],
   "entities": [
     {
       "id": "inventory-0",
@@ -190,20 +225,7 @@
       "weapon": "bullet"
     },
     {
-      "id": "generator-2",
-      "kind": "generator",
-      "position": [
-        1014.0,
-        137.5,
-        685.0
-      ],
-      "team": 0,
-      "circuit": "base-0",
-      "radius": 2.8,
-      "weapon": "bullet"
-    },
-    {
-      "id": "turret-3",
+      "id": "turret-2",
       "kind": "turret",
       "position": [
         1024.0,
@@ -216,7 +238,7 @@
       "weapon": "bullet"
     },
     {
-      "id": "turret-4",
+      "id": "turret-3",
       "kind": "turret",
       "position": [
         1048.2,
@@ -229,7 +251,7 @@
       "weapon": "bullet"
     },
     {
-      "id": "sensor-5",
+      "id": "sensor-4",
       "kind": "sensor",
       "position": [
         1051.0,
@@ -242,7 +264,33 @@
       "weapon": "bullet"
     },
     {
-      "id": "turret-6",
+      "id": "generator-5",
+      "kind": "generator",
+      "position": [
+        1024.0,
+        130.5,
+        684.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 2.8,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-6",
+      "kind": "inventory",
+      "position": [
+        986.0,
+        136.0,
+        674.8
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "turret-7",
       "kind": "turret",
       "position": [
         952.0,
@@ -255,7 +303,7 @@
       "weapon": "plasma"
     },
     {
-      "id": "inventory-7",
+      "id": "inventory-8",
       "kind": "inventory",
       "position": [
         1014.0,
@@ -268,7 +316,7 @@
       "weapon": "bullet"
     },
     {
-      "id": "inventory-8",
+      "id": "inventory-9",
       "kind": "inventory",
       "position": [
         1014.0,
@@ -278,19 +326,6 @@
       "team": 1,
       "circuit": "base-1",
       "radius": 3,
-      "weapon": "bullet"
-    },
-    {
-      "id": "generator-9",
-      "kind": "generator",
-      "position": [
-        1034.0,
-        137.5,
-        1363.0
-      ],
-      "team": 1,
-      "circuit": "base-1",
-      "radius": 2.8,
       "weapon": "bullet"
     },
     {
@@ -333,7 +368,33 @@
       "weapon": "bullet"
     },
     {
-      "id": "turret-13",
+      "id": "generator-13",
+      "kind": "generator",
+      "position": [
+        1024.0,
+        130.5,
+        1364.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 2.8,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-14",
+      "kind": "inventory",
+      "position": [
+        1062.0,
+        136.0,
+        1373.2
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "turret-15",
       "kind": "turret",
       "position": [
         1096.0,
@@ -348,7 +409,7 @@
   ],
   "instances": [
     {
-      "asset": "dustreach-citadel-v1",
+      "asset": "dustreach-citadel-v2",
       "team": 0,
       "position": [
         1024,
@@ -387,12 +448,39 @@
             1024.0,
             130.2,
             633.0
+          ],
+          [
+            996.0,
+            130.2,
+            669.0
+          ],
+          [
+            986.0,
+            130.2,
+            657.0
+          ],
+          [
+            1052.5,
+            130.1,
+            648.0
           ]
         ],
         "generator": [
-          1014.0,
-          135.0,
-          685.0
+          1024.0,
+          128.0,
+          684.0
+        ],
+        "gen_entrances": [
+          [
+            1012.75,
+            135.2,
+            680.5
+          ],
+          [
+            1035.1,
+            128.2,
+            672.8
+          ]
         ],
         "roof_turret": [
           1024.0,
@@ -450,11 +538,46 @@
           1070.0,
           146.0,
           757.0
+        ],
+        "cistern_view": [
+          1036.4,
+          129.8,
+          694.4
+        ],
+        "tunnel_view": [
+          1036.0,
+          129.7,
+          671.0
+        ],
+        "tower_room_view": [
+          1054.6,
+          129.8,
+          662.6
+        ],
+        "tower_exit": [
+          1052.5,
+          129.9,
+          648.0
+        ],
+        "store_view": [
+          977.6,
+          136.7,
+          658.6
+        ],
+        "store_ground_view": [
+          977.6,
+          131.7,
+          675.4
+        ],
+        "store_inventory": [
+          986.0,
+          135.0,
+          673.8
         ]
       }
     },
     {
-      "asset": "dustreach-citadel-v1",
+      "asset": "dustreach-citadel-v2",
       "team": 1,
       "position": [
         1024,
@@ -493,12 +616,39 @@
             1024.0,
             130.2,
             1415.0
+          ],
+          [
+            1052.0,
+            130.2,
+            1379.0
+          ],
+          [
+            1062.0,
+            130.2,
+            1391.0
+          ],
+          [
+            995.5,
+            130.1,
+            1400.0
           ]
         ],
         "generator": [
-          1034.0,
-          135.0,
-          1363.0
+          1024.0,
+          128.0,
+          1364.0
+        ],
+        "gen_entrances": [
+          [
+            1035.25,
+            135.2,
+            1367.5
+          ],
+          [
+            1012.9,
+            128.2,
+            1375.2
+          ]
         ],
         "roof_turret": [
           1024.0,
@@ -556,6 +706,41 @@
           978.0,
           146.0,
           1291.0
+        ],
+        "cistern_view": [
+          1011.6,
+          129.8,
+          1353.6
+        ],
+        "tunnel_view": [
+          1012.0,
+          129.7,
+          1377.0
+        ],
+        "tower_room_view": [
+          993.4,
+          129.8,
+          1385.4
+        ],
+        "tower_exit": [
+          995.5,
+          129.9,
+          1400.0
+        ],
+        "store_view": [
+          1070.4,
+          136.7,
+          1389.4
+        ],
+        "store_ground_view": [
+          1070.4,
+          131.7,
+          1372.6
+        ],
+        "store_inventory": [
+          1062.0,
+          135.0,
+          1374.2
         ]
       }
     },
@@ -730,19 +915,19 @@
     "fogDistance": "1500",
     "fogColor": "0.80 0.69 0.52"
   },
-  "asset_sha256": "1138f4068321067301b5cae0a2942c05fa1737155e533d556780a2fa7f670f49",
+  "asset_sha256": "67f24426abe7818a3478a5c8f3e5b51436a736e5b05cb80f110585e8e40d1e3b",
   "gate_asset_sha256": "463844e0c681ff0a7a7a2a9b69757aab937db8a846413c8e03cadccec9339e2d",
   "structure_kit_sha256": "0636249d6eb133db27977b895a48d7d50ce7b8882ec8ba8fd0a63908b5f04630",
-  "terrain_source_sha256": "50971178d060d8750aef922af61852b77700f019d659199784a1d182b8235162",
+  "terrain_source_sha256": "7c1a24c6528ffc8c1315496e9b447cc2fe7061322afa9c3f43f6263a606f99fa",
   "material_source_sha256": "46e919d56b58c04eda219ac0529d9583e98e5d8bcf76586485b5ca2e6a33f838",
   "provenance": "PeakRunner original Dustreach geometry, original procedural dune terrain, original material kit, sky and synthesized wind; no extracted assets, no external height data, no recordings",
   "definition_sha256": "3c8dbe0b1b75922fbf6a1a4a1ab87eaca781f9cd9a3f3f2a4c37975db5623583",
   "files": {
-    "height.bin": "640d7e9ac7c0b2b7ecf2e64b631e0d93a6f44ed2fc29a4bac4a4e80a9fc95a55",
-    "vertices.bin": "5c501ab57a3f7c2a2a925cc8d6defdffb6cdd262c4ad1fd9174dc78902938065",
-    "collision.bin": "2da561854be5fe17a3b23e21493e593698ef0126cc6f3d8447b1a24787ba55f0",
-    "weights.rgba": "36d0686ffa7cede185dd35170c29a13bd0b83fd7e1a948771eb2647857930be5",
-    "textures.rgba": "d7ad5c8d6a79397276da570e4b1657b5c80358f00ca11864d38acdd6860c8a9e",
+    "height.bin": "c6dfaca84a24c372640888f8dd3541dd627144844193ddfc1666a86700e16a38",
+    "vertices.bin": "5ed37a15ff735ec18b71311014e59c139a05ef602d5d2e56df7b1dae2cd5f11c",
+    "collision.bin": "2d4173db12ed73d78705d45d94e0227b89d8f83472b826c7e25038a5c141aaa0",
+    "weights.rgba": "f71c0e623e45f28b804145e6f011aed122846b4d1daa4a75a0c032419d6427da",
+    "textures.rgba": "16e9ec21b72f9b4c130e058f417c9cc270164af9df1663da1737039069c2cc7d",
     "ambient.f32": "a3938b139d99dbdde7156268f817497624177809ab733a0f0ccc8ccce3782462"
   }
 }

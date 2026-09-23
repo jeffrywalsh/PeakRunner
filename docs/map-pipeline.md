@@ -78,7 +78,22 @@ Design checklist (each item has bitten us once):
   open face per level. Check every route with body sweeps.
 - **Decoration is non-solid.** Trim, liners, markings, lamps and landing
   circles use `solid=False`, so nothing slick or snaggy sits on a floor.
-- **Budget:** at most 3000 collision triangles per base; report render counts.
+- **Budget:** at most 4500 collision triangles per base, including its
+  outbuildings, tunnels and pads (`scripts/assets/budgets.py`, checked by
+  every map's suite); report render counts. Raised from 3000 for Dustreach's
+  cistern and storehouse after measuring. At 3442 per base, Dustreach's sim tick
+  averaged 141 µs (was 112 µs at 2056), worst tick ~310 µs either way,
+  against a 16 667 µs tick. A mixed collision query averaged 6.2 µs (was 3.4 µs),
+  because the base's 32 m buckets got denser. The densest bucket (1029
+  triangles) matches Cairnhold's (1066). The eight-client load test sustained
+  726 ticks in 12 s before and after. Re-measure before going past 4500 with
+  the ignored `collision_budget_timing` probe in `sim.rs`, and with
+  `PEAKRUNNER_LOAD_MAP=<key>` on the load test.
+- **Underground:** tunnels and basements sit in terrain holes (whole 8 m
+  cells, listed in the manifest's `holes`). Keep every hole cell under a
+  structure, so no lid is exposed and the cut's edge keeps the flat site
+  height. Otherwise the lid must meet the terrain exactly, like Cairnhold's
+  trench. A generator room gets exactly two entrances and no spawn points.
 - **Terrain:** original procedural. Match the study's slope *profile*, keep
   bases exactly mirrored (180° symmetry), keep ski runs and more than one
   route, avoid large flats. Where terrain is cut for trenches or bunkers,

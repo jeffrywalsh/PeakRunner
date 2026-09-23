@@ -12,6 +12,7 @@ import unittest
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
+from assets import budgets
 from assets import dustreach_citadel as base
 from assets import dustreach_gate as gate
 from assets import dustreach_materials
@@ -159,7 +160,8 @@ class DustreachTests(unittest.TestCase):
         n, cen = self.soup.n, self.soup.tris.mean(1)
         ents = [e['position'] for e in self.mesh.entities]
         cx, cz = base.RUIN
-        ramps = [base.FRONT_RAMP, base.BACK_RAMP, base.ruin_ramp(), (-base.PIT_X, base.PIT_X, *base.PIT_Z)]
+        ramps = [base.FRONT_RAMP, base.BACK_RAMP, base.ruin_ramp(), (-base.PIT_X, base.PIT_X, *base.PIT_Z),
+                 base.STAIR, base.TOWER_RAMP, base.STORE_RAMP]
         for i in np.where((n[:, 1] > .3) & (n[:, 1] < .9999))[0]:
             x, y, z = cen[i]
             if any(r[0]-.01 <= x <= r[1]+.01 and min(r[2:])-.01 <= z <= max(r[2:])+.01 for r in ramps): continue
@@ -224,9 +226,9 @@ class DustreachTests(unittest.TestCase):
             for x, y in zip(expected, b.collision[i:i+3]): self.assertAlmostEqual(x, y, places=3)
         self.assertTrue(all(e['team'] == 1 and e['circuit'] == 'two' for e in b.entities))
         kinds = sorted(e['kind'] for e in b.entities)
-        self.assertEqual(kinds, ['generator', 'inventory', 'inventory', 'sensor', 'turret', 'turret', 'turret'])
+        self.assertEqual(kinds, ['generator', 'inventory', 'inventory', 'inventory', 'sensor', 'turret', 'turret', 'turret'])
         self.assertEqual(sorted(e['weapon'] for e in b.entities if e['kind'] == 'turret'), ['bullet', 'bullet', 'plasma'])
-        self.assertLess(len(b.collision)//9, 3000)
+        self.assertLess(len(b.collision)//9, budgets.COLLISION_TRIS_PER_BASE)
 
     def test_two_instances_have_unique_ids_and_independent_circuits(self):
         mesh = kit.Mesh(); base.build(mesh, 0, 'red')
@@ -257,6 +259,121 @@ class DustreachTests(unittest.TestCase):
         self.assertEqual(len(face), 256*256*4)
         self.assertNotEqual(face, kit.sky(4))
 
+    # --- Underground level and storehouse (v2) -------------------------------
+    def test_underground_and_storehouse_floors_have_floor_and_headroom(self):
+        C, S = base.CIS_FLOOR, base.STORE_UP
+        tw = (base.TUNNEL_W[2]+base.TUNNEL_W[3])/2
+        # (x, z, floor, minimum headroom)
+        samples = [(x, z, C, 5.5) for x, z in ((-10, -14), (-10, 4), (4, -14), (-4, 3), (3, 4), (-11, -3))]
+        samples += [(-12.0, z, C, 4.2) for z in np.arange(7.5, 21.6, 2.0)]                 # tunnel north
+        samples += [(x, tw, C, 4.2) for x in np.arange(-23.5, -15.9, 1.5)]                # tunnel west
+        samples += [(-29.0, 18.0, C, 6.0), (-25.5, 20.0, C, 6.0), (-29.5, 28.5, base.LANDING, 4.2)]   # tower room
+        samples += [(x, z, 0.0, 3.5) for x, z in ((33, 4), (45, 4), (38, 20), (33, 20), (40, 8))]    # store, ground
+        samples += [(x, z, S, 3.5) for x, z in ((33, 4), (40, 20), (46, 5), (35, 12))]              # store, upper
+        for x, z, y, room in samples:
+            t, ny = self.soup.hits((x, y+3, z), (0, -1, 0))
+            self.assertTrue(len(t) and abs(3-t[0]) < 1e-6 and ny[0] > .999, (x, z, y, 'floor', t[:1]))
+            self.assertGreater(self.soup.first((x, y+.2, z), (0, 1, 0)), room, (x, z, y, 'headroom'))
+        # The tunnel keeps its 4.5 m headroom under a lid, not open to the terrace.
+        self.assertAlmostEqual(self.soup.first((-12.0, C+.2, 12.0), (0, 1, 0)), base.TUN_CEIL-C-.2, places=4)
+
+    def test_new_ramps_climb_with_headroom_and_closed_undersides(self):
+        cases = [(base.STAIR, base.stair_y, base.CIS_FLOOR, 1),        # open (railed) side at x0, probe from -x
+                 (base.TOWER_RAMP, base.tower_ramp_y, base.CIS_FLOOR, -1),
+                 (base.STORE_RAMP, base.store_ramp_y, 0.0, 1)]
+        for ramp, fn, bottom, side in cases:
+            x0, x1, za, zb = ramp
+            lo, hi = sorted((za, zb))
+            rise = abs(fn(zb)-fn(za))
+            self.assertLess(math.degrees(math.atan(rise/(hi-lo))), 30.0, ramp)
+            for z in np.arange(lo+.3, hi-.2, .8):
+                for x in (x0+.6, (x0+x1)/2, x1-.6):
+                    y = fn(z)
+                    t, ny = self.soup.hits((x, y+1, z), (0, -1, 0))
+                    self.assertLess(abs(1-t[0]), .02, (ramp, x, z))
+                    self.assertGreater(abs(ny[0]), .85, (ramp, z))
+                    self.assertGreater(self.soup.first((x, y+.2, z), (0, 1, 0)), 2.4, (ramp, x, z, 'headroom'))
+            # Nothing can be walked into underneath the open edge.
+            edge = x0 if side > 0 else x1
+            for z in np.arange(lo+.5, hi-.5, .8):
+                if fn(z)-.9 < bottom+.3: continue
+                self.assertLess(self.soup.first((edge-side, bottom+.3, z), (side, 0, 0)), 1.01, (ramp, z))
+        # The stair's head meets the hall floor flush, and the hall floor
+        # resumes over the stair's low end (the opening is railed round).
+        hx0, hx1, hz0, hz1 = base.HALL_HOLE
+        t, ny = self.soup.hits(((hx0+hx1)/2, TER+1, hz1+.3), (0, -1, 0))
+        self.assertAlmostEqual(t[0], 1.0, places=4); self.assertGreater(ny[0], .999)
+        t, _ = self.soup.hits(((hx0+hx1)/2, TER+1, hz1-.3), (0, -1, 0))
+        self.assertAlmostEqual(TER+1-t[0], base.stair_y(hz1-.3), delta=.02)
+        for x in (hx0-.2, (hx0+hx1)/2):
+            self.assertLess(self.soup.first((x, TER+.5, hz0-1.0), (0, 0, 1)), 1.01, 'south rail')
+
+    def test_generator_room_has_exactly_two_ways_in(self):
+        """The cistern's walls have one opening (the tunnel door); the only
+        other way in is the stair from the hall. No view out through its
+        ceiling, and the generator sits on its floor."""
+        C = base.CIS_FLOOR
+        cx0, cx1, cz0, cz1 = base.CIS
+        gx, gy, gz = self.anchors['generator']
+        self.assertTrue(cx0 < gx < cx1 and cz0 < gz < cz1 and gy == C)
+        runs = {}
+        step = .25
+        sides = {'south': [((x, cz0+.3), (0, 0, -1)) for x in np.arange(cx0+.3, cx1-.29, step)],
+                 'north': [((x, cz1-.3), (0, 0, 1)) for x in np.arange(cx0+.3, cx1-.29, step)],
+                 'west': [((cx0+.3, z), (-1, 0, 0)) for z in np.arange(cz0+.3, cz1-.29, step)],
+                 'east': [((cx1-.3, z), (1, 0, 0)) for z in np.arange(cz0+.3, cz1-.29, step)
+                          if not base.STAIR[2]-.4 <= z <= base.STAIR[3]+.4]}
+        for name, probes in sides.items():
+            open_ = [all(self.soup.first((x, C+h, z), d, 2.0) == np.inf for h in (.6, 1.6)) for (x, z), d in probes]
+            n, width, widths = 0, 0, []
+            for o in open_ + [False]:
+                if o: width += step
+                elif width: widths.append(width); width = 0
+            runs[name] = widths
+        self.assertEqual(runs['south'], []); self.assertEqual(runs['west'], []); self.assertEqual(runs['east'], [])
+        self.assertEqual(len(runs['north']), 1, runs['north'])
+        self.assertAlmostEqual(runs['north'][0], base.TUN_DOOR[1]-base.TUN_DOOR[0]-.3, delta=.6)
+        for x in np.arange(cx0+.5, cx1, 1.0):
+            for z in np.arange(cz0+.5, cz1, 1.0):
+                self.assertLess(self.soup.first((x, C+.3, z), (0, 1, 0)), 7.0, (x, z, 'open ceiling'))
+
+    def test_holes_are_covered_on_the_grid_and_cut_edges_stay_flat(self):
+        spec, _, soup, grid = self.whole_map()
+        cells = build.holes(spec)
+        per_base = sum((x1-x0)*(z1-z0)/64 for x0, x1, z0, z1 in base.HOLES.values())
+        self.assertEqual(len(cells), 2*per_base, 'hole rects overlap or leave the grid')
+        for b in spec['bases']:
+            oy = b['position'][1]
+            m = kit.Mesh(); m.origin = tuple(b['position']); m.yaw = math.radians(b['yaw'])
+            for name, (x0, x1, z0, z1) in base.HOLES.items():
+                for x in np.arange(x0+1.5, x1, 3.0):
+                    for z in np.arange(z0+1.5, z1, 3.0):
+                        p = m.point((x, 2.3, z))
+                        t, _ = soup.hits(p, (0, -1, 0))
+                        floor = 2.3-t[0] if len(t) else -1e9
+                        self.assertTrue(base.CIS_FLOOR-.01 <= floor < 2.3, (name, x, z, floor))   # a floor, stair or landing
+                        self.assertLess(soup.first(p, (0, 1, 0)), 30, (name, x, z, 'hole open to the sky'))
+                # Grid vertices on the cut's edge keep the flat site height: no seam.
+                for x in np.arange(x0, x1+.1, 8.0):
+                    for z in (z0, z1):
+                        wx, wz = build.to_world(b, x, z)
+                        self.assertAlmostEqual(build.terrain_height(wx, wz, grid)-oy, -.1, delta=1/32, msg=(name, x, z))
+                for z in np.arange(z0, z1+.1, 8.0):
+                    for x in (x0, x1):
+                        wx, wz = build.to_world(b, x, z)
+                        self.assertAlmostEqual(build.terrain_height(wx, wz, grid)-oy, -.1, delta=1/32, msg=(name, x, z))
+
+    def test_storehouse_bridge_route_is_open_through_the_gate(self):
+        z = (base.GATE_Z[0]+base.GATE_Z[1])/2
+        for x in (17.5, 20.6, base.TX+1, (base.TX+base.STORE[0])/2, base.STORE[0]+.4, base.STORE[0]+1.6, 33.0):
+            t, ny = self.soup.hits((x, TER+1, z), (0, -1, 0))
+            self.assertAlmostEqual(t[0], 1.0, places=4, msg=x); self.assertGreater(ny[0], .999, x)
+            self.assertGreater(self.soup.first((x, TER+.2, z), (0, 1, 0)), 3.5, (x, 'headroom'))
+        # Straight through the gate and the door: the first thing in the way
+        # is the storehouse baffle, not the curtain or the wall.
+        baffle = base.STORE[0]+base.WALL+2.4
+        self.assertAlmostEqual(self.soup.first((17.0, TER+1.2, z), (1, 0, 0)), baffle-17.0, places=3)
+
     # --- Whole map ----------------------------------------------------------
     @classmethod
     def whole_map(cls):
@@ -267,20 +384,34 @@ class DustreachTests(unittest.TestCase):
             cls._map = spec, mesh, Soup(mesh.collision), grid
         return cls._map
 
-    def test_turrets_cannot_see_into_the_keep(self):
+    # Rooms no turret may see into: (name, x0, x1, z0, z1, floor), local. The
+    # vestibules between each door and its baffle lie outside these boxes.
+    ROOMS = [('keep hall', -(base.KX-base.WALL)+.6, base.KX-base.WALL-.6,
+              base.FRONT_BAFFLE_Z[1]+.6, base.BACK_BAFFLE_Z[0]-.6, TER),
+             ('cistern', base.CIS[0]+.6, base.CIS[1]-.6, base.CIS[2]+.6, base.CIS[3]-.6, base.CIS_FLOOR),
+             ('tunnel north', base.TUNNEL_N[0]+1.4, base.TUNNEL_N[1]-1.4, base.TUNNEL_N[2]+.6, base.TUNNEL_W[3]-1.4, base.CIS_FLOOR),
+             ('tunnel west', base.TUNNEL_W[0]+.6, base.TUNNEL_W[1]+.6, base.TUNNEL_W[2]+1.4, base.TUNNEL_W[3]-1.4, base.CIS_FLOOR),
+             ('tower room', base.TOWER[0]+1.4, base.TOWER_HOLE[1]-1.4, base.TOWER[2]+1.4, base.TOWER_RAMP[2], base.CIS_FLOOR),
+             ('store ground', base.STORE[0]+base.WALL+3.4, base.STORE[1]-base.WALL-.6,
+              base.STORE[2]+base.WALL+.6, base.STORE[3]-base.WALL-3.4, 0.0),
+             ('store upper', base.STORE[0]+base.WALL+3.4, base.STORE_HOLE[0]-1.0,
+              base.STORE[2]+base.WALL+.6, base.STORE[3]-base.WALL-.6, base.STORE_UP)]
+
+    def test_turrets_cannot_see_into_rooms(self):
         """No turret has a clear line from its barrel to a player's chest
-        anywhere in the spawn hall. Allowed: the vestibules between each door
-        and its baffle."""
+        anywhere in the spawn hall, the cistern, the tunnel, the tower room or
+        the storehouse, at sensor-extended range."""
         spec, mesh, soup, _ = self.whole_map()
-        ix = base.KX-base.WALL
-        z0, z1 = base.FRONT_BAFFLE_Z[1]+.6, base.BACK_BAFFLE_Z[0]-.6
-        targets = []
+        targets, counts = [], {}
         for b in spec['bases']:
             m = kit.Mesh(); m.origin = tuple(b['position']); m.yaw = math.radians(b['yaw'])
-            for x in np.arange(-ix+.6, ix-.59, 1.0):
-                for z in np.arange(z0, z1+.01, 1.0):
-                    if soup.first(m.point((x, TER+.1, z)), (0, 1, 0), 2.3) < 2.3: continue   # inside a prop
-                    targets.append(m.point((x, TER+LIFT+.8, z)))
+            for name, x0, x1, z0, z1, floor in self.ROOMS:
+                for x in np.arange(x0, x1+.01, 1.0):
+                    for z in np.arange(z0, z1+.01, 1.0):
+                        if soup.first(m.point((x, floor+.1, z)), (0, 1, 0), 2.3) < 2.3: continue   # inside a prop
+                        t, _ = soup.hits(m.point((x, floor+1, z)), (0, -1, 0))
+                        if not len(t) or abs(t[0]-1) > .02: continue                              # not this floor
+                        targets.append(m.point((x, floor+LIFT+.8, z))); counts[name] = counts.get(name, 0)+1
         targets = np.array(targets)
         turrets = [e for e in mesh.entities if e['kind'] == 'turret']
         self.assertEqual(len(turrets), 6)
@@ -290,7 +421,8 @@ class DustreachTests(unittest.TestCase):
             starts = p+d[near]/dist[near, None]*(e['radius']+.6)
             clear = ~soup.blocked_many(starts, targets[near])
             self.assertEqual(int(clear.sum()), 0, (e['id'], targets[near][clear][:5]))
-        self.assertGreater(len(targets), 350)
+        for name, *_ in self.ROOMS: self.assertGreater(counts.get(name, 0), 20, (name, counts))
+        self.assertGreater(len(targets), 1500)
 
     def test_terrain_is_symmetric_dune_like_and_matches_targets(self):
         spec, _, _, grid = self.whole_map()
@@ -323,6 +455,10 @@ class DustreachTests(unittest.TestCase):
             for x in np.arange(-base.TX, base.TX+.1, 2):
                 for z in np.arange(base.TZ0, base.TZ1+.1, 2):
                     self.assertLess(local(x, z), .02, ('terrace', x, z))
+            sx0, sx1, sz0, sz1 = base.STORE
+            for x in np.arange(sx0, sx1+.1, 2):
+                for z in np.arange(sz0, sz1+.1, 2):
+                    self.assertLess(local(x, z), .02, ('storehouse', x, z))
             px, pz = base.PAD; H = base.PAD_HALF
             for x in np.arange(px-H, px+H+.1, 2):
                 for z in np.arange(pz-H, pz+H+.1, 2):

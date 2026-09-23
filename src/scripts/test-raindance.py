@@ -13,6 +13,7 @@ import unittest
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
+from assets import budgets
 from assets import raindance_base as base
 from assets import raindance_materials
 from assets import raindance_structures
@@ -287,7 +288,7 @@ class RaindanceTests(unittest.TestCase):
             expected = b.point(tuple(a.collision[i:i+3]))
             for x, y in zip(expected, b.collision[i:i+3]): self.assertAlmostEqual(x, y, places=3)
         self.assertTrue(all(e['team'] == 1 and e['circuit'] == 'two' for e in b.entities))
-        self.assertLess(len(b.collision)//9, 3000)
+        self.assertLess(len(b.collision)//9, budgets.COLLISION_TRIS_PER_BASE)
 
     def test_two_instances_have_unique_ids_and_independent_circuits(self):
         mesh = kit.Mesh(); base.build(mesh, 0, 'red', EQUIPMENT)

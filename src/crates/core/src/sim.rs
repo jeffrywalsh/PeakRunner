@@ -649,6 +649,14 @@ impl World {
             }
         }
         equipment::power(defs,&mut self.equipment);
+        for (d,s) in defs.iter().zip(&mut self.equipment) {s.regen(d,dt);}
+    }
+
+    /// Clear sight between two points through terrain, pillars and the map
+    /// collision mesh. Client overlays use it cosmetically; positions already
+    /// arrive in snapshots, so it reveals nothing new.
+    pub fn sight_clear(&self, from:Vec3, to:Vec3)->bool {
+        obstacle_hit(self.map,&self.pillars,from,to,0.).is_none()
     }
 
     pub fn equipment_prompt(&self)->Option<String> {
@@ -1187,7 +1195,8 @@ impl World {
             }
         }
         self.discs = keep;
-        for idx in equipment_hits {self.equipment[idx].health=(self.equipment[idx].health-8.).max(0.);}
+        let defs=crate::equipment::definitions(self.map);
+        for idx in equipment_hits {self.equipment[idx].damage(&defs[idx],8.,true);}
         for (idx, owner) in bullet_hits {
             if !self.players[idx].alive { continue; }
             self.players[idx].health -= 8.0;
@@ -1228,7 +1237,7 @@ impl World {
             let end=d.pos()-delta.normalize_or_zero()*d.radius.min(delta.length());
             if obstacle_hit(self.map,&self.pillars,pos,end,0.).is_some_and(|t|t<0.995) {continue;}
             let damage=profile.map_or((dmg_core+12.)*(1.-distance/max_r),|p|p.damage(distance));
-            s.health=(s.health-damage).max(0.);
+            s.damage(d,damage,false);
         }
         let mut killed_by_player = false;
         let pid = self.player_id;
@@ -2827,7 +2836,9 @@ mod equipment_tests {
             let d=&defs[i];let blast=d.pos()+Vec3::Y*(d.radius+2.);
             let profile=crate::combat::player_weapon_blast(kind).unwrap();
             w.explode(blast,MAX_PLAYERS,kind,Team::Glacier);
-            assert!((w.equipment[i].health-(d.max_health()-profile.damage(2.))).abs()<0.001);
+            // The sensor's generator shield soaks the blast before the hull.
+            assert!((w.equipment[i].shield-(d.max_shield()-profile.damage(2.))).abs()<0.001);
+            assert_eq!(w.equipment[i].health,d.max_health());
         }
     }
     #[test]
@@ -2931,9 +2942,26 @@ mod equipment_tests {
     fn equipment_snapshots_and_empty_server_reset() {
         let mut m=Match::new(MapId::Raindance);let Some(s)=m.join(31,"tester") else {panic!()};
         if m.world.equipment.is_empty(){return;}
-        m.world.equipment[0].health=12.;let snap=m.snapshot();
+        m.world.equipment[0].health=12.;m.world.equipment[0].shield=7.5;let snap=m.snapshot();
         let mut client=world();assert!(client.apply_snapshot(&snap,31));assert_eq!(client.equipment[0].health,12.);
+        assert_eq!(client.equipment[0].shield,7.5,"shield state reaches clients");
         m.leave(s);assert_eq!(m.world.equipment[0].health,equipment::definitions(m.world.map)[0].max_health());
+    }
+    #[test]
+    fn shielded_turrets_fall_only_after_the_generator_or_a_sustained_attack() {
+        let mut w=world();let defs=equipment::definitions(w.map);
+        let Some(i)=defs.iter().position(|d|d.kind==Kind::Turret && d.team==0) else {return;};
+        let d=&defs[i];assert!(w.equipment[i].shield>0.,"fixed turrets start shielded");
+        let blast=d.pos()+Vec3::Y*(d.radius+0.5);
+        w.explode(blast,MAX_PLAYERS,0,Team::Glacier);
+        assert_eq!(w.equipment[i].health,d.max_health(),"one disc does not reach the hull");
+        for (g,s) in defs.iter().zip(&mut w.equipment) {if g.kind==Kind::Generator && g.team==0 {s.health=0.;}}
+        w.step_equipment(STEP);
+        assert!(!w.equipment[i].powered);assert_eq!(w.equipment[i].shield,0.,"no generator, no shield");
+        for _ in 0..40 {w.step_equipment(STEP);}
+        assert_eq!(w.equipment[i].shield,0.,"shield cannot regenerate without power");
+        let before=w.equipment[i].health;w.explode(blast,MAX_PLAYERS,0,Team::Glacier);
+        assert!(w.equipment[i].health<before,"the bare hull takes the blast");
     }
     #[test]
     fn original_base_walk_routes_enter_service_hall_and_reach_roof() {
@@ -3365,8 +3393,14 @@ mod line_of_sight_tests {
             (-12.8,12.8,-12.8,12.8,7.5),   // command deck (flag level)
             (98.1,109.9,-77.9,-69.,20.)];  // relay outpost behind its baffle
         let dust:&[(f32,f32,f32,f32,f32)]=&[
-            (-12.6,12.6,-11.8,-0.6,5.)];   // keep spawn hall
-        for (map,rooms,min) in [(MapId::SnowblindClone,frost,1500),(MapId::DesertOfDeathClone,dust,350)] {
+            (-12.6,12.6,-11.8,-0.6,5.),    // keep spawn hall
+            (-12.6,12.6,-15.6,5.6,-2.),    // cistern (generator room) under the keep
+            (-14.6,-9.4,7.6,21.6,-2.),     // service tunnel, north leg
+            (-23.4,-16.6,16.4,21.6,-2.),   // service tunnel, west leg
+            (-30.6,-25.4,16.4,22.5,-2.),   // watch tower base room
+            (32.2,46.6,3.4,17.8,0.),       // storehouse ground floor, behind its baffles
+            (32.2,42.4,3.4,20.6,5.)];      // storehouse upper floor, behind its baffle
+        for (map,rooms,min) in [(MapId::SnowblindClone,frost,1500),(MapId::DesertOfDeathClone,dust,1500)] {
             let pack=crate::map_pack::on(map).unwrap();
             let info=crate::terrain::info(map);
             let to_world=|team:u8,lx:f32,y:f32,lz:f32| if team==0 {
@@ -3404,6 +3438,43 @@ mod line_of_sight_tests {
                 }
             }
             assert!(seen.is_empty(),"{map:?}: {} interior points visible to turrets, e.g. {:?}",seen.len(),&seen[..seen.len().min(8)]);
+        }
+    }
+
+    /// Dustreach's new routes are walkable end to end with the full player
+    /// body (engine body sweep, 0.6 m above each floor or ramp), for both
+    /// teams: hall -> stair -> cistern -> tunnel -> tower room -> exit ramp ->
+    /// back door, and courtyard -> gate -> bridge -> storehouse -> its ramp and
+    /// doors. Local base coordinates; team 0 is yawed 180 degrees.
+    #[test]
+    fn dustreach_underground_and_storehouse_routes_are_walkable() {
+        let map=MapId::DesertOfDeathClone;
+        let pack=crate::map_pack::on(map).unwrap();
+        let info=crate::terrain::info(map);
+        let stair=|z:f32| -2.0+7.0*((z+14.0)/12.5).clamp(0.,1.);           // hall 5 at z -1.5, cistern -2 at z -14
+        let tramp=|z:f32| -2.0+1.9*((z-22.5)/4.0).clamp(0.,1.);           // tower room -2 to landing -0.1
+        let sramp=|z:f32| 5.0*((19.0-z)/10.0).clamp(0.,1.);               // storehouse ground 0 to upper 5
+        let routes:Vec<(&str,Vec<(f32,f32,f32)>)>=vec![
+            ("hall to tower exit",vec![(4.,5.,-1.),(11.25,5.,-0.6),(11.25,stair(-1.5),-1.5),(11.25,stair(-13.9),-13.9),
+                (11.25,-2.,-15.2),(5.,-2.,-15.2),(-3.,-2.,-15.2),(-10.5,-2.,-15.2),(-11.,-2.,-10.),(-11.,-2.,5.),(-11.1,-2.,6.6),
+                (-12.,-2.,8.),(-12.,-2.,19.),(-20.,-2.,19.),(-26.,-2.,19.),(-29.2,-2.,21.5),(-29.2,tramp(22.6),22.6),
+                (-29.2,tramp(26.4),26.4),(-28.5,-0.1,28.5),(-28.5,-0.1,32.),(-28.5,-0.1,35.)]),
+            ("bridge into the storehouse and down",vec![(15.,5.,15.5),(20.6,5.,15.5),(24.6,5.,15.5),(28.4,5.,15.5),
+                (29.9,5.,15.5),(29.9,5.,20.2),(33.,5.,20.2),(38.,5.,12.),(40.,5.,8.2),(45.3,5.,8.2),(45.3,sramp(9.1),9.1),
+                (45.3,sramp(18.9),18.9),(45.3,0.,20.3),(43.,0.,20.3),(38.,0.,20.),(38.,0.,22.5),(38.,-0.1,25.)]),
+            ("storehouse ground west door",vec![(25.,-0.1,10.),(28.4,0.,10.),(29.9,0.,10.),(29.9,0.,14.8),(33.,0.,14.8),
+                (33.,0.,5.),(40.,0.,5.)]),
+        ];
+        for team in [0u8,1] {
+            let world=|(x,y,z):(f32,f32,f32)| if team==0 {
+                Vec3::new(info.ember.x-x,info.ember.y+y+0.6,info.ember.z-z)
+            } else {Vec3::new(info.glacier.x+x,info.glacier.y+y+0.6,info.glacier.z+z)};
+            for (name,points) in &routes {
+                for pair in points.windows(2) {
+                    let (a,b)=(world(pair[0]),world(pair[1]));
+                    assert!(pack.body_sweep(a,b).is_none(),"team {team} {name}: blocked between {:?} and {:?}",pair[0],pair[1]);
+                }
+            }
         }
     }
 
@@ -3562,6 +3633,60 @@ mod targeting_equivalence {
             }
             assert!(acquired>0 && sensed_only>0,"{map:?}: {scenarios} scenarios, {acquired} acquired, {sensed_only} sensed-only");
             if matches!(map,MapId::StonehengeClone|MapId::Raindance) {assert!(leading>0,"{map:?}: no plasma intercept case exercised");}
+        }
+    }
+}
+
+/// Collision-budget evidence, not a correctness check. Times whole sim ticks
+/// (a full offline match with bots firing) and raw map-pack queries around
+/// each base, so a per-base collision budget can be set from numbers. Run with
+/// `cargo test --release -p peakrunner-core --lib collision_budget_timing -- --ignored --nocapture`.
+#[cfg(test)]
+mod collision_budget_timing {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    #[ignore = "timing probe; run in release"]
+    fn collision_budget_timing() {
+        for map in [MapId::Raindance, MapId::BroadsideClone, MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone] {
+            let pack = crate::map_pack::on(map).unwrap();
+            let info = crate::terrain::info(map);
+            let mut world = World::new();
+            world.set_map(map);
+            world.start_match(true);
+            let dt = 1.0 / 60.0;
+            for _ in 0..120 { world.tick(dt); }
+            let (mut total, mut worst) = (0.0f64, 0.0f64);
+            let ticks = 3600;
+            for i in 0..ticks {
+                world.input.move_z = 1.0; world.input.fire = i % 30 < 15; world.input.jet = i % 240 < 90;
+                let t = Instant::now();
+                world.tick(dt);
+                let e = t.elapsed().as_secs_f64();
+                total += e; worst = worst.max(e);
+            }
+            // Raw queries in a 120 m box round each base: short movement
+            // sweeps, body sweeps, floor probes and 80 m sight rays.
+            let mut seed = 0x2545F491u32;
+            let mut rnd = || { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; seed as f32 / u32::MAX as f32 };
+            let n = 200_000;
+            let t = Instant::now();
+            let mut hits = 0;
+            for i in 0..n {
+                let home = if i % 2 == 0 { info.ember } else { info.glacier };
+                let p = home + Vec3::new((rnd() - 0.5) * 120.0, rnd() * 25.0 - 5.0, (rnd() - 0.5) * 120.0);
+                let d = Vec3::new(rnd() - 0.5, (rnd() - 0.5) * 0.3, rnd() - 0.5).normalize_or_zero();
+                match i % 4 {
+                    0 => hits += pack.sweep(p, p + d * 1.5, 0.52).is_some() as usize,
+                    1 => hits += pack.body_sweep(p, p + d * 1.5).is_some() as usize,
+                    2 => hits += pack.floor(p).is_some() as usize,
+                    _ => hits += pack.sweep(p, p + d * 80.0, 0.0).is_some() as usize,
+                }
+            }
+            let per_query = t.elapsed().as_secs_f64() / n as f64;
+            println!("{map:?}: {} collision tris, tick avg {:.1} us worst {:.1} us over {ticks} ticks ({} players), query avg {:.2} us ({hits} hits)",
+                pack.triangle_count(), total / ticks as f64 * 1e6, worst * 1e6, world.players.len(), per_query * 1e6);
         }
     }
 }
