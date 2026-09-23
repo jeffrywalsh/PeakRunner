@@ -114,14 +114,24 @@ Ascend's maps is copied. All dimensions are local to a base, mirrored for blue.
   between the generator and the tower; capping stays on the surface.
 - **Storehouse:** 20 × 20 m, two floors (0 and 5 m), roof at 10 m, right of
   the courtyard. A bridge at terrace level crosses from a new gate in the east
-  curtain to its upper door. It has a third inventory station, two of the eight
-  spawns (upper floor), a railed ramp between floors, crates, and baffles
-  inside all three doors.
+  curtain to its upper door. It has a third inventory station, four of the
+  eight spawns (two per floor), a railed ramp between floors, crates, and
+  baffles inside all three doors.
+- **Spawns (v3):** none in the keep hall or the cistern. Four are in the
+  storehouse, three in the courtyard arcades and one on the caravan dais; the
+  nearest is 23 m in a straight line (over 30 m on foot) from the head of the
+  stair down to the generator. `test_no_spawn_camps_the_generator_stair`
+  holds this.
+- **Tower back porch (v3):** a roofed porch outside the tower's back door, with
+  a baffle wall 2.6 m out and a closed west end, so the only way in is from the
+  east. `test_tower_back_door_porch_hides_the_exit_ramp` checks that no
+  outside viewpoint (25 bearings × 3 distances × 3 heights) sees into the tower
+  room, up its ramp or onto the landing.
 - **Terrain holes:** 17 whole 8 m cells per base (`HOLES` in
   `dustreach_citadel.py`), all under the terrace or the tower. No lid is
   exposed, and the cut's edge keeps the flat site height.
 - **Routes:** a Rust test sweeps the engine's full player body along
-  hall → stair → cistern → tunnel → tower → back door and courtyard → gate →
+  hall → stair → cistern → tunnel → tower → back door → porch and courtyard → gate →
   bridge → storehouse → its ramp and doors, for both teams
   (`dustreach_underground_and_storehouse_routes_are_walkable`). Another checks
   both generators stand in cut cells, 2 m below the ground.
@@ -134,8 +144,6 @@ Ascend's maps is copied. All dimensions are local to a base, mirrored for blue.
 - No real glow: lit surfaces are bright textures.
 - Nobody has walked, skied or played it yet, including the new underground
   routes. Bots don't use the stair or the tunnel.
-- The generator may turn out too easy to hold: four of the eight spawns are in
-  the keep hall next to the stair. Watch this in playtests; moving hall
-  spawns out to the storehouse is the first lever.
-- The tower's back door has no baffle. No turret can see in (the tests prove
-  it), but players outside can look straight up the exit ramp.
+- Turtling: spawns no longer sit by the generator stair (v3), but the stair
+  is still the only way from the keep to the generator, 30 m from the nearest
+  spawn. Whether defenders can hold it too easily needs a playtest.

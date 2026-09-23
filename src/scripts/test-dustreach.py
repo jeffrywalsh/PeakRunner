@@ -277,6 +277,53 @@ class DustreachTests(unittest.TestCase):
         # The tunnel keeps its 4.5 m headroom under a lid, not open to the terrace.
         self.assertAlmostEqual(self.soup.first((-12.0, C+.2, 12.0), (0, 1, 0)), base.TUN_CEIL-C-.2, places=4)
 
+    def test_no_spawn_camps_the_generator_stair(self):
+        """No spawn in the keep hall or cistern, and every spawn at least 15 m
+        (straight line, so walking is further) from the stair head."""
+        hx0, hx1, _, hz1 = base.HALL_HOLE
+        head = ((hx0+hx1)/2, hz1)
+        ix, iz0, iz1 = base.KX, base.KZ0, base.KZ1
+        for x, y, z, _ in self.anchors['spawn_points']:
+            self.assertFalse(-ix < x < ix and iz0 < z < iz1 and y > base.TER, (x, z, 'in the keep hall'))
+            self.assertGreaterEqual(math.hypot(x-head[0], z-head[1]), 15.0, (x, z))
+
+    def test_tower_back_door_porch_hides_the_exit_ramp(self):
+        """Nobody outside the porch sees into the tower room or up its ramp:
+        rays from a ring of outside viewpoints behind and beside the tower to
+        points in the room, on the ramp and on the landing are all blocked.
+        The porch is still open to the east for the route out."""
+        wx0, wx1, wz0, wz1 = base.TOWER
+        qx0, qx1, qz0, qz1 = base.PORCH
+        targets = []
+        r0, r1, rz0, rz1 = base.TOWER_RAMP
+        for z in np.arange(rz0+.4, rz1, 1.0):
+            for x in (r0+.6, (r0+r1)/2, r1-.6):
+                targets.append((x, base.tower_ramp_y(z)+1.0, z))
+        for x in np.arange(wx0+1.5, base.TOWER_HOLE[1]-1.0, 1.5):
+            for z in np.arange(wz0+1.5, rz0, 1.5):
+                targets.append((x, base.CIS_FLOOR+1.0, z))
+            targets.append((x, base.LANDING+1.0, (rz1+wz1)/2))
+        viewers = []
+        for ang in np.linspace(-.25*np.pi, 1.25*np.pi, 25):   # behind (+Z) and to both sides
+            for dist in (6.0, 15.0, 40.0):
+                for h in (1.7, 6.0, 14.0):
+                    cx, cz = (qx0+qx1)/2, qz1
+                    x, z = cx+dist*math.cos(ang), cz+dist*math.sin(ang)
+                    if z < wz1+.5 and wx0-1 < x < wx1+1: continue
+                    if qx0 <= x <= qx1+2 and wz1 <= z <= qz1: continue   # inside the porch itself
+                    viewers.append((x, h, z))
+        starts = np.array([v for v in viewers for _ in targets], float)
+        ends = np.array([t for _ in viewers for t in targets], float)
+        blocked = self.soup.blocked_many(starts, ends)
+        self.assertTrue(blocked.all(), [tuple(starts[i]) + tuple(ends[i]) for i in np.flatnonzero(~blocked)[:3]])
+        # East opening: open from the ground outside, through the porch, to the door.
+        y = base.LANDING+1.0
+        for a, c in [((qx1+4, y, (wz1+qz0)/2), ((base.TOWER_DOOR[0]+base.TOWER_DOOR[1])/2, y, (wz1+qz0)/2)),
+                     (((base.TOWER_DOOR[0]+base.TOWER_DOOR[1])/2, y, (wz1+qz0)/2),
+                      ((base.TOWER_DOOR[0]+base.TOWER_DOOR[1])/2, y, wz1-1.0))]:
+            d = np.subtract(c, a); n = np.linalg.norm(d)
+            self.assertEqual(self.soup.first(a, d/n, n), np.inf, (a, c))
+
     def test_new_ramps_climb_with_headroom_and_closed_undersides(self):
         cases = [(base.STAIR, base.stair_y, base.CIS_FLOOR, 1),        # open (railed) side at x0, probe from -x
                  (base.TOWER_RAMP, base.tower_ramp_y, base.CIS_FLOOR, -1),

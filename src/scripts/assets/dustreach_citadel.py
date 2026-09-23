@@ -37,7 +37,7 @@ import math
 
 from assets.structure_kit import Builder
 
-ASSET_ID = 'dustreach-citadel-v2'
+ASSET_ID = 'dustreach-citadel-v3'
 
 TER = 5.0                                   # terrace top
 TX, TZ0, TZ1 = 21.2, -18.0, 30.0            # terrace half-width and depth
@@ -103,6 +103,11 @@ TOWER_ROOM_TOP = 4.5
 TOWER_RAMP = (-31.2, -27.2, 22.5, 26.5)    # x0, x1, z at the room floor, z at the landing
 LANDING = -0.1
 TOWER_DOOR = (-30.5, -26.5)                # in the tower's back (+Z) face
+# Porch outside the tower's back door: a baffle wall parallel to the face, a
+# closed west end and a roof, so the only way in is from the east and nobody
+# outside has a straight view up the exit ramp.
+PORCH = (-32.0, -22.0, 33.6, 34.2)         # baffle x0, x1, z0, z1
+PORCH_TOP = TOWER_ROOM_TOP
 HOLES = {'cistern': (-16.0, 16.0, -17.0, 7.0), 'tunnel north': TUNNEL_N,
          'tunnel west': TUNNEL_W, 'tower': TOWER_HOLE}
 # --- Storehouse (v2): right of the courtyard, two floors ------------------------
@@ -407,7 +412,16 @@ def build(mesh, team, circuit):
     for x in TOWER_DOOR:
         b.face_box('z', wz1, 1, x-.35 if x == TOWER_DOOR[0] else x, x if x == TOWER_DOOR[0] else x+.35,
                    LANDING, TOWER_ROOM_TOP, .12, METAL)
-    b.lamp(((TOWER_DOOR[0]+TOWER_DOOR[1])/2, 4.0, wz1+2.0), .45)
+    # Porch: baffle wall, closed west end, roof; open to the east.
+    qx0, qx1, qz0, qz1 = PORCH
+    wall(qx0, qx1, qz0, qz1, FOOT, PORCH_TOP, HULL)
+    wall(qx0, qx0+.6, wz1, qz0, FOOT, PORCH_TOP, HULL)
+    slab(qx0, qx1, wz1, qz1, PORCH_TOP+.5, HULL, .5)
+    b.dress('z', qz0, -1, [(qx0+.6, qx1)], LANDING, PORCH_TOP, pilasters=False)
+    b.face_box('z', qz1, 1, qx0, qx1, PORCH_TOP-.35, PORCH_TOP, .15, METAL)
+    b.face_box('x', qx1, 1, wz1, qz1, PORCH_TOP-.35, PORCH_TOP, .12, METAL)
+    b.ceiling_strip('x', (wz1+qz0)/2, qx0+1.2, qx1-1.2, PORCH_TOP, .45)
+    b.lamp(((TOWER_DOOR[0]+TOWER_DOOR[1])/2, 3.6, (wz1+qz0)/2), .45)
     t = .5
     for x0, x1, za, zb in [(wx0, wx1, wz0, wz0+t), (wx0, wx1, wz1-t, wz1), (wx0, wx0+t, wz0+t, wz1-t),
                            (wx1-t, wx1, wz0+t, wz1-t)]:
@@ -614,12 +628,12 @@ def build(mesh, team, circuit):
     lift = SPAWN_LIFT
     return {
         'flag': (fx, PIT_FLOOR+PLINTH+.05, fz),
-        'spawn': (-4.0, TER+lift, -10.5),
-        # (x, y, z, local yaw): yaw 0 faces the base front (-Z). Hall spawns
-        # face along the hall toward the far baffle, never the near one.
-        # No spawns in the cistern (generator room), so it can't be camped.
-        'spawn_points': [(-4.0, TER+lift, -10.5, math.pi), (4.0, TER+lift, -10.5, math.pi),
-                         (-4.0, TER+lift, -2.5, 0.0), (4.0, TER+lift, -2.5, 0.0),
+        'spawn': (18.2, TER+lift, 20.5),
+        # (x, y, z, local yaw): yaw 0 faces the base front (-Z). No spawn is in
+        # the keep hall or the cistern: the stair down to the generator starts
+        # in the hall, so every spawn is at least ~30 m on foot from its head.
+        'spawn_points': [(18.2, TER+lift, 20.5, math.pi/2), (-18.2, TER+lift, 24.5, -math.pi/2),
+                         (36.0, lift, 4.2, math.pi), (41.0, lift, 5.0, math.pi),
                          (36.0, STORE_UP+lift, 9.0, -math.pi/2), (34.0, STORE_UP+lift, 18.0, -math.pi/2),
                          (-18.2, TER+lift, 15.5, -math.pi/2), (px-5, PAD_TOP+lift, pz+4, 0.0)],
         'entrances': [(0.0, TER+.2, KZ0), (0.0, TER+.2, KZ1), (0.0, .2, FRONT_RAMP[2]), (0.0, .2, BACK_RAMP[2]),
