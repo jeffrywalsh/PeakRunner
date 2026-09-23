@@ -5,7 +5,7 @@ Ring on a central mesa, over original rugged terrain. No extracted assets,
 no external height data.
 
 Usage (from src/, numpy venv): build-cairnhold.py [OUTPUT] [--no-bake]
-Default output is the ignored local-assets/cairnhold; refuses to overwrite.
+Default output is the embedded assets/maps/cairnhold; refuses to overwrite.
 """
 import importlib.util
 import json
@@ -181,4 +181,4 @@ def build(output, bake=True):
 
 if __name__ == '__main__':
     args = [a for a in sys.argv[1:] if a != '--no-bake']
-    build(Path(args[0]) if args else ROOT/'local-assets/cairnhold', bake='--no-bake' not in sys.argv)
+    build(Path(args[0]) if args else ROOT/'assets/maps/cairnhold', bake='--no-bake' not in sys.argv)

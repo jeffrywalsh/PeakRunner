@@ -9,17 +9,19 @@ pub const GAME_VERSION: &str = "0.1.0-private.20260921.1";
 /// layout. Keep directory discovery independent of gameplay/map assets.
 pub fn game_protocol() -> String {
     let mut protocol = match peakrunner_core::map_pack::active() {
-        // maps3: the broadside-clone slot is the embedded Tower Complex.
+        // maps4: the broadside-clone slot is the embedded Tower Complex and the
+        // stonehenge-clone slot is the embedded Cairnhold.
         // muzzle1: player shots are clamped to the shooter's side of walls.
-        Some(pack) => format!("{PROTOCOL}:equipment3:blast3:chat2:names1:ping1:fov1:muzzle1:maps3:{}:{}:{}",pack.fingerprint,
+        Some(pack) => format!("{PROTOCOL}:equipment3:blast3:chat2:names1:ping1:fov1:muzzle1:maps4:{}:{}:{}:{}",pack.fingerprint,
             peakrunner_core::map_pack::on(peakrunner_core::terrain::MapId::Skybreak).expect("Skybreak").fingerprint,
-            peakrunner_core::map_pack::on(peakrunner_core::terrain::MapId::BroadsideClone).expect("Tower Complex").fingerprint),
+            peakrunner_core::map_pack::on(peakrunner_core::terrain::MapId::BroadsideClone).expect("Tower Complex").fingerprint,
+            peakrunner_core::map_pack::on(peakrunner_core::terrain::MapId::StonehengeClone).expect("Cairnhold").fingerprint),
         None => format!("{PROTOCOL}:equipment3:blast3:chat2:names1:ping1:fov1:muzzle1"),
     };
     // Installed reference packs join the compatibility marker. A missing or
     // changed pack is rejected before a player slot is granted.
     use peakrunner_core::{map_pack, terrain::MapId};
-    for map in [MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone] {
+    for map in [MapId::SnowblindClone, MapId::DesertOfDeathClone] {
         if let Some(pack) = map_pack::on(map) {
             protocol.push_str(&format!(":private1:{}:{}", map.key(), pack.fingerprint));
         }

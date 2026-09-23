@@ -68,13 +68,16 @@ pub fn validate_catalog(maps: &[MapDescriptor]) -> Result<(), &'static str> {
 mod tests {
     use super::*;
     #[test]
-    fn broadside_slot_is_embedded_and_reference_packs_are_listed_only_when_installed() {
+    fn original_slots_are_embedded_and_reference_packs_are_listed_only_when_installed() {
         use crate::{map_pack,terrain::{self,MapId}};
         assert_eq!(MapId::parse("broadside-clone"),Some(MapId::BroadsideClone));
+        assert_eq!(MapId::parse("stonehenge-clone"),Some(MapId::StonehengeClone));
         let listed=terrain::maps();
-        assert!(listed.iter().any(|m|m.id==MapId::BroadsideClone));
-        assert!(!map_pack::on(MapId::BroadsideClone).unwrap().manifest.private_reference);
-        for id in [MapId::StonehengeClone,MapId::SnowblindClone,MapId::DesertOfDeathClone] {
+        for id in [MapId::BroadsideClone,MapId::StonehengeClone] {
+            assert!(listed.iter().any(|m|m.id==id));
+            assert!(!map_pack::on(id).unwrap().manifest.private_reference);
+        }
+        for id in [MapId::SnowblindClone,MapId::DesertOfDeathClone] {
             let installed=map_pack::on(id);
             assert_eq!(listed.iter().any(|m|m.id==id),installed.is_some());
             if let Some(pack)=installed { assert!(pack.manifest.private_reference); }

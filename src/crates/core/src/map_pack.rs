@@ -88,6 +88,21 @@ fn tower_complex_asset(name: &str) -> Result<&'static [u8], String> {
     })
 }
 
+/// Original Cairnhold, built by `scripts/build-cairnhold.py`. It holds the
+/// `stonehenge-clone` rotation slot so existing server configs keep working.
+fn cairnhold_asset(name: &str) -> Result<&'static [u8], String> {
+    Ok(match name {
+        "map.json" => include_bytes!("../../../assets/maps/cairnhold/map.json"),
+        "vertices.bin" => include_bytes!("../../../assets/maps/cairnhold/vertices.bin"),
+        "collision.bin" => include_bytes!("../../../assets/maps/cairnhold/collision.bin"),
+        "height.bin" => include_bytes!("../../../assets/maps/cairnhold/height.bin"),
+        "weights.rgba" => include_bytes!("../../../assets/maps/cairnhold/weights.rgba"),
+        "textures.rgba" => include_bytes!("../../../assets/maps/cairnhold/textures.rgba"),
+        "ambient.f32" => include_bytes!("../../../assets/maps/cairnhold/ambient.f32"),
+        _ => return Err("Unknown Cairnhold asset".into()),
+    })
+}
+
 type Embedded = fn(&str) -> Result<&'static [u8], String>;
 
 fn embedded_pack(assets: Embedded, label: &str) -> MapPack {
@@ -158,19 +173,8 @@ pub fn on(map: crate::terrain::MapId) -> Option<&'static MapPack> {
             }).as_ref()
         }
         crate::terrain::MapId::StonehengeClone => {
-            static STONE: OnceLock<Option<MapPack>> = OnceLock::new();
-            STONE.get_or_init(|| {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    let path=private_pack_path(map);
-                    if path.join("map.json").is_file() {
-                        let pack=MapPack::load(&path).expect("Invalid local stonehenge-clone pack");
-                        assert!(pack.manifest.private_reference,"Reference pack marker missing");
-                        return Some(pack);
-                    }
-                }
-                None
-            }).as_ref()
+            static CAIRN: OnceLock<MapPack> = OnceLock::new();
+            Some(CAIRN.get_or_init(|| embedded_pack(cairnhold_asset, "Cairnhold")))
         }
         crate::terrain::MapId::BroadsideClone => {
             static TOWER: OnceLock<MapPack> = OnceLock::new();

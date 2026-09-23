@@ -167,10 +167,10 @@ about 15 s on 13 processes.
 
 ## Compatibility
 
-`game_protocol()` now uses `maps3:<raindance>:<skybreak>:<tower-complex>`
-fingerprints, replacing `maps2`. Broadside no longer contributes a `private1`
-segment. Only Stonehenge, Snowblind and Desert of Death do, and only when
-their packs are installed. Old clients and servers are therefore incompatible
+`game_protocol()` now uses `maps4:<raindance>:<skybreak>:<tower-complex>:<cairnhold>`
+fingerprints (Tower Complex introduced `maps3`; Cairnhold made it `maps4`).
+Broadside and Stonehenge no longer contribute `private1` segments. Only
+Snowblind and Desert of Death do, and only when their packs are installed. Old clients and servers are therefore incompatible
 with this source.
 
 ## Validation done

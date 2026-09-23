@@ -43,23 +43,29 @@ stays an internal fixture.
 **Tower Complex (source only, not deployed):** in source, the `broadside-clone`
 key/`MapId::BroadsideClone` slot is now the ORIGINAL Tower Complex, embedded like
 Skybreak from `src/assets/maps/tower-complex/` (no private pack, always listed).
-Gameplay compatibility is `maps3` with its fingerprint. Its terrain is original
+Gameplay compatibility is now `maps4` (below). Its terrain is original
 procedural rolling hills (`scripts/assets/tower_complex_terrain.py`); Broadside was
 studied for statistics only, privately, and none of its height data is used.
 Optional manifest `spawn_points` (per team `[x,y,z,yaw]`, centre 1.2 m above the
 floor) make the server pick a random spawn each respawn; maps without it are
 unchanged. Spawn centres must be 1.2 m above the floor: lower ones start the
-support ray inside the slab and leave players frictionless. Three private reference
-packs remain: Stonehenge, Snowblind, Desert of Death. The live server and
-published clients still run the old Broadside clone pack; deploying needs a
-full matching client/server release. See `docs/tower-complex.md`.
+support ray inside the slab and leave players frictionless. See `docs/tower-complex.md`.
+
+**Cairnhold (source only, not deployed):** likewise, the `stonehenge-clone`
+key/`MapId::StonehengeClone` slot is now the ORIGINAL Cairnhold, embedded from
+`src/assets/maps/cairnhold/` and always listed. Compatibility is `maps4` with the
+Raindance, Skybreak, Tower Complex and Cairnhold fingerprints. Stonehenge was
+studied privately for statistics only; no Stonehenge data is used. Two private
+reference packs remain: Snowblind and Desert of Death. The live server and
+published clients still run the old Broadside and Stonehenge clone packs;
+deploying needs a full matching client/server release. See `docs/cairnhold.md`.
 
 There is no private-test switch. A dedicated server loads a reference map when
 its pack is installed and rejects that map when the pack is missing.
 `PEAKRUNNER_PRIVATE_MAPS_DIR/<map-key>` is where the server reads those packs.
 Packaged clients find them in `private-maps/` beside the executable, or in
 macOS `Contents/Resources/private-maps/`. Development builds also read
-`local-assets/<map-key>/installed`. Client packaging now copies the three
+`local-assets/<map-key>/installed`. Client packaging now copies the two
 remaining packs (it copied four for the published release).
 
 The published game `0.1.0-private.20260921.1` was built before this removal.
@@ -550,6 +556,9 @@ Tower Complex build/test, from `src/` (numpy venv):
 (default output `assets/maps/tower-complex`, refuses overwrite; bakes lightmaps,
 `--no-bake` skips) and `scripts/test-tower-complex.py`. Builds are byte-identical.
 Its build places bases at z 820/1228 (408 m apart) over rolling terrain.
+Cairnhold likewise: `scripts/build-cairnhold.py [OUTPUT] [--no-bake]` (default
+`assets/maps/cairnhold`) and `scripts/test-cairnhold.py`; bunkers at z 844/1204,
+flags 532 m apart.
 
 Optional `QA_FLYCAM=x,y,z,yaw_deg,pitch_deg,fov_deg` (`src/drawlist.rs`) renders
 one frame from an arbitrary world-space camera instead of the player's actual

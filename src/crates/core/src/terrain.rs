@@ -150,7 +150,7 @@ impl MapId {
         [Self::Valley, Self::Raindance, Self::Skybreak, Self::BroadsideClone, Self::StonehengeClone, Self::SnowblindClone, Self::DesertOfDeathClone].into_iter().find(|id| id.key().eq_ignore_ascii_case(key))
     }
     pub fn is_private_clone(self) -> bool {
-        matches!(self, Self::StonehengeClone | Self::SnowblindClone | Self::DesertOfDeathClone)
+        matches!(self, Self::SnowblindClone | Self::DesertOfDeathClone)
     }
 }
 
@@ -211,9 +211,10 @@ fn all_maps() -> [MapInfo; 7] {
         MapInfo { id: MapId::BroadsideClone, name: "Tower Complex",
             note: "Floating towers over rolling hills. Turret pods, a central shaft and flags on level two.",
             size: RAIN_SIZE, ember: Vec3::new(1024.,240.,820.), glacier: Vec3::new(1024.,240.,1228.), res: RAIN_N },
-        MapInfo { id: MapId::StonehengeClone, name: "Stonehenge Clone",
-            note: "Reference stone-ring layout. Geometry starts here.", size:RAIN_SIZE,
-            ember:Vec3::ZERO, glacier:Vec3::ZERO, res:RAIN_N },
+        // Original map in the former Stonehenge Clone slot; the key stays for rotations.
+        MapInfo { id: MapId::StonehengeClone, name: "Cairnhold",
+            note: "Hillside bunkers, trench-linked flag towers and a central ring on rugged ground.",
+            size: RAIN_SIZE, ember: Vec3::new(1024.,191.,844.), glacier: Vec3::new(1024.,191.,1204.), res: RAIN_N },
         MapInfo { id: MapId::SnowblindClone, name: "Snowblind Clone",
             note: "Reference snow-bunker layout. Geometry starts here.", size:RAIN_SIZE,
             ember:Vec3::ZERO, glacier:Vec3::ZERO, res:RAIN_N },
@@ -227,10 +228,7 @@ fn all_maps() -> [MapInfo; 7] {
 }
 
 pub fn maps() -> Vec<MapInfo> {
-    let mut maps=vec![info(MapId::Raindance),info(MapId::Skybreak),info(MapId::BroadsideClone)];
-    if crate::map_pack::on(MapId::StonehengeClone).is_some() {
-        maps.push(info(MapId::StonehengeClone));
-    }
+    let mut maps=vec![info(MapId::Raindance),info(MapId::Skybreak),info(MapId::BroadsideClone),info(MapId::StonehengeClone)];
     for id in [MapId::SnowblindClone, MapId::DesertOfDeathClone] {
         if crate::map_pack::on(id).is_some() { maps.push(info(id)); }
     }
@@ -521,6 +519,48 @@ mod map_tests {
             }
         }
         for other in [MapId::Raindance, MapId::Skybreak] {
+            assert_ne!(pack.fingerprint, crate::map_pack::on(other).unwrap().fingerprint);
+        }
+    }
+
+    #[test]
+    fn cairnhold_is_embedded_with_grounded_spawns_and_flag_decks() {
+        let id = MapId::StonehengeClone;
+        assert!(!id.is_private_clone());
+        assert!(maps().iter().any(|m| m.id == id && m.name == "Cairnhold"));
+        let pack = crate::map_pack::on(id).expect("embedded Cairnhold");
+        assert!(!pack.manifest.private_reference);
+        assert_eq!(pack.manifest.name, "Cairnhold");
+        assert!(pack.asset("textures.rgba").unwrap().len() > 1_000_000);
+        let bases = [Vec3::new(1024.,191.,844.), Vec3::new(1024.,191.,1204.)];
+        for team in [true, false] {
+            let spawn = spawn_on(id, team);
+            let floor = support_on(id, spawn).0;
+            assert!((spawn.y-floor-1.2).abs() < 0.05, "spawn support {floor} {spawn:?}");
+            assert!(pack.sweep(spawn, spawn+Vec3::Y*2., PLAYER_RADIUS).is_none());
+        }
+        for (team, flag) in pack.manifest.flags.iter().enumerate() {
+            let flag = Vec3::from_array(*flag);
+            assert!(pack.floor(flag).is_some(), "team {team} flag has solid deck");
+            // Exposed stand: open sky above the flag, on a tower over the knoll.
+            assert!(pack.sweep(flag+Vec3::Y,flag+Vec3::Y*60.,0.).is_none(), "flag stand is open");
+            assert!(flag.y-height_on(id,flag.x,flag.z) > 8., "flag stand is raised");
+        }
+        for (team, points) in pack.manifest.spawn_points.iter().enumerate() {
+            assert!(points.len() >= 6);
+            for p in points {
+                let spawn = Vec3::new(p[0], p[1], p[2]);
+                // Bunker, flag hut and the two flank structures all count as home.
+                let (own, enemy) = ((spawn-bases[team]).length(), (spawn-bases[1-team]).length());
+                assert!(own < 150.0 && own < enemy, "team {team} spawn {spawn:?} is not on its own side");
+                let floor = pack.floor(spawn).expect("spawn has a floor").0;
+                assert!((spawn.y - floor - 1.2).abs() < 0.01);
+                assert!(pack.body_sweep(spawn, spawn + Vec3::Y*0.2).is_none(), "spawn {spawn:?} head clearance");
+                assert!([Vec3::X,-Vec3::X,Vec3::Z,-Vec3::Z].iter().any(|d| pack.body_sweep(spawn, spawn + *d*0.5).is_none()),
+                    "spawn {spawn:?} boxed in");
+            }
+        }
+        for other in [MapId::Raindance, MapId::Skybreak, MapId::BroadsideClone] {
             assert_ne!(pack.fingerprint, crate::map_pack::on(other).unwrap().fingerprint);
         }
     }

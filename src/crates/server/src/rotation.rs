@@ -54,9 +54,10 @@ mod tests {
             r#"[{"map":"valley","mode":"ctf","script":"x"}]"#] {
             assert!(Rotation::parse(json).is_err(), "{json}");
         }
-        // The broadside-clone slot now holds the embedded Tower Complex.
+        // The broadside-clone and stonehenge-clone slots hold embedded originals.
         assert!(Rotation::parse(r#"[{"map":"broadside-clone","mode":"ctf"}]"#).is_ok());
-        for key in ["stonehenge-clone", "snowblind-clone", "desert-of-death-clone"] {
+        assert!(Rotation::parse(r#"[{"map":"stonehenge-clone","mode":"ctf"}]"#).is_ok());
+        for key in ["snowblind-clone", "desert-of-death-clone"] {
             let json = format!(r#"[{{"map":"{key}","mode":"ctf"}}]"#);
             let installed = peakrunner_core::map_pack::on(MapId::parse(key).unwrap()).is_some();
             assert_eq!(Rotation::parse(&json).is_ok(), installed, "{key}");

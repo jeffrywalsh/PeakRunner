@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Copy verified runtime files for the three reference maps.
+"""Copy verified runtime files for the two reference maps.
 
-The broadside-clone slot is the original Tower Complex, embedded in the binary.
+The broadside-clone and stonehenge-clone slots are the original Tower Complex
+and Cairnhold, embedded in the binary.
 """
 import hashlib
 import json
@@ -15,7 +16,7 @@ if destination.exists():
     raise SystemExit("Refusing to overwrite private map stage")
 payloads = ("vertices.bin", "collision.bin", "height.bin", "weights.rgba", "textures.rgba", "ambient.f32")
 packs = {}
-for key in ("stonehenge-clone", "snowblind-clone", "desert-of-death-clone"):
+for key in ("snowblind-clone", "desert-of-death-clone"):
     source = workspace / "local-assets" / key / "installed"
     manifest = json.loads((source / "map.json").read_text())
     if not manifest.get("private_reference"):

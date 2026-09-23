@@ -12,10 +12,11 @@ copied, traced, resampled or fitted. The study (ignored
 `research/stonehenge-study/`) was used only for statistics and design intent:
 slope distribution, distances and what each base element is for.
 
-**Status.** v2 is built into ignored `local-assets/cairnhold/`; the v1 pack is
-kept beside it as `local-assets/cairnhold-v1/`. It is not embedded, not wired to
-a `MapId`, not committed as a pack and not deployed. The `stonehenge-clone` slot
-still loads the private reference pack.
+**Status.** v2 is embedded in source from `src/assets/maps/cairnhold/` and holds
+the `stonehenge-clone` slot (`MapId::StonehengeClone`, menu name "Cairnhold"),
+always listed, with no private pack. Gameplay compatibility is `maps4`, which
+adds its fingerprint. Not deployed: the live server still runs the old
+Stonehenge clone. The v1 pack is kept in ignored `local-assets/cairnhold-v1/`.
 
 **v2 base pass.** The bunker front is a stepped, crenellated gatehouse facade
 (gatehouse 17 m, middle tiers 14 m, outer tiers 11.5 m over the 0 m floor) with a
@@ -88,7 +89,7 @@ From `src/` with the numpy venv:
 ../research/local-assets/tools/venv/bin/python scripts/test-cairnhold.py
 ```
 
-Default output is `local-assets/cairnhold`, and the build refuses to overwrite.
+Default output is the embedded `assets/maps/cairnhold`, and the build refuses to overwrite.
 It bakes lightmaps (10 pages, about 25 s). Baked builds are byte-identical.
 Pack assembly is shared with Tower Complex in `scripts/assets/pack_writer.py`,
 and Tower Complex still builds byte-identical to its committed pack. Building
@@ -120,8 +121,13 @@ Collision: 2,336 triangles per base (budget 3,000), 256 for the Ring; about 6,25
   (aerial, Ring, bunker exterior, bunker interior, flag tower and trench,
   battery, slopes, a battery-deck spawn view). The v1 camera positions were not
   saved, so the v1/v2 pairs are matched by eye, not exactly.
-- **Not done:** the Rust `MapId` wiring and embedding, human traversal, ski
-  feel, balance, bot pathing, audio, and Windows/Linux runtime.
+- **Rust acceptance tests:** `cairnhold_is_embedded_with_grounded_spawns_and_flag_decks`
+  (terrain.rs) and `cairnhold_turrets_cannot_see_into_base_rooms` (sim.rs), which
+  runs every turret through `equipment::acquire_target` at sensor range against
+  standable points in the bunker, trench, hut and tower floors. Tolerance: the
+  entry vestibule in front of each baffle and the columns under the open roof hatches.
+- **Not done:** human traversal, ski feel, balance, bot pathing, audio, and
+  Windows/Linux runtime.
 - **Known gaps:** kit turret heads and the sensor are still shared placeholders
   inside render-only collars. The flag is the engine's. There is no bloom, so
   "glow" is a bright texture. The Ring has no mechanic yet. The attack ramp's

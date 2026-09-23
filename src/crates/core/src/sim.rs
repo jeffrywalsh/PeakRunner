@@ -3255,6 +3255,63 @@ mod line_of_sight_tests {
         assert!(seen.is_empty(),"{} interior points visible to pod turrets (tower, left tunnel, right tunnel, generator, ship: {by_room:?}), e.g. {:?}",seen.len(),&seen[..seen.len().min(12)]);
     }
 
+    /// Cairnhold's sentry, roof and battery turrets, through the shared
+    /// `equipment::acquire_target` rule at sensor-boosted range, must not
+    /// acquire a player standing anywhere inside the bunker, the trench, the
+    /// guard hut or the flag tower's interior floors. Tolerance: the 3.6 m
+    /// entry vestibule between each bunker's front wall and its baffle
+    /// (local z < -15), and the columns under the tower's open roof hatches.
+    #[test]
+    fn cairnhold_turrets_cannot_see_into_base_rooms() {
+        let map=MapId::StonehengeClone;
+        let pack=crate::map_pack::on(map).unwrap();
+        let info=crate::terrain::info(map);
+        let defs=equipment::definitions(map);
+        let to_world=|team:u8,lx:f32,y:f32,lz:f32| if team==0 {
+            Vec3::new(info.ember.x-lx,info.ember.y+y,info.ember.z-lz)
+        } else {Vec3::new(info.glacier.x+lx,info.glacier.y+y,info.glacier.z+lz)};
+        let trench=|z:f32| 22.*((z-20.)/56.).clamp(0.,1.);
+        let level=|y:f32| move |_z:f32| y;
+        // (x0,x1,z0,z1,floor(z),skip hatch columns)
+        let rooms:[(f32,f32,f32,f32,&dyn Fn(f32)->f32,bool);5]=[
+            (-15.,15.,-15.,19.,&level(0.),false),       // bunker: spawn hall, stores, generator
+            (1.6,6.4,20.6,75.4,&trench,false),            // covered trench
+            (-6.6,14.6,77.4,98.6,&level(22.),true),       // guard hut
+            (3.4,14.6,77.4,94.6,&level(29.),true),        // tower floor over the hut
+            (3.4,14.6,92.4,94.9,&level(35.),false)];      // tower landing
+        let (mut sampled,mut seen)=(0,Vec::new());
+        for d in defs.iter().filter(|d|matches!(d.kind,Kind::Turret)) {
+            let profile=equipment::profile(d.kind,d.weapon).unwrap();
+            {   let team=d.team;   // attackers inside the turret's own base
+                for (r,&(x0,x1,z0,z1,floor,hatch)) in rooms.iter().enumerate() {
+                    let mut lx=x0; while lx<=x1 { let mut lz=z0; while lz<=z1 {
+                        if !(hatch && (9.5..=15.2).contains(&lx) && (80.0..=94.0).contains(&lz)) {
+                            let y=floor(lz);
+                            let probe=to_world(team,lx,y+1.5,lz);
+                            if let Some((fy,_))=pack.floor(probe) {
+                                let pos=Vec3::new(probe.x,fy+1.2,probe.z);
+                                if (fy-(info.ember.y+y)).abs()<1.5 && pack.body_sweep(pos,pos+Vec3::Y*0.01).is_none() {
+                                    sampled+=1;
+                                    let enemy=equipment::Candidate {index:0,team:1-d.team,pos,vel:Vec3::ZERO};
+                                    {
+                                        if let Some(a)=equipment::acquire_target(d.pos(),d.radius,d.team,&profile,true,[enemy],
+                                            |a,b|obstacle_hit(map,&[],a,b,0.).is_none()) {
+                                            seen.push((d.id.clone(),r,lx,y,lz,a.aim_point));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    lz+=1.;} lx+=1.;}
+                }
+            }
+        }
+        assert!(sampled>3000,"too few interior samples ({sampled})");
+        let by_room:Vec<usize>=(0..5).map(|r|seen.iter().filter(|s|s.1==r).count()).collect();
+        assert!(seen.is_empty(),"{} interior points visible to turrets (bunker, trench, hut, tower floor, landing: {by_room:?}), e.g. {:?}",
+            seen.len(),&seen[..seen.len().min(8)]);
+    }
+
     /// The entry baffles must not block the routes they sit on: each front
     /// opening leads through the vestibule and a baffle gap into the room, and
     /// the moved L1->L2 ramp foot is reachable from there.
