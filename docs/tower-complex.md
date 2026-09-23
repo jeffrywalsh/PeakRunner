@@ -18,8 +18,19 @@ apart (z 820 and 1228) and the flags sit about 88–95 m above the ground:
   - Level 1: open area with cover blocks and ramps.
   - Level 2: the flag, on a plinth between two pillars.
   - Level 3: framed windows (collision panes act as glass) and inventory stations.
-  - A gunmetal central shaft has one open face per level and floor holes at L2
-    and L3. Hazard striping marks only its edges.
+  - A gunmetal central shaft runs from the keel level to the roof, with one
+    open face per level (keel −x, L1 front, L2 toward the flag, L3 the far
+    side) and floor holes at L1, L2 and L3. Hazard striping marks only its
+    edges and the L1 hole's lip.
+  - **Keel level (generator).** A 16.2 × 16.2 m room inside the top of the
+    keel, floor 8 m below the deck, 7 m of headroom under the L1 slab. The
+    generator stands in its front-left corner. Exactly two ways in: drop down
+    the shaft from Level 1 (jet back up it), or the **keel hatch** on the +x
+    flank: a 4.4 m wide, 4.5 m tall airlock passage out through the keel to an
+    open 8 × 9 m ledge that a jetting player reaches from the bridges or the
+    field. A baffle 1.8 m inside the hatch turns the entry sideways, so no
+    straight line runs from outside into the room. No turret or sensor sits
+    inside, and the four engine pods moved 2 m lower to clear the room's floor.
   - Above the playable block, stepped setbacks, spires and a team banner with a
     chevron emblem take the tower to about 52 m.
 - **Two turret pods, front left and front right.** Each sits on an open bridge
@@ -31,12 +42,28 @@ apart (z 820 and 1228) and the flags sit about 88–95 m above the ground:
   through its door, along a walkway and into the rear tunnel. That let it track
   players inside the tower (570 standable interior points) and in the ship room
   (60), which felt like shooting through walls. Engine line of sight was correct.
-- **Generator room, rear left, and ship platform, rear right.** Both connect to
-  Level 1 through enclosed tunnels.
+- **Armory, rear left, and ship platform, rear right.** Both connect to Level 1
+  through enclosed tunnels. The armory was the generator's pod; it now holds
+  an inventory station and a repair pad facing its tunnel mouth, so the left
+  tunnel still leads somewhere worth going.
 - **Keels.** Every hull has a tapered keel with thruster nozzles.
 
-Blue mirrors Red. Each base has about 7,550 render and 2,070 collision triangles
-(the collision budget was then 3,000; now 4,500, see `map-pipeline.md`).
+Blue mirrors Red. Each base has about 9,180 render and 2,570 collision
+triangles (budget 4,500, see `map-pipeline.md`).
+
+### Ways in
+
+`scripts/assets/route_checks.py` counts entries on the committed pack with its
+airborne model (open-sky decks count as reachable, plus drops and short jet
+hops; see the module doc). Both teams:
+
+| Region | Before (v5) | After (v6) |
+| --- | --- | --- |
+| Main floors (L1–L3) | 3: both bridge doors, front door by a hop from a bridge | 4: the same, plus up the shaft from the keel level |
+| Flag level (L2) | 2: ramp from L1, shaft | 2: the same |
+| Generator | 1: the left tunnel | 2: the shaft and the keel hatch |
+
+`test-tower-complex.py` holds these at ≥3, ≥2 and exactly 2.
 
 ### Terrain
 
@@ -85,7 +112,8 @@ placed turrets or vehicles. The Rust manifest schema is unchanged.
 
 Each team has eight authored spawn points (`spawn_points` in `map.json`,
 `[x, y, z, yaw]`, player centre 1.2 m above the floor): two on each tower
-level, one in the generator room and one in the ship platform room. The server
+level, one in the armory and one in the ship platform room. None is on the
+keel level, at the shaft's L1 hole, or near the hatch ledge. The server
 picks one at random on every respawn, never the same point twice in a row for
 a team, and avoids points with a live enemy within 30 m when another choice
 exists. Offline bots use the same points. Maps without `spawn_points` keep the
@@ -123,7 +151,7 @@ Run these from `src/` with the numpy venv:
 ```sh
 ../research/local-assets/tools/venv/bin/python scripts/build-tower-complex.py            # -> assets/maps/tower-complex
 ../research/local-assets/tools/venv/bin/python scripts/build-tower-complex.py OUT --no-bake
-../research/local-assets/tools/venv/bin/python scripts/test-tower-complex.py            # 17 tests
+../research/local-assets/tools/venv/bin/python scripts/test-tower-complex.py            # 23 tests, ~70 s (route counts)
 ```
 
 The builder refuses to overwrite. Two builds produce byte-identical packs,
@@ -188,11 +216,32 @@ with this source.
 - Rendered through the normal embedded path (`QA_LOCAL=1 QA_MAP=broadside-clone`),
   plus `QA_FLYCAM` views of the interiors and exterior.
 
+### Keel level (v6) validation
+
+- Python: 23 tests pass, including the keel room's geometry (generator on the
+  keel floor under the L1 slab, hatch passage open, baffle blocking every
+  straight look in, walk-round on both sides, other walls closed, ledge open to
+  the sky, nothing solid poking up through the floor), standing support and
+  slopes on the keel floor, passage and ledge, spawn clearance and the route
+  counts above. Two baked builds are byte-identical (13 lightmap pages).
+- Rust: `pod_turrets_cannot_see_into_tower_rooms` now also samples the keel
+  room and hatch passage; `tower_complex_generators_sit_on_the_keel_level`
+  checks each generator is inside the tower, on a floor 8 m below the deck,
+  under the L1 slab; `basement_bars_stay_in_their_room` covers the keel room.
+- Hit bars: a bar squeezed between a generator and a ceiling less than 1 m
+  above its usual spot was hidden behind the generator from anywhere a player
+  stands. `world_overlay::bar_anchor` now hangs such bars beside the
+  equipment on the viewer's side (Dustreach's cistern already did).
+- Captures: `research/screenshots/tower-complex-v8-*.png`.
+
 ## Known gaps
 
 - No human playtest yet: traversal, balance and the fall risk are all unproven.
-- The flag is the engine's flat red square, and the turret heads are the kit's
-  boxes. Both are shared code, so changing them affects every map.
+- The keel level is untested in play. Its generator sits in a 5 m lane between
+  the shaft and the wall, so two defenders at the shaft foot may hold it
+  easily. Bots do not use the shaft or the hatch.
+- The flag cloth is six strips, so seams show close up. Turrets and the flag
+  are shared models, so changing them affects every map.
 - There is no emissive or bloom. "Lights" are just bright textures.
 - The ship platform has no gameplay role yet.
 - The landing pads' deploy slots are placeholders; nothing can be placed on

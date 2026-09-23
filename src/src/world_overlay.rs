@@ -55,22 +55,22 @@ fn model_top(kind: Kind) -> f32 {
     match kind { Kind::Generator => 3.3, Kind::Sensor => 2.1, _ => 1.6 }
 }
 
-/// Where a hit bar hangs: above the equipment, but never through a low
-/// ceiling (a generator in a basement), so the bar stays in the room it
-/// belongs to instead of poking into the floor above. With no room above the
-/// model, it hangs beside the equipment on the viewer's side.
+/// Where a hit bar hangs: above the equipment when there is open air over it.
+/// Under a low ceiling (a generator in a basement) a bar squeezed between the
+/// model and the ceiling would poke into the floor above or be hidden behind
+/// the model from anywhere a player stands, so within CEILING_ROOM of the
+/// usual spot it hangs beside the equipment on the viewer's side instead.
 pub fn bar_anchor(map: peakrunner_core::terrain::MapId, d: &peakrunner_core::equipment::Definition, eye: Vec3) -> Vec3 {
+    const CEILING_ROOM: f32 = 1.0;
     let base = d.pos();
     let lift = d.radius + 1.1;
     let top = model_top(d.kind).min(lift - 0.2) + 0.05;
-    let span = lift + 0.5 - top;
+    let span = lift + CEILING_ROOM - top;
     let from = base + Vec3::Y * top;
     let ceiling = peakrunner_core::map_pack::on(map)
-        .and_then(|pack| pack.sweep(from, from + Vec3::Y * span, 0.0))
-        .map(|(t, _)| top + span * t);
+        .and_then(|pack| pack.sweep(from, from + Vec3::Y * span, 0.0));
     match ceiling {
         None => base + Vec3::Y * lift,
-        Some(c) if c - 0.4 >= top + 0.2 => base + Vec3::Y * (c - 0.4).min(lift),
         Some(_) => {
             let side = (eye - base).with_y(0.0).normalize_or(Vec3::X);
             base + side * (d.radius + 0.4) + Vec3::Y * 1.0
@@ -230,14 +230,16 @@ mod tests {
     }
 
     /// Generator bars in basements: visible from inside the generator room,
-    /// never from the floor above. Cairnhold's well leaves room over the
-    /// generator; Dustreach's cistern doesn't, so its bar hangs beside it.
+    /// never from the floor above. Tower Complex's keel level and Dustreach's
+    /// cistern have a low ceiling over the generator, so their bars hang
+    /// beside it.
     #[test]
     fn basement_bars_stay_in_their_room() {
         // (map, a viewpoint in the room, a viewpoint on the floor above), in
         // base-local coordinates (team 1 is unrotated; team 0 is turned 180).
         let cases = [(MapId::StonehengeClone, Vec3::new(13.2, -1.65, -3.0), Vec3::new(6.8, 1.7, 7.7)),
-                     (MapId::DesertOfDeathClone, Vec3::new(-12.4, -0.2, -15.4), Vec3::new(0.0, 6.7, -5.0))];
+                     (MapId::DesertOfDeathClone, Vec3::new(-12.4, -0.2, -15.4), Vec3::new(0.0, 6.7, -5.0)),
+                     (MapId::BroadsideClone, Vec3::new(0.5, -6.3, -6.8), Vec3::new(-5.2, 1.7, -5.2))];
         for (map, inside, above) in cases {
             let info = peakrunner_core::terrain::info(map);
             let mut w = World::new(); w.set_map(map);

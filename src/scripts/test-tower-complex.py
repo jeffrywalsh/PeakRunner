@@ -50,12 +50,12 @@ class TowerComplexTests(unittest.TestCase):
                 self.assertTrue(any(abs(h-y)<.05 for h in heights),(x,z,'ramp surface'))
                 self.assertFalse(any(y+.2<h<y+2.2 for h in heights),(x,z,y,'ramp headroom'))
 
-    def test_shaft_is_a_drop_to_l1_with_one_open_face_per_level(self):
+    def test_shaft_drops_to_the_keel_with_one_open_face_per_level(self):
         import numpy as np
         mesh=kit.Mesh(); tower_complex.build(mesh,0,'one')
         heights=floor_heights_at(mesh.collision,0,0)
-        self.assertTrue(any(abs(h-tower_complex.L1)<.6 for h in heights),'tube needs its L1 floor')
-        for y in (tower_complex.L2, tower_complex.L3):
+        self.assertTrue(any(abs(h-tower_complex.KEEL)<.6 for h in heights),'tube needs its keel-level floor')
+        for y in (tower_complex.L1, tower_complex.L2, tower_complex.L3):
             self.assertFalse(any(abs(h-y)<.6 for h in heights),(y,'shaft should be open'))
         tris=np.array(mesh.collision).reshape(-1,3,3)
         def blocked(a,b):
@@ -145,7 +145,7 @@ class TowerComplexTests(unittest.TestCase):
         import numpy as np
         mesh=kit.Mesh(); anchors=tower_complex.build(mesh,0,'one')
         pts=np.array(mesh.collision).reshape(-1,3)
-        centres={'tower':(0,0),'generator':anchors['generator'][::2],
+        centres={'tower':(0,0),'armory':anchors['armory'][::2],
                  'ship_platform':anchors['ship_platform'][::2],
                  'turret_left':anchors['turret_left'][::2],'turret_right':anchors['turret_right'][::2]}
         for name,(cx,cz) in centres.items():
@@ -187,6 +187,55 @@ class TowerComplexTests(unittest.TestCase):
             self.assertEqual(hits(render,a,b),0,(a,'view blocked'))
         # The front banner strip stays solid wall.
         self.assertGreater(hits(render,(0,y,-10),(0,y,-14)),0)
+
+    def test_keel_level_holds_the_generator_behind_a_baffled_hatch(self):
+        import numpy as np
+        tc=tower_complex
+        mesh=kit.Mesh(); anchors=tc.build(mesh,0,'one')
+        gens=[e for e in mesh.entities if e['kind']=='generator']
+        self.assertEqual(len(gens),1)
+        gx,gy,gz=anchors['generator']
+        self.assertEqual((gx,gy,gz),tc.GENERATOR)
+        self.assertLess(max(abs(gx),abs(gz))+2.5,tc.KEEL_IN)
+        # Generator stands on the keel floor with the L1 slab as its ceiling.
+        heights=floor_heights_at(mesh.collision,gx,gz+1.9)
+        self.assertTrue(any(abs(h-tc.KEEL)<.02 for h in heights),heights)
+        self.assertTrue(any(abs(h-tc.KEEL_CEILING)<.02 for h in heights),heights)
+        tris=np.array(mesh.collision).reshape(-1,3,3)
+        def blocked(a,b):
+            a,b=np.array(a,float),np.array(b,float); d=b-a
+            for p0,p1,p2 in tris:
+                e1,e2=p1-p0,p2-p0; h=np.cross(d,e2); det=e1@h
+                if abs(det)<1e-9: continue
+                s=a-p0; u=(s@h)/det; q=np.cross(s,e1); v=(d@q)/det; t=(e2@q)/det
+                if u>=0 and v>=0 and u+v<=1 and 0<=t<=1: return True
+            return False
+        y=tc.KEEL+1.5
+        # The hatch passage is open from the ledge to the room wall...
+        self.assertFalse(blocked((tc.LEDGE_OUT-.5,y,0),(tc.KEEL_IN+.2,y,0)))
+        # ...but the baffle stops every straight look from the passage into the room,
+        self.assertTrue(blocked((tc.HATCH_OUT,y,0),(-6,y,0)))
+        for z in (-1.8,0,1.8):
+            for tx,tz in ((-6,-6),(-6,6),(0,0),(-7,0)):
+                self.assertTrue(blocked((tc.HATCH_OUT-.2,y,z),(tx,y,tz)),(z,tx,tz))
+        # and a player can walk round it on either side.
+        bx0,bx1,bz0,bz1=tc.KEEL_BAFFLE
+        for s in (-1,1):
+            self.assertFalse(blocked((tc.KEEL_IN-.8,y,0),(tc.KEEL_IN-.8,y,s*(bz1+1.5))))
+            self.assertFalse(blocked((tc.KEEL_IN-.8,y,s*(bz1+1.5)),(bx0-1,y,s*(bz1+1.5))))
+        # Every other wall of the keel room is closed at body height.
+        for d in ((-1,0),(0,1),(0,-1)):
+            self.assertTrue(blocked((d[0]*4,y,d[1]*4+(3.5 if d[0] else 0)),(d[0]*12,y,d[1]*12+(3.5 if d[0] else 0))),d)
+        # The tube's keel face is open toward -x, its other keel faces closed.
+        self.assertFalse(blocked((0,y,0),(-5,y,0)))
+        for fx,fz in ((5,0),(0,5),(0,-5)): self.assertTrue(blocked((0,y,0),(fx,y,fz)))
+        # Ledge: open sky, standable.
+        lx=(tc.HATCH_OUT+tc.LEDGE_OUT)/2
+        self.assertEqual([h for h in floor_heights_at(mesh.collision,lx,3.5) if h>tc.KEEL+.1],[])
+        # Engine pods and the lower keel stay below the keel-level floor.
+        inside=tris[(np.abs(tris[:,:,0]).max(1)<tc.KEEL_IN-.05)&(np.abs(tris[:,:,2]).max(1)<tc.KEEL_IN-.05)]
+        low=inside[:,:,1].min(1)
+        self.assertFalse(((low>tc.KEEL-.9)&(low<tc.KEEL-.05)).any(),'solid poking up through the keel floor')
 
     def test_collision_budget(self):
         mesh=kit.Mesh(); tower_complex.build(mesh,0,'one')
@@ -275,6 +324,9 @@ class TowerComplexTests(unittest.TestCase):
         checked=0
         regions=[(-11.4,11.4,-11.4,11.4,y) for y in (tower_complex.L1,tower_complex.L2,tower_complex.L3)]
         regions+=[(-12.4,-3.6,26.6,35.4,0),(3.6,12.4,26.6,35.4,0),(-9.6,-6.4,12.2,25.8,0),(6.4,9.6,12.2,25.8,0)]
+        K,KEEL=tower_complex.KEEL_IN,tower_complex.KEEL
+        regions+=[(-K+.3,K-.3,-K+.3,K-.3,KEEL),(K+.7,tower_complex.LEDGE_OUT-.3,-1.9,1.9,KEEL),
+                  (tower_complex.HATCH_OUT+.3,tower_complex.LEDGE_OUT-.3,-4.2,4.2,KEEL)]
         for x0,x1,z0,z1,level in regions:
             for x in np.arange(x0,x1+.01,.8):
                 for z in np.arange(z0,z1+.01,.8):
@@ -296,7 +348,11 @@ class TowerComplexTests(unittest.TestCase):
         ents=[e['position'] for e in mesh.entities]
         for i in np.where((n[:,1]>.3)&(n[:,1]<.9999))[0]:
             x,y,z=cen[i]
-            if y<tower_complex.L1-.5 or y>tower_complex.ROOF+.5: continue   # keels, exterior massing
+            if y>tower_complex.ROOF+.5: continue   # exterior massing
+            in_keel_level=((tower_complex.KEEL-.5<=y<=tower_complex.KEEL_CEILING and abs(x)<=K and abs(z)<=K)
+                           or (tower_complex.KEEL-.5<=y<=tower_complex.KEEL+.5 and K<x<=tower_complex.LEDGE_OUT
+                               and abs(z)<=tower_complex.HATCH_HALF+2.3))
+            if y<tower_complex.L1-.5 and not in_keel_level: continue   # keels, engine pods
             if abs(abs(x)-9)<=2.01 and abs(z)<=tower_complex.TOWER_HALF: continue  # ramps
             if math.hypot(x-tower_complex.FLAG_X,z)<1.8 and abs(y-tower_complex.L2-.15)<.3: continue
             if any(math.hypot(x-e[0],z-e[2])<3.3 for e in ents): continue
@@ -433,6 +489,35 @@ class TowerComplexTests(unittest.TestCase):
                 for dz in range(-14,15,2):
                     self.assertLess(build.terrain_height(x+dx,z+dz,grid),y-landing_pad.KEEL-8,(p['team'],dx,dz))
             self.assertLessEqual(y-build.terrain_height(x,z,grid),80,'reachable by jetting from the ground')
+
+class RouteCounts(unittest.TestCase):
+    """Ways in on the committed pack (assets/route_checks.py, airborne model:
+    open-sky decks, drops and short jet hops). docs/map-pipeline.md asks for
+    at least three into the main floors, two to the flag level and exactly two
+    into the generator room. Both teams."""
+    def test_committed_pack_entry_counts(self):
+        import json
+        from assets import route_checks
+        tc=tower_complex
+        root=Path(__file__).resolve().parent.parent
+        pack=route_checks.Pack(root/'assets/maps/tower-complex')
+        spec=json.loads((root/'maps/tower-complex.json').read_text())
+        K=tc.KEEL_IN
+        local={'main floors':(-11.6,11.6,tc.L1-.5,tc.L3+.5,-11.6,11.6),
+               'flag level':(-11.6,11.6,tc.L2-.5,tc.L2+.5,-11.6,11.6),
+               'generator':(-K,K,tc.KEEL-.5,tc.KEEL+.5,-K,K)}
+        for base in spec['bases']:
+            ox,oy,oz=base['position']; s=-1 if base['yaw']==180 else 1
+            def world(b):
+                x0,x1,y0,y1,z0,z1=b
+                xs=sorted((ox+s*x0,ox+s*x1)); zs=sorted((oz+s*z0,oz+s*z1))
+                return (xs[0],xs[1],oy+y0,oy+y1,zs[0],zs[1])
+            found=route_checks.base_entries(pack,(ox,oz),{k:world(v) for k,v in local.items()},airborne=True)
+            n={k:len(v) for k,v in found.items()}
+            self.assertGreaterEqual(n['main floors'],3,(base['team'],n))
+            self.assertGreaterEqual(n['flag level'],2,(base['team'],n))
+            self.assertEqual(n['generator'],2,(base['team'],n))
+
 
 class SpawnForwardClearance(unittest.TestCase):
     """Every committed spawn faces open floor: a clear body-width view for

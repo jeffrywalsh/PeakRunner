@@ -142,6 +142,11 @@ the same validating `MapPack::load`, with no manifest patching:
 - the support-ray check for every spawn
 - no slick surfaces
 - sightlines into rooms
+- route counts with `scripts/assets/route_checks.py` on the committed pack:
+  at least 3 ways into the main building, 2 onto the flag deck, exactly 2
+  into the generator room. Ground maps use the walking model; floating bases
+  pass `airborne=True` (open-sky decks, drops and short jet hops, see the
+  module doc). Define room-shaped regions; a box around an open area scores 1.
 - transform/anchor invariance
 - unique equipment IDs and per-team circuits
 - terrain-stat bounds and cut-seam checks

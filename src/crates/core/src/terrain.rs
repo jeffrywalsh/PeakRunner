@@ -496,6 +496,31 @@ mod map_tests {
         }
     }
 
+    /// Tower Complex keeps its generator on the keel level: inside the
+    /// tower's footprint, standing on a floor 8 m below the deck, with the
+    /// Level 1 slab as its ceiling (the floating base has no terrain to cut).
+    #[test]
+    fn tower_complex_generators_sit_on_the_keel_level() {
+        let id = MapId::BroadsideClone;
+        let pack = crate::map_pack::on(id).unwrap();
+        let info = info(id);
+        let gens: Vec<_> = crate::equipment::definitions(id).iter()
+            .filter(|d| d.kind == crate::equipment::Kind::Generator).collect();
+        assert_eq!(gens.len(), 2);
+        for d in gens {
+            let home = if d.team == 0 { info.ember } else { info.glacier };
+            let p = d.pos();
+            assert!((p.x-home.x).abs() < 8.1 && (p.z-home.z).abs() < 8.1, "generator {} outside the tower", d.id);
+            let floor = pack.floor(p - Vec3::Y * 2.4).expect("generator floor").0;
+            assert!((floor - (home.y - 8.0)).abs() < 0.01, "generator {} floor {floor}, base {home:?}", d.id);
+            // Probe the ceiling 4 m beside the generator (base-local +z), clear of its model.
+            let s = if d.team == 0 { -1.0 } else { 1.0 };
+            let q = Vec3::new(p.x, floor + 1.0, p.z + s * 4.0);
+            let (t, _) = pack.sweep(q, q + Vec3::Y * 10.0, 0.0).expect("keel room ceiling");
+            assert!((q.y + 10.0 * t - (home.y - 1.0)).abs() < 0.05, "generator {} ceiling", d.id);
+        }
+    }
+
     #[test]
     fn frostline_and_dustreach_are_embedded_with_grounded_spawns_and_flag_decks() {
         for (id, name) in [(MapId::SnowblindClone, "Frostline"), (MapId::DesertOfDeathClone, "Dustreach")] {

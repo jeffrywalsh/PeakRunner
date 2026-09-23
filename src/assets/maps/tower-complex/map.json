@@ -18,9 +18,9 @@
     "position": "-384 -160 54",
     "scale": "720 150 1"
   },
-  "texture_count": 31,
+  "texture_count": 33,
   "lightmap": {
-    "pages": 11,
+    "pages": 13,
     "first_layer": 20,
     "texel_m": 0.5,
     "sun": [
@@ -28,7 +28,7 @@
       0.57735,
       -0.57735
     ],
-    "lamps": 130,
+    "lamps": 160,
     "baker_sha256": "66d1c04a0581f283b62d4a01a9229abd22fbd18a738474c8c5c148db84800fed"
   },
   "version": 1,
@@ -164,7 +164,20 @@
   "holes": [],
   "entities": [
     {
-      "id": "inventory-0",
+      "id": "generator-0",
+      "kind": "generator",
+      "position": [
+        1029.2,
+        234.5,
+        825.2
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 2.8,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-1",
       "kind": "inventory",
       "position": [
         1029.2,
@@ -177,7 +190,7 @@
       "weapon": "bullet"
     },
     {
-      "id": "inventory-1",
+      "id": "inventory-2",
       "kind": "inventory",
       "position": [
         1018.8,
@@ -190,20 +203,33 @@
       "weapon": "bullet"
     },
     {
-      "id": "generator-2",
-      "kind": "generator",
+      "id": "inventory-3",
+      "kind": "inventory",
       "position": [
-        1032.0,
-        242.5,
-        791.0
+        1034.5,
+        241,
+        792.2
       ],
       "team": 0,
       "circuit": "base-0",
-      "radius": 2.8,
+      "radius": 3,
       "weapon": "bullet"
     },
     {
-      "id": "turret-3",
+      "id": "repair-4",
+      "kind": "repair",
+      "position": [
+        1030.0,
+        240.8,
+        791.2
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "turret-5",
       "kind": "turret",
       "position": [
         1033.0,
@@ -216,7 +242,7 @@
       "weapon": "bullet"
     },
     {
-      "id": "turret-4",
+      "id": "turret-6",
       "kind": "turret",
       "position": [
         1015.0,
@@ -229,7 +255,20 @@
       "weapon": "bullet"
     },
     {
-      "id": "inventory-5",
+      "id": "generator-7",
+      "kind": "generator",
+      "position": [
+        1018.8,
+        234.5,
+        1222.8
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 2.8,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-8",
       "kind": "inventory",
       "position": [
         1018.8,
@@ -242,7 +281,7 @@
       "weapon": "bullet"
     },
     {
-      "id": "inventory-6",
+      "id": "inventory-9",
       "kind": "inventory",
       "position": [
         1029.2,
@@ -255,20 +294,33 @@
       "weapon": "bullet"
     },
     {
-      "id": "generator-7",
-      "kind": "generator",
+      "id": "inventory-10",
+      "kind": "inventory",
       "position": [
-        1016.0,
-        242.5,
-        1257.0
+        1013.5,
+        241,
+        1255.8
       ],
       "team": 1,
       "circuit": "base-1",
-      "radius": 2.8,
+      "radius": 3,
       "weapon": "bullet"
     },
     {
-      "id": "turret-8",
+      "id": "repair-11",
+      "kind": "repair",
+      "position": [
+        1018.0,
+        240.8,
+        1256.8
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "turret-12",
       "kind": "turret",
       "position": [
         1015.0,
@@ -281,7 +333,7 @@
       "weapon": "bullet"
     },
     {
-      "id": "turret-9",
+      "id": "turret-13",
       "kind": "turret",
       "position": [
         1033.0,
@@ -296,7 +348,7 @@
   ],
   "instances": [
     {
-      "asset": "tower-complex-v5",
+      "asset": "tower-complex-v6",
       "team": 0,
       "position": [
         1024,
@@ -343,9 +395,24 @@
           ]
         ],
         "generator": [
+          1029.2,
+          232,
+          825.2
+        ],
+        "armory": [
           1032.0,
           240,
-          791.0
+          789.0
+        ],
+        "keel_hatch": [
+          1009.1,
+          232,
+          820.0
+        ],
+        "keel_view": [
+          1017.5,
+          232.2,
+          813.5
         ],
         "ship_platform": [
           1016.0,
@@ -390,7 +457,7 @@
       }
     },
     {
-      "asset": "tower-complex-v5",
+      "asset": "tower-complex-v6",
       "team": 1,
       "position": [
         1024,
@@ -437,9 +504,24 @@
           ]
         ],
         "generator": [
+          1018.8,
+          232,
+          1222.8
+        ],
+        "armory": [
           1016.0,
           240,
-          1257.0
+          1259.0
+        ],
+        "keel_hatch": [
+          1038.9,
+          232,
+          1228.0
+        ],
+        "keel_view": [
+          1030.5,
+          232.2,
+          1234.5
         ],
         "ship_platform": [
           1032.0,
@@ -621,7 +703,7 @@
     "visibleDistance": "2500",
     "fogDistance": "1500"
   },
-  "asset_sha256": "288058a5f3df7221d60875f668e5ef09d8814322a8383241a04d8a294ad36cf4",
+  "asset_sha256": "a312250968f3dad250aba35adef7e252cbf737f177c7c727e55caf5221c9612b",
   "pad_asset_sha256": "e08760880694f1e3903e43d2ed1761e8537bf477e8212b3cffddca00786a85d8",
   "terrain_source_sha256": "b0eb73f41448b92fc1b37552b7c5e300eb4892e17d819966405cb5fdf3e7e72b",
   "material_source_sha256": "d86aa4cb8e7facef1838d50786a3ae0486303984f7428e3381169d18ee6d4293",
@@ -629,10 +711,10 @@
   "definition_sha256": "2c57b9bb44f141cadfec2f0f31aaff50ecd384f111a84699434cfac7bc8a7193",
   "files": {
     "height.bin": "c7cbbeee0459c9f4338a9336f6c11abdc472dd98f224672d1056edfdbdc429a6",
-    "vertices.bin": "815413dd556b5850041c7c8b62d3e8a384e49aa3f690e7731bf45f9ca2ce6edb",
-    "collision.bin": "a40dce3af7bf8c85cfad5699321eb255e92995d2fe054ecbeb46de2097a45911",
+    "vertices.bin": "c28b186c0f3474978bbf91789846c81234c39de19801cb13fac326585d862c91",
+    "collision.bin": "c3ad032a7bc06d270b46e56394bcdfa544e4c5f904f34808e03b061c990e6672",
     "weights.rgba": "2c0e11be87e32040a6133893c6ba22f07ea57ea0618175cf51ca7f32dfe14c77",
-    "textures.rgba": "f884e529e98b6d0aa46cba4828f168f63305054f7c57c08b487c3852851453eb",
+    "textures.rgba": "bcc66f0832a77e83aef22440325e46a02a0d4fe049664582dd31c25e7ac43a9c",
     "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e"
   }
 }

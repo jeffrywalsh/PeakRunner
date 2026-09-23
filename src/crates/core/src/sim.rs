@@ -3259,10 +3259,12 @@ mod line_of_sight_tests {
             Vec3::new(info.ember.x-lx,info.ember.y+y,info.ember.z-lz)
         } else {Vec3::new(info.glacier.x+lx,info.glacier.y+y,info.glacier.z+lz)};
         // (x0,x1,z0,z1,floor levels to probe from)
-        let rooms:[(f32,f32,f32,f32,&[f32]);5]=[
+        let rooms:[(f32,f32,f32,f32,&[f32]);7]=[
             (-11.5,11.5,-11.5,11.5,&[0.,7.,14.]),   // tower L1-L3
             (-10.,-6.,12.,26.,&[0.]),(6.,10.,12.,26.,&[0.]),   // tunnels
-            (-12.5,-3.5,26.5,35.5,&[0.]),(3.5,12.5,26.5,35.5,&[0.])];   // rear rooms
+            (-12.5,-3.5,26.5,35.5,&[0.]),(3.5,12.5,26.5,35.5,&[0.]),   // armory, ship room
+            (-8.,8.,-8.,8.,&[-8.]),   // keel-level generator room
+            (8.6,13.3,-2.,2.,&[-8.])];   // keel hatch passage
         let (mut sampled,mut seen)=(0,Vec::new());
         for (i,d) in defs.iter().enumerate().filter(|(_,d)|d.kind==Kind::Turret) {
             let c=d.pos();
@@ -3285,8 +3287,8 @@ mod line_of_sight_tests {
             }
         }
         assert!(sampled>2000,"too few interior samples ({sampled})");
-        let by_room:Vec<usize>=(0..5).map(|r|seen.iter().filter(|s|s.0==r).count()).collect();
-        assert!(seen.is_empty(),"{} interior points visible to pod turrets (tower, left tunnel, right tunnel, generator, ship: {by_room:?}), e.g. {:?}",seen.len(),&seen[..seen.len().min(12)]);
+        let by_room:Vec<usize>=(0..7).map(|r|seen.iter().filter(|s|s.0==r).count()).collect();
+        assert!(seen.is_empty(),"{} interior points visible to pod turrets (tower, left tunnel, right tunnel, armory, ship, keel room, hatch passage: {by_room:?}), e.g. {:?}",seen.len(),&seen[..seen.len().min(12)]);
     }
 
     /// Cairnhold's sentry, roof and battery turrets, through the shared

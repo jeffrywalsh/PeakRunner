@@ -7,17 +7,23 @@ No source mesh, texture, lightmap or parser is used by this builder. Local
 X/Z are horizontal, Y is up. -Z is the front (field-facing) side; +Z is the
 rear. Caller supplies placement and ownership through mesh.origin/mesh.yaw.
 
-Design simplification: the spec this was drawn from described the center
-shaft "leading down to the tunnels" via a separate basement junction. This
-build instead lands the generator/ship tunnels directly on Level 1, and the
-tube bottoms out on the L1 floor. Each level gets one open wall face into the
-tube (L1 front, L2 toward the flag, L3 the far side); L2 and L3 have floor
-holes inside it, so it is a fast drop down and a jet route up.
+The central tube runs from the keel level up to the roof. Each level gets
+one open wall face into it (keel -x, L1 front, L2 toward the flag, L3 the far
+side); L1, L2 and L3 have floor holes inside it, so it is a fast drop down
+and a jet route up.
 
-Everything above ROOF (stepped setbacks, spine, fins, spires) and below L1
-(keels, engine pods) is exterior massing. It is solid where a jetting player
-could plausibly touch it and non-solid for thin decoration, and none of it
-encloses a space a player can enter.
+The generator sits on the keel level: a room inside the top of the tower's
+keel, below Level 1, with exactly two entrances. One is the tube (drop in
+from Level 1, jet back up). The other is an exterior hatch on the keel's +x
+flank, opening onto a ledge a jetting player can reach from the bridges or
+the field; an airlock housing and an inner baffle keep every outside line of
+sight out of the room. The old rear-left generator pod is now the armory: an
+inventory station and a repair pad at the end of its tunnel.
+
+Everything above ROOF (stepped setbacks, spine, fins, spires) and below the
+keel level (lower keel, engine pods) is exterior massing. It is solid where a
+jetting player could plausibly touch it and non-solid for thin decoration,
+and none of it encloses a space a player can enter.
 
 Interior dressing (wall liners, baseboards, cornices, pilasters, light
 fixtures, frames) is render-only and sits at most 0.2 m proud of a solid
@@ -33,7 +39,7 @@ import math
 
 from assets.fortress_rooms import shaft
 
-ASSET_ID = 'tower-complex-v5'
+ASSET_ID = 'tower-complex-v6'
 
 TOWER_HALF = 12
 WALL = .4             # half-thickness of the tower perimeter walls
@@ -41,8 +47,18 @@ INNER = TOWER_HALF-WALL
 SHAFT_HALF = 2.5
 SHAFT_WALL = .6
 L1, L2, L3, ROOF = 0, 7, 14, 21
+KEEL = -8             # generator level floor; its ceiling is the L1 slab (-1)
+KEEL_IN = 8.1         # keel room inner wall faces at |x|, |z| = KEEL_IN
+KEEL_WALL = .4
+KEEL_CEILING = L1-1
+HATCH_HALF = 2.2      # hatch passage half-width (z)
+HATCH_TOP = KEEL+4.5
+HATCH_OUT = 13.4      # outer end of the airlock housing (+x)
+LEDGE_OUT = 16.5
+KEEL_BAFFLE = (5.9, 6.3, -4.0, 4.0)   # x0, x1, z0, z1 inside the hatch
+GENERATOR = (-5.2, KEEL, -5.2)
 STOREY = 6            # floor top to the underside of the next slab
-SHAFT_OPENINGS = [('-z',L1,L1+3.2),('+x',L2,L2+3.2),('-x',L3,L3+3.2)]
+SHAFT_OPENINGS = [('-x',KEEL,KEEL+3.2),('-z',L1,L1+3.2),('+x',L2,L2+3.2),('-x',L3,L3+3.2)]
 DOOR_TOP = 4.5        # headers close L1 wall gaps above this height
 POD_Z = -30
 REAR_Z0, REAR_Z1 = 26, 36
@@ -169,12 +185,12 @@ def build(mesh, team, circuit):
     # --- Central tower: traversable L1-L3 block ------------------------------
     # Ramp openings keep ~2.2 m headroom over each climbing ramp: L2 is cut
     # above the L1->L2 ramp (x=-9), L3 above the L2->L3 ramp (x=+9).
-    floor_ring(L1,shaft_hole=False)
+    floor_ring(L1)
     floor_ring(L2,holes=[(-11,-7,-1,11)])
     floor_ring(L3,holes=[(7,11,-11,1)])
     slab(-TOWER_HALF,TOWER_HALF,-TOWER_HALF,TOWER_HALF,ROOF)
     # The tube: gunmetal walls; hazard striping only frames the open faces.
-    shaft(mesh,0,0,SHAFT_HALF,L1,ROOF,mat=METAL,thickness=SHAFT_WALL,openings=SHAFT_OPENINGS)
+    shaft(mesh,0,0,SHAFT_HALF,KEEL,ROOF,mat=METAL,thickness=SHAFT_WALL,openings=SHAFT_OPENINGS)
     edge = SHAFT_HALF+SHAFT_WALL
     for side,ya,yb in SHAFT_OPENINGS:
         axis = 'x' if side[1] == 'x' else 'z'; sgn = -1 if side[0] == '-' else 1
@@ -191,16 +207,67 @@ def build(mesh, team, circuit):
         tube_box(mid-SHAFT_WALL/2-.02,mid+SHAFT_WALL/2+.04,-reach,reach,yb+.02,yb+.35,HAZARD,False)
         tube_box(mid-SHAFT_WALL/2,mid+SHAFT_WALL/2,-(reach-.35),reach-.35,ya,ya+.02,HAZARD,False)
     # A lit ring inside the tube above each opening, and a landing square on
-    # the tube's L1 floor.
-    for level in (L1,L2,L3):
-        y = level+4.4
+    # the tube's keel-level floor.
+    for level in (KEEL,L1,L2,L3):
+        y = level+(4.4 if level != KEEL else 5.4)
         for s in (-1,1):
             mesh.box((s*(SHAFT_HALF-.03),y,0),(.06,.18,2*SHAFT_HALF),GLOW,False)
             mesh.box((0,y,s*(SHAFT_HALF-.03)),(2*SHAFT_HALF,.18,.06),GLOW,False)
         lamp((0,y-.4,0),.9)
     for s in (-1,1):
-        mesh.box((0,L1+.015,s*(SHAFT_HALF-.2)),(2*SHAFT_HALF,.03,.4),HAZARD,False)
-        mesh.box((s*(SHAFT_HALF-.2),L1+.016,0),(.4,.03,2*SHAFT_HALF-.8),HAZARD,False)
+        mesh.box((0,KEEL+.015,s*(SHAFT_HALF-.2)),(2*SHAFT_HALF,.03,.4),HAZARD,False)
+        mesh.box((s*(SHAFT_HALF-.2),KEEL+.016,0),(.4,.03,2*SHAFT_HALF-.8),HAZARD,False)
+    # Hazard lip round the tube's Level 1 floor hole (the drop to the keel).
+    for s in (-1,1):
+        wall(-SHAFT_HALF,SHAFT_HALF,s*SHAFT_HALF-.02,s*SHAFT_HALF+.02,L1-.3,L1+.01,HAZARD,False)
+        wall(s*SHAFT_HALF-.02,s*SHAFT_HALF+.02,-SHAFT_HALF,SHAFT_HALF,L1-.3,L1+.01,HAZARD,False)
+
+    # --- Keel level: the generator room ------------------------------------
+    # A room inside the top of the keel, under the L1 slab. Exactly two ways
+    # in: the tube's keel-level face (-x) and the hatch passage on the +x
+    # flank. The baffle just inside the hatch turns the entry sideways.
+    K, KW = KEEL_IN, KEEL_WALL
+    slab(-K-KW,K,-K-KW,K+KW,KEEL)                       # floor (the ledge slab carries x > K)
+    keel_faces = {'-z': ('z',-K,1), '+z': ('z',K,-1), '-x': ('x',-K,1), '+x': ('x',K,-1)}
+    for side,(axis,plane,into) in keel_faces.items():
+        outer = plane-into*KW; lo, hi = min(plane,outer), max(plane,outer)
+        gaps = [(-HATCH_HALF,HATCH_HALF)] if side == '+x' else []
+        for u0,u1 in spans(-K-KW,K+KW,gaps):
+            if axis == 'z': wall(u0,u1,lo,hi,KEEL,KEEL_CEILING)
+            else: wall(lo,hi,u0,u1,KEEL,KEEL_CEILING)
+        for u0,u1 in gaps:
+            wall(lo,hi,u0,u1,HATCH_TOP,KEEL_CEILING)
+            face_quad(axis,plane,into,u0,u1,HATCH_TOP,KEEL_CEILING,INTERIOR)
+        dress(axis,plane,into,spans(-K,K,gaps),KEEL,KEEL_CEILING)
+    bx0,bx1,bz0,bz1 = KEEL_BAFFLE
+    wall(bx0,bx1,bz0,bz1,KEEL,KEEL_CEILING)
+    dress('x',bx1,1,[(bz0,bz1)],KEEL,KEEL_CEILING,pilasters=False)
+    dress('x',bx0,-1,[(bz0,bz1)],KEEL,KEEL_CEILING,pilasters=False)
+    for z in (bz0,bz1): wall(bx0-.06,bx1+.06,z-.06,z+.06,KEEL,KEEL+DOOR_TOP,HAZARD,False)
+    for x in (-5.5,5.5): ceiling_strip(x,-7,7,KEEL_CEILING,.8)
+    mesh.equipment('generator',GENERATOR,team,circuit)
+    gxk,_,gzk = GENERATOR
+    mesh.box((gxk,KEEL+.015,gzk),(6.4,.03,5.4),HAZARD,False)
+    # Hatch passage and airlock housing: floor on the ledge slab, solid side
+    # walls and roof from the room wall out past the keel flank.
+    slab(K,LEDGE_OUT,-HATCH_HALF-2.3,HATCH_HALF+2.3,KEEL)              # passage floor + ledge
+    for s in (-1,1):
+        wall(K+KW,HATCH_OUT,s*HATCH_HALF,s*(HATCH_HALF+.4),KEEL,HATCH_TOP+1)
+        dress('z',s*HATCH_HALF,-s,[(K+KW,HATCH_OUT)],KEEL,HATCH_TOP,pilasters=False)
+    slab(K+KW,HATCH_OUT,-HATCH_HALF-.4,HATCH_HALF+.4,HATCH_TOP+1,HULL)    # roof
+    mesh.box(((K+KW+HATCH_OUT)/2,HATCH_TOP-.035,0),(HATCH_OUT-K-KW-.6,.07,.8),METAL,False)
+    mesh.box(((K+KW+HATCH_OUT)/2,HATCH_TOP-.07,0),(HATCH_OUT-K-KW-1,.06,.45),GLOW,False)
+    for x in (K+1.5,HATCH_OUT-1.5): lamp((x,HATCH_TOP-.3,0),.5)
+    # Outer frame, hazard lintel and ledge edge markings (render only).
+    for s in (-1,1):
+        mesh.box((HATCH_OUT+.07,(KEEL+HATCH_TOP)/2,s*(HATCH_HALF+.2)),(.14,HATCH_TOP-KEEL,.5),METAL,False)
+        mesh.box(((HATCH_OUT+LEDGE_OUT)/2,KEEL+.015,s*(HATCH_HALF+2.1)),(LEDGE_OUT-HATCH_OUT,.03,.3),HAZARD,False)
+    mesh.box((HATCH_OUT+.07,HATCH_TOP+.2,0),(.16,.4,2*HATCH_HALF+.9),HAZARD,False)
+    mesh.box((LEDGE_OUT-.15,KEEL+.015,0),(.3,.03,2*HATCH_HALF+4.6),HAZARD,False)
+    for s in (-1,1):
+        mesh.column((LEDGE_OUT-.4,KEEL,s*(HATCH_HALF+2)),.12,1.6,METAL,6,top=.05,solid=False)
+        mesh.box((LEDGE_OUT-.4,KEEL+1.7,s*(HATCH_HALF+2)),(.2,.2,.2),GLOW,False)
+        lamp((LEDGE_OUT-.4,KEEL+2.2,s*(HATCH_HALF+2)),.3)
 
     # Level 1 shell: door gaps capped by solid headers above DOOR_TOP.
     T, W = TOWER_HALF, WALL
@@ -369,14 +436,25 @@ def build(mesh, team, circuit):
     mesh.column((0,51.2,0),.5,9,METAL,6,top=.06,solid=False)
     mesh.box((0,60.2,0),(.5,.5,.5),GLOW,False)
 
-    hull(0,0,(9.5,9.5),(12.4,12.4),-8,-1,METAL)
+    # Upper keel band around the keel level. Its +x face is split round the
+    # hatch housing (z within the housing's outer walls, below its roof).
+    kb, kt = 9.5, 12.4
+    hz, hy = HATCH_HALF+.4, HATCH_TOP+1
+    at_y = lambda y: kb+(kt-kb)*(y-KEEL)/(KEEL_CEILING-KEEL)
+    for s in (-1,1):
+        mesh.quad((-kb,KEEL,s*kb),(kb,KEEL,s*kb),(kt,KEEL_CEILING,s*kt),(-kt,KEEL_CEILING,s*kt),METAL)
+    mesh.quad((-kb,KEEL,-kb),(-kb,KEEL,kb),(-kt,KEEL_CEILING,kt),(-kt,KEEL_CEILING,-kt),METAL)
+    mesh.quad((kb,KEEL,-kb),(kb,KEEL,-hz),(kt,KEEL_CEILING,-hz),(kt,KEEL_CEILING,-kt),METAL)
+    mesh.quad((kb,KEEL,hz),(kb,KEEL,kb),(kt,KEEL_CEILING,kt),(kt,KEEL_CEILING,hz),METAL)
+    mesh.quad((at_y(hy),hy,-hz),(at_y(hy),hy,hz),(kt,KEEL_CEILING,hz),(kt,KEEL_CEILING,-hz),METAL)
     hull(0,0,(4.5,4.5),(9.5,9.5),-22,-8,HULL)
     hull(0,0,(1.3,1.3),(4.5,4.5),-34,-22,METAL)
     thruster(0,-34,0,1.3)
     for sx in (-1,1):
         for sz in (-1,1):
-            mesh.column((sx*8,-13,sz*8),1.3,5.5,METAL,8,top=2.1)
-            thruster(sx*8,-13,sz*8,1.3)
+            # Engine pods sit fully below the keel-level floor.
+            mesh.column((sx*8,-15,sz*8),1.3,5.5,METAL,8,top=2.1)
+            thruster(sx*8,-15,sz*8,1.3)
 
     # --- Rear tunnels + support pods --------------------------------------
     def corridor_z(x,width,z0,z1,y0,y1,mat=HULL):
@@ -416,10 +494,12 @@ def build(mesh, team, circuit):
         mesh.quad((x0,2.2,REAR_Z1+.45),(x1,2.2,REAR_Z1+.45),(x1,3.0,REAR_Z1+.45),(x0,3.0,REAR_Z1+.45),accent,False)
         return cx
 
-    # Generator room, rear-left: exhaust stacks on the roof.
+    # Armory, rear-left (the generator's old pod): an inventory station facing
+    # the tunnel mouth and a repair pad, so the left tunnel still leads
+    # somewhere worth going. Exhaust stacks on the roof.
     gx=rear_room(-13,-3,(-10,-6))
-    mesh.equipment('generator',(-8,L1,rear_mid-2),team,circuit)
-    mesh.box((-8,L1+.015,rear_mid-2),(6.4,.03,5.4),HAZARD,False)
+    mesh.equipment('inventory',(-10.5,L1,rear_mid-2.2),team,circuit)
+    mesh.equipment('repair',(-6,L1,rear_mid-2.2),team,circuit)
     for dx,h in [(-2.5,6),(0,8),(2.5,6)]:
         mesh.column((gx+dx,L1+ROOM_H,REAR_Z1-2.5),.9,h,METAL,8,top=.7)
         mesh.column((gx+dx,L1+ROOM_H+h,REAR_Z1-2.5),.72,.12,GLOW,8,top=.72,solid=False)
@@ -470,7 +550,10 @@ def build(mesh, team, circuit):
                          (-4,L3+SPAWN_LIFT,6,0), (4,L3+SPAWN_LIFT,7,0),
                          (-11,L1+SPAWN_LIFT,34,-math.pi/2), (5,L1+SPAWN_LIFT,34,-math.pi/2)],
         'entrances': [(0,.2,-TOWER_HALF),(-8,.2,TOWER_HALF),(8,.2,TOWER_HALF),(-9,.2,POD_Z),(9,.2,POD_Z)],
-        'generator': (-8,L1,rear_mid-2),
+        'generator': GENERATOR,
+        'armory': (-8,L1,rear_mid),
+        'keel_hatch': (HATCH_OUT+1.5,KEEL,0),
+        'keel_view': (6.5,KEEL+.2,6.5),
         'ship_platform': (8,L1,rear_mid),
         'turret_left': (-9,L1,POD_Z),
         'turret_right': (9,L1,POD_Z),

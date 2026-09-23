@@ -12,6 +12,32 @@ changes by at most 0.75 m and a 0.9 m wide band is clear between them at
 knee, chest and head height. An entry is a cluster of graph edges crossing
 from open ground's reachable component into the region; crossings within
 ENTRY_MERGE metres of each other are one entry.
+
+Airborne model (opt-in with airborne=True, for floating bases that no one
+can walk to). It adds, on top of walking:
+
+- Open sky. Every standable node with nothing solid above it for SKY metres
+  is reachable from the field: in this game players ski and jet onto exposed
+  decks, and each map's own tests keep its decks within jet reach of the
+  terrain or a pad. Open-sky nodes seed the outside, alongside the ground.
+- Drops. From a standing node a player can step off into a neighbouring
+  column and fall to its highest floor that is more than MAX_RISE lower, if
+  the body band is clear across and then all the way down.
+- Hops. A short jet move from an outside node to a node in the region, at
+  most HOP_REACH metres apart horizontally and JET_RISE vertically. It counts
+  when one of five simple paths is clear for the body band: straight;
+  straight up then across; across then straight down; or along x then z
+  (or z then x) at the higher of the two heights. Each inside node near a
+  wall or edge tries only its HOP_TRIES nearest outside candidates. JET_RISE is a conservative
+  cut of the engine's standing climb: JET_ACCEL 37.28 against 20 gravity
+  reaches the 16 m/s thrust knee in 0.93 s (7.4 m), holds about 17.8 m/s for
+  the rest of the 4 s tank (about 53 m), then coasts about 8 m: roughly 69 m.
+  Hops only cross the region's boundary; long flights between exterior decks
+  are already covered by the open-sky rule.
+
+A crossing's entry point is where its path first enters the region's volume
+(the node box raised by HEADROOM), so every route through one door or one
+shaft opening lands in one cluster.
 """
 import json
 import math
@@ -27,6 +53,10 @@ EDGE_HEIGHTS = (0.45, 1.2, 2.2)
 LATERAL = 0.45
 BUCKET = 4.0
 ENTRY_MERGE = 3.0
+SKY = 40.0
+HOP_REACH = 12.0
+HOP_TRIES = 6
+JET_RISE = 60.0
 
 
 class Pack:
@@ -79,10 +109,12 @@ class Pack:
         k = ok & (u >= -1e-7) & (v >= -1e-7) & (u+v <= 1+1e-7)
         return np.sort(a[k, 1]+u[k]*e1[k, 1]+v[k]*e2[k, 1])
 
-    def blocked(self, starts, ends):
-        """Segment-vs-soup test for rays that all lie near one another."""
+    def blocked(self, starts, ends, r=1):
+        """Segment-vs-soup test for rays that all lie near one another: every
+        ray must stay within about 4*r metres (horizontally) of the batch's
+        middle."""
         mid = (starts.mean(0)+ends.mean(0))/2
-        idx = self.near(mid[0], mid[2])
+        idx = self.near(mid[0], mid[2], r)
         if not len(idx): return np.zeros(len(starts), bool)
         A, E1, E2 = self.a[idx][None], self.e1[idx][None], self.e2[idx][None]
         s = starts[:, None]; d = ends[:, None]-s
@@ -111,9 +143,40 @@ def floors(pack, x, z):
     return out
 
 
+def path_clear(pack, points):
+    """Is a body-band polyline clear? Each leg is tested at EDGE_HEIGHTS above
+    its points, on its centre line and LATERAL either side (for vertical legs,
+    either side along x and along z)."""
+    pts = np.asarray(points, float)
+    for a, b in zip(pts, pts[1:]):
+        d = b-a
+        if np.hypot(d[0], d[2]) > 1e-6:
+            side = np.array([-d[2], 0, d[0]])/np.hypot(d[0], d[2])
+            offsets = [side*o for o in (-LATERAL, 0.0, LATERAL)]
+        else:
+            offsets = [np.zeros(3)]+[np.array(v)*LATERAL for v in ((1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1))]
+        starts = np.array([a+o+(0, h, 0) for h in EDGE_HEIGHTS for o in offsets])
+        ends = np.array([b+o+(0, h, 0) for h in EDGE_HEIGHTS for o in offsets])
+        if pack.blocked(starts, ends, r=2).any(): return False
+    return True
+
+
+def first_inside(points, volume, step=.25):
+    """First point along a polyline inside an axis box (x0,x1,y0,y1,z0,z1)."""
+    x0, x1, y0, y1, z0, z1 = volume
+    pts = np.asarray(points, float)
+    for a, b in zip(pts, pts[1:]):
+        n = max(1, int(np.linalg.norm(b-a)/step))
+        for t in np.linspace(0, 1, n+1):
+            p = a+(b-a)*t
+            if x0 <= p[0] <= x1 and y0 <= p[1] <= y1 and z0 <= p[2] <= z1: return p
+    return pts[-1]
+
+
 class Graph:
-    def __init__(self, pack, x0, x1, z0, z1):
+    def __init__(self, pack, x0, x1, z0, z1, airborne=False):
         self.pack = pack
+        self.airborne = airborne
         self.nodes = []                      # (x, y, z)
         self.at = {}                         # (ix, iz) -> [node ids]
         for ix in range(int(math.floor(x0/GRID)), int(math.ceil(x1/GRID))+1):
@@ -123,8 +186,37 @@ class Graph:
                     self.at.setdefault((ix, iz), []).append(len(self.nodes))
                     self.nodes.append((x, y, z))
         self.nodes = np.array(self.nodes)
+        self.cell = {i: key for key, ids in self.at.items() for i in ids}
         self.adj = [[] for _ in range(len(self.nodes))]
+        self.down = [[] for _ in range(len(self.nodes))]   # directed drops (airborne only)
         self._edges()
+        if airborne: self._drops()
+
+    def structure(self, i):
+        x, y, z = self.nodes[i]
+        return self.pack.hole(x, z) or abs(y-self.pack.terrain(x, z)) > .3
+
+    def open_sky(self, i):
+        x, y, z = self.nodes[i]
+        above = self.pack.column(x, z)
+        return not ((above > y+.05) & (above < y+SKY)).any()
+
+    def edge_node(self, i):
+        return len(self.adj[i]) < 8
+
+    def _drops(self):
+        for i in range(len(self.nodes)):
+            if not self.structure(i): continue
+            ix, iz = self.cell[i]; ax, ay, az = self.nodes[i]
+            for dx in (-1, 0, 1):
+                for dz in (-1, 0, 1):
+                    if not dx and not dz: continue
+                    lower = [j for j in self.at.get((ix+dx, iz+dz), ()) if self.nodes[j, 1] < ay-MAX_RISE]
+                    if not lower or any(abs(self.nodes[j, 1]-ay) <= MAX_RISE for j in self.at.get((ix+dx, iz+dz), ())): continue
+                    j = max(lower, key=lambda k: self.nodes[k, 1])
+                    bx, by, bz = self.nodes[j]
+                    if path_clear(self.pack, [(ax, ay, az), (bx, ay, bz), (bx, by, bz)]):
+                        self.down[i].append(j)
 
     def _edges(self):
         pairs = []
@@ -160,16 +252,55 @@ class Graph:
             if not blocked[s]: seen[s] = True; q.append(s)
         while q:
             i = q.popleft()
-            for j in self.adj[i]:
+            for j in (*self.adj[i], *self.down[i]):
                 if not seen[j] and not blocked[j]: seen[j] = True; q.append(j)
         return seen
 
 
-def entries(graph, inside, outside_seeds):
+def hop_paths(a, b):
+    """The five simple jet paths from node a to node b (see module doc)."""
+    (ax, ay, az), (bx, by, bz) = a, b
+    top = max(ay, by)
+    return [[a, b],
+            [a, (ax, top, az), (bx, top, bz), b],
+            [a, (bx, top, bz), b],
+            [a, (bx, top, az), (bx, top, bz), b],
+            [a, (ax, top, bz), (bx, top, bz), b]]
+
+
+def entries(graph, inside, outside_seeds, volume=None):
     """Clusters of edges from the region's outside (reached from the seeds
-    without entering the region) into the region. Returns cluster centres."""
+    without entering the region) into the region. Returns cluster centres.
+    `volume` (x0,x1,y0,y1,z0,z1) places airborne crossings where their path
+    enters the region."""
     outside = graph.reach(outside_seeds, inside)
     cross = [(graph.nodes[i]+graph.nodes[j])/2 for i in np.flatnonzero(outside) for j in graph.adj[i] if inside[j]]
+    if graph.airborne:
+        for i in np.flatnonzero(outside):
+            for j in graph.down[i]:
+                if inside[j]:
+                    a, b = graph.nodes[i], graph.nodes[j]
+                    cross.append(first_inside([a, (b[0], a[1], b[2]), b], volume))
+        # Every real opening has an outside standing spot close to it (a
+        # bridge by a door, a shaft floor under a hole, a ledge by a hatch),
+        # so each inside edge node tries only its HOP_TRIES nearest outside
+        # edge nodes within reach.
+        near = [j for j in np.flatnonzero(inside) if graph.edge_node(j)]
+        cand = np.array([i for i in np.flatnonzero(outside) if graph.edge_node(i)], int)
+        if near and len(cand):
+            nodes = graph.nodes; out_pts = nodes[cand]
+            for j in near:
+                b = nodes[j]
+                d = np.hypot(out_pts[:, 0]-b[0], out_pts[:, 2]-b[2])
+                ok = np.flatnonzero((d <= HOP_REACH) & (np.abs(out_pts[:, 1]-b[1]) <= JET_RISE))
+                if not len(ok): continue
+                ok = ok[np.argsort(np.linalg.norm(out_pts[ok]-b, axis=1))[:HOP_TRIES]]
+                for k in ok:
+                    i = cand[k]
+                    if j in graph.adj[i]: continue
+                    path = next((p for p in hop_paths(tuple(nodes[i]), tuple(b)) if path_clear(graph.pack, p)), None)
+                    if path is not None:
+                        cross.append(first_inside(path, volume)); break
     clusters = []
     for p in cross:
         for c in clusters:
@@ -192,16 +323,23 @@ def box_region(graph, x0, x1, y0, y1, z0, z1):
     return (n[:, 0] >= x0) & (n[:, 0] <= x1) & (n[:, 1] >= y0) & (n[:, 1] <= y1) & (n[:, 2] >= z0) & (n[:, 2] <= z1)
 
 
-def base_entries(pack, centre, regions, extent=64.0, seed_radius=48.0):
+def base_entries(pack, centre, regions, extent=64.0, seed_radius=48.0, airborne=False):
     """Entries into each named world-space region box (x0, x1, y0, y1, z0, z1)
     around one base: {name: [entry centres]}. Open ground is every terrain
     node at least seed_radius from the base centre, inside a square of
-    half-size `extent`. Pass a Pack or a pack directory."""
+    half-size `extent`. With airborne=True, open-sky decks also seed the
+    outside and drops and hops count (see the module doc). Pass a Pack or a
+    pack directory."""
     pack = pack if isinstance(pack, Pack) else Pack(pack)
     cx, cz = centre
-    g = Graph(pack, cx-extent, cx+extent, cz-extent, cz+extent)
-    seeds = open_ground(g, cx, cz, seed_radius)
-    return {name: entries(g, box_region(g, *box), seeds) for name, box in regions.items()}
+    g = Graph(pack, cx-extent, cx+extent, cz-extent, cz+extent, airborne=airborne)
+    seeds = list(open_ground(g, cx, cz, seed_radius))
+    if airborne: seeds += [i for i in range(len(g.nodes)) if g.structure(i) and g.open_sky(i)]
+    out = {}
+    for name, box in regions.items():
+        x0, x1, y0, y1, z0, z1 = box
+        out[name] = entries(g, box_region(g, *box), seeds, (x0, x1, y0, y1+HEADROOM, z0, z1))
+    return out
 
 
 def open_ground(graph, cx, cz, radius):
