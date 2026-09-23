@@ -1,0 +1,10 @@
+{
+  "id": "frostline",
+  "name": "Frostline",
+  "seed": 70331,
+  "bases": [
+    {"team": 0, "position": [1024, 233, 624], "yaw": 180},
+    {"team": 1, "position": [1024, 233, 1424], "yaw": 0}
+  ],
+  "beacon": {"position": [1024, 262, 1024]}
+}

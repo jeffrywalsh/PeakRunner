@@ -1,0 +1,10 @@
+{
+  "id": "dustreach",
+  "name": "Dustreach",
+  "seed": 52331,
+  "bases": [
+    {"team": 0, "position": [1024, 130, 679], "yaw": 180},
+    {"team": 1, "position": [1024, 130, 1369], "yaw": 0}
+  ],
+  "gate": {"position": [1024, 152, 1024]}
+}
