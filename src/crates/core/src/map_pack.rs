@@ -90,6 +90,36 @@ fn cairnhold_asset(name: &str) -> Result<&'static [u8], String> {
     })
 }
 
+/// Original Frostline, built by `scripts/build-frostline.py`. It holds the
+/// `snowblind-clone` rotation slot so existing server configs keep working.
+fn frostline_asset(name: &str) -> Result<&'static [u8], String> {
+    Ok(match name {
+        "map.json" => include_bytes!("../../../assets/maps/frostline/map.json"),
+        "vertices.bin" => include_bytes!("../../../assets/maps/frostline/vertices.bin"),
+        "collision.bin" => include_bytes!("../../../assets/maps/frostline/collision.bin"),
+        "height.bin" => include_bytes!("../../../assets/maps/frostline/height.bin"),
+        "weights.rgba" => include_bytes!("../../../assets/maps/frostline/weights.rgba"),
+        "textures.rgba" => include_bytes!("../../../assets/maps/frostline/textures.rgba"),
+        "ambient.f32" => include_bytes!("../../../assets/maps/frostline/ambient.f32"),
+        _ => return Err("Unknown Frostline asset".into()),
+    })
+}
+
+/// Original Dustreach, built by `scripts/build-dustreach.py`. It holds the
+/// `desert-of-death-clone` rotation slot so existing server configs keep working.
+fn dustreach_asset(name: &str) -> Result<&'static [u8], String> {
+    Ok(match name {
+        "map.json" => include_bytes!("../../../assets/maps/dustreach/map.json"),
+        "vertices.bin" => include_bytes!("../../../assets/maps/dustreach/vertices.bin"),
+        "collision.bin" => include_bytes!("../../../assets/maps/dustreach/collision.bin"),
+        "height.bin" => include_bytes!("../../../assets/maps/dustreach/height.bin"),
+        "weights.rgba" => include_bytes!("../../../assets/maps/dustreach/weights.rgba"),
+        "textures.rgba" => include_bytes!("../../../assets/maps/dustreach/textures.rgba"),
+        "ambient.f32" => include_bytes!("../../../assets/maps/dustreach/ambient.f32"),
+        _ => return Err("Unknown Dustreach asset".into()),
+    })
+}
+
 type Embedded = fn(&str) -> Result<&'static [u8], String>;
 
 fn embedded_pack(assets: Embedded, label: &str) -> MapPack {
@@ -99,23 +129,6 @@ fn embedded_pack(assets: Embedded, label: &str) -> MapPack {
 }
 
 static PACK: OnceLock<Option<MapPack>> = OnceLock::new();
-
-/// Reference layouts live in their own packs, beside the executable or under
-/// `PEAKRUNNER_PRIVATE_MAPS_DIR`. Development builds also read `local-assets/<key>/installed`.
-#[cfg(not(target_arch = "wasm32"))]
-fn private_pack_path(map: crate::terrain::MapId) -> PathBuf {
-    if let Some(root) = std::env::var_os("PEAKRUNNER_PRIVATE_MAPS_DIR") {
-        return PathBuf::from(root).join(map.key());
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            for root in [parent.join("private-maps"), parent.join("../Resources/private-maps")] {
-                if root.is_dir() { return root.join(map.key()); }
-            }
-        }
-    }
-    Path::new("local-assets").join(map.key()).join("installed")
-}
 
 pub fn active() -> Option<&'static MapPack> {
     PACK.get_or_init(|| {
@@ -142,22 +155,13 @@ pub fn on(map: crate::terrain::MapId) -> Option<&'static MapPack> {
     match map {
         crate::terrain::MapId::Valley => None,
         crate::terrain::MapId::Raindance => active(),
-        crate::terrain::MapId::SnowblindClone | crate::terrain::MapId::DesertOfDeathClone => {
-            static SNOW: OnceLock<Option<MapPack>> = OnceLock::new();
-            static DESERT: OnceLock<Option<MapPack>> = OnceLock::new();
-            let cache=if map==crate::terrain::MapId::SnowblindClone { &SNOW } else { &DESERT };
-            cache.get_or_init(|| {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    let path=private_pack_path(map);
-                    if path.join("map.json").is_file() {
-                        let pack=MapPack::load(&path).expect("Invalid private collection pack");
-                        assert!(pack.manifest.private_reference,"Reference pack marker missing");
-                        return Some(pack);
-                    }
-                }
-                None
-            }).as_ref()
+        crate::terrain::MapId::SnowblindClone => {
+            static FROST: OnceLock<MapPack> = OnceLock::new();
+            Some(FROST.get_or_init(|| embedded_pack(frostline_asset, "Frostline")))
+        }
+        crate::terrain::MapId::DesertOfDeathClone => {
+            static DUST: OnceLock<MapPack> = OnceLock::new();
+            Some(DUST.get_or_init(|| embedded_pack(dustreach_asset, "Dustreach")))
         }
         crate::terrain::MapId::StonehengeClone => {
             static CAIRN: OnceLock<MapPack> = OnceLock::new();
@@ -446,52 +450,6 @@ mod tests {
     }
     use super::*;
 
-    #[test]
-    #[ignore = "requires private local Stonehenge install"]
-    fn stonehenge_private_pack_spawn_and_wall_checks() {
-        let root=Path::new(env!("CARGO_MANIFEST_DIR")).join("../../local-assets/stonehenge-clone/installed");
-        let pack=MapPack::load(&root).expect("private Stonehenge installed");
-        assert_eq!(pack.manifest.name,"Stonehenge Clone");
-        assert!(pack.manifest.private_reference);
-        assert_eq!(pack.manifest.entities.len(),18);
-        for spawn in pack.manifest.spawns {
-            let p=Vec3::from_array(spawn);
-            let floor=pack.floor(p).expect("spawn must have building support").0;
-            assert!((p.y-floor-1.2).abs()<0.1,"spawn {p:?} floor {floor}");
-            assert!(pack.body_sweep(p,p+Vec3::Y*0.2).is_none(),"spawn intersects ceiling");
-            assert!(pack.body_sweep(p,p+Vec3::X*2.).is_none(),"spawn movement blocked");
-        }
-        // Gallery wall behind the donut is solid, and its approach is open.
-        let eye=Vec3::new(759.182,278.234,636.799);
-        assert!(pack.body_sweep(eye,eye+Vec3::Z*3.).is_none());
-        assert!(pack.sweep(eye,eye+Vec3::Z*10.,0.).is_some());
-        assert!(pack.sweep(eye,eye-Vec3::Y*20.,0.).is_some());
-        assert!(pack.sweep(eye,eye+Vec3::Y*20.,0.).is_some());
-    }
-    #[test]
-    #[ignore = "requires private Snowblind and Desert of Death installs"]
-    fn collection_private_spawns_and_donuts() {
-        use crate::terrain::MapId;
-        for id in [MapId::SnowblindClone,MapId::DesertOfDeathClone] {
-            let root=Path::new(env!("CARGO_MANIFEST_DIR")).join("../../local-assets").join(id.key()).join("installed");
-            let pack=MapPack::load(&root).expect("private pack installed");
-            assert!(pack.manifest.private_reference);
-            for spawn in pack.manifest.spawns {
-                let p=Vec3::from_array(spawn);
-                let floor=pack.floor(p).expect("spawn building support").0;
-                println!("{} spawn {p:?}, support {floor}",id.key());
-                assert!((p.y-floor-1.2).abs()<0.25,"{} unsupported spawn",id.key());
-                assert!(pack.body_sweep(p,p+Vec3::Y*0.2).is_none(),"{} head clearance",id.key());
-                assert!([Vec3::X,-Vec3::X,Vec3::Z,-Vec3::Z].iter().any(|d|pack.body_sweep(p,p+*d*2.).is_none()),"spawn trapped");
-            }
-            let v:serde_json::Value=serde_json::from_slice(&std::fs::read(pack.root.join("validation.json")).unwrap()).unwrap();
-            let vec=|v:&serde_json::Value|Vec3::new(v[0].as_f64().unwrap() as f32,v[1].as_f64().unwrap() as f32,v[2].as_f64().unwrap() as f32);
-            let eye=vec(&v["poster"]["camera"]);let heading=vec(&v["poster"]["heading"]);
-            let hit=pack.sweep(eye,eye+heading*9.,0.).expect("donut backing wall");
-            println!("{} donut ray {hit:?}",id.key());
-            assert!(pack.sweep(eye,eye+heading*3.,0.).is_none(),"donut view occluded");
-        }
-    }
     #[test]
     fn fast_sweeps_stop_at_thin_faces_from_both_sides() {
         let t=[Vec3::new(-10.,0.,-10.),Vec3::new(0.,0.,10.),Vec3::new(10.,0.,-10.)];

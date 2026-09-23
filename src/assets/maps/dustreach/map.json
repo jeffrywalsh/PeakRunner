@@ -1,0 +1,747 @@
+{
+  "terrain_layers": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "sky_layers": [
+    14,
+    15,
+    16,
+    17,
+    18,
+    19
+  ],
+  "water_layer": 13,
+  "water": {
+    "position": "-384 -160 54",
+    "scale": "720 150 1"
+  },
+  "texture_count": 28,
+  "lightmap": {
+    "pages": 8,
+    "first_layer": 20,
+    "texel_m": 0.5,
+    "sun": [
+      -0.57735,
+      0.57735,
+      -0.57735
+    ],
+    "lamps": 97,
+    "baker_sha256": "66d1c04a0581f283b62d4a01a9229abd22fbd18a738474c8c5c148db84800fed"
+  },
+  "version": 1,
+  "id": "dustreach",
+  "name": "Dustreach",
+  "flags": [
+    [
+      1024.0,
+      132.35,
+      662.0
+    ],
+    [
+      1024.0,
+      132.35,
+      1386.0
+    ]
+  ],
+  "spawns": [
+    [
+      1028.0,
+      136.2,
+      689.5
+    ],
+    [
+      1020.0,
+      136.2,
+      1358.5
+    ]
+  ],
+  "exact_spawns": true,
+  "spawn_points": [
+    [
+      [
+        1028.0,
+        136.2,
+        689.5,
+        0.0
+      ],
+      [
+        1020.0,
+        136.2,
+        689.5,
+        0.0
+      ],
+      [
+        1028.0,
+        136.2,
+        681.5,
+        3.141592653589793
+      ],
+      [
+        1020.0,
+        136.2,
+        681.5,
+        3.141592653589793
+      ],
+      [
+        1005.8,
+        136.2,
+        663.5,
+        4.71238898038469
+      ],
+      [
+        1042.2,
+        136.2,
+        663.5,
+        1.5707963267948966
+      ],
+      [
+        1113.0,
+        135.2,
+        701.0,
+        3.141592653589793
+      ],
+      [
+        1103.0,
+        135.2,
+        701.0,
+        3.141592653589793
+      ]
+    ],
+    [
+      [
+        1020.0,
+        136.2,
+        1358.5,
+        3.141592653589793
+      ],
+      [
+        1028.0,
+        136.2,
+        1358.5,
+        3.141592653589793
+      ],
+      [
+        1020.0,
+        136.2,
+        1366.5,
+        0.0
+      ],
+      [
+        1028.0,
+        136.2,
+        1366.5,
+        0.0
+      ],
+      [
+        1042.2,
+        136.2,
+        1384.5,
+        1.5707963267948966
+      ],
+      [
+        1005.8,
+        136.2,
+        1384.5,
+        4.71238898038469
+      ],
+      [
+        935.0,
+        135.2,
+        1347.0,
+        0.0
+      ],
+      [
+        945.0,
+        135.2,
+        1347.0,
+        0.0
+      ]
+    ]
+  ],
+  "holes": [],
+  "entities": [
+    {
+      "id": "inventory-0",
+      "kind": "inventory",
+      "position": [
+        1034.0,
+        136.0,
+        690.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-1",
+      "kind": "inventory",
+      "position": [
+        1034.0,
+        136.0,
+        684.5
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "generator-2",
+      "kind": "generator",
+      "position": [
+        1014.0,
+        137.5,
+        685.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 2.8,
+      "weapon": "bullet"
+    },
+    {
+      "id": "turret-3",
+      "kind": "turret",
+      "position": [
+        1024.0,
+        144.8,
+        691.5
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 2.2,
+      "weapon": "bullet"
+    },
+    {
+      "id": "turret-4",
+      "kind": "turret",
+      "position": [
+        1048.2,
+        152.8,
+        653.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 2.2,
+      "weapon": "bullet"
+    },
+    {
+      "id": "sensor-5",
+      "kind": "sensor",
+      "position": [
+        1051.0,
+        155.8,
+        656.2
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 2.8,
+      "weapon": "bullet"
+    },
+    {
+      "id": "turret-6",
+      "kind": "turret",
+      "position": [
+        952.0,
+        139.8,
+        743.0
+      ],
+      "team": 0,
+      "circuit": "base-0",
+      "radius": 2.2,
+      "weapon": "plasma"
+    },
+    {
+      "id": "inventory-7",
+      "kind": "inventory",
+      "position": [
+        1014.0,
+        136.0,
+        1358.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "inventory-8",
+      "kind": "inventory",
+      "position": [
+        1014.0,
+        136.0,
+        1363.5
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 3,
+      "weapon": "bullet"
+    },
+    {
+      "id": "generator-9",
+      "kind": "generator",
+      "position": [
+        1034.0,
+        137.5,
+        1363.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 2.8,
+      "weapon": "bullet"
+    },
+    {
+      "id": "turret-10",
+      "kind": "turret",
+      "position": [
+        1024.0,
+        144.8,
+        1356.5
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 2.2,
+      "weapon": "bullet"
+    },
+    {
+      "id": "turret-11",
+      "kind": "turret",
+      "position": [
+        999.8,
+        152.8,
+        1395.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 2.2,
+      "weapon": "bullet"
+    },
+    {
+      "id": "sensor-12",
+      "kind": "sensor",
+      "position": [
+        997.0,
+        155.8,
+        1391.8
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 2.8,
+      "weapon": "bullet"
+    },
+    {
+      "id": "turret-13",
+      "kind": "turret",
+      "position": [
+        1096.0,
+        139.8,
+        1305.0
+      ],
+      "team": 1,
+      "circuit": "base-1",
+      "radius": 2.2,
+      "weapon": "plasma"
+    }
+  ],
+  "instances": [
+    {
+      "asset": "dustreach-citadel-v1",
+      "team": 0,
+      "position": [
+        1024,
+        130,
+        679
+      ],
+      "yaw": 180,
+      "anchors": {
+        "flag": [
+          1024.0,
+          132.35,
+          662.0
+        ],
+        "spawn": [
+          1028.0,
+          136.2,
+          689.5
+        ],
+        "entrances": [
+          [
+            1024.0,
+            135.2,
+            695.0
+          ],
+          [
+            1024.0,
+            135.2,
+            675.0
+          ],
+          [
+            1024.0,
+            130.2,
+            713.0
+          ],
+          [
+            1024.0,
+            130.2,
+            633.0
+          ]
+        ],
+        "generator": [
+          1014.0,
+          135.0,
+          685.0
+        ],
+        "roof_turret": [
+          1024.0,
+          142.0,
+          691.5
+        ],
+        "sentry": [
+          1048.2,
+          150.0,
+          653.0
+        ],
+        "ruin_turret": [
+          952.0,
+          137.0,
+          743.0
+        ],
+        "pad_deck": [
+          1108.0,
+          134.0,
+          705.0
+        ],
+        "deploy_slots": [
+          [
+            1114.5,
+            134.0,
+            711.5
+          ],
+          [
+            1101.5,
+            134.0,
+            711.5
+          ],
+          [
+            1114.5,
+            134.0,
+            698.5
+          ],
+          [
+            1101.5,
+            134.0,
+            698.5
+          ]
+        ],
+        "hall_view": [
+          1035.5,
+          136.7,
+          690.8
+        ],
+        "court_view": [
+          1041.5,
+          136.7,
+          652.5
+        ],
+        "exterior_view": [
+          1070.0,
+          146.0,
+          757.0
+        ]
+      }
+    },
+    {
+      "asset": "dustreach-citadel-v1",
+      "team": 1,
+      "position": [
+        1024,
+        130,
+        1369
+      ],
+      "yaw": 0,
+      "anchors": {
+        "flag": [
+          1024.0,
+          132.35,
+          1386.0
+        ],
+        "spawn": [
+          1020.0,
+          136.2,
+          1358.5
+        ],
+        "entrances": [
+          [
+            1024.0,
+            135.2,
+            1353.0
+          ],
+          [
+            1024.0,
+            135.2,
+            1373.0
+          ],
+          [
+            1024.0,
+            130.2,
+            1335.0
+          ],
+          [
+            1024.0,
+            130.2,
+            1415.0
+          ]
+        ],
+        "generator": [
+          1034.0,
+          135.0,
+          1363.0
+        ],
+        "roof_turret": [
+          1024.0,
+          142.0,
+          1356.5
+        ],
+        "sentry": [
+          999.8,
+          150.0,
+          1395.0
+        ],
+        "ruin_turret": [
+          1096.0,
+          137.0,
+          1305.0
+        ],
+        "pad_deck": [
+          940.0,
+          134.0,
+          1343.0
+        ],
+        "deploy_slots": [
+          [
+            933.5,
+            134.0,
+            1336.5
+          ],
+          [
+            946.5,
+            134.0,
+            1336.5
+          ],
+          [
+            933.5,
+            134.0,
+            1349.5
+          ],
+          [
+            946.5,
+            134.0,
+            1349.5
+          ]
+        ],
+        "hall_view": [
+          1012.5,
+          136.7,
+          1357.2
+        ],
+        "court_view": [
+          1006.5,
+          136.7,
+          1395.5
+        ],
+        "exterior_view": [
+          978.0,
+          146.0,
+          1291.0
+        ]
+      }
+    },
+    {
+      "asset": "dustreach-gate-v1",
+      "position": [
+        1024,
+        152,
+        1024
+      ],
+      "anchors": {
+        "arch": [
+          1024.0,
+          152.0,
+          1024.0
+        ],
+        "lintel_top": [
+          1024.0,
+          174.0,
+          1024.0
+        ],
+        "columns": [
+          [
+            1054.0,
+            162.6,
+            1034.0
+          ],
+          [
+            1054.0,
+            162.6,
+            1014.0
+          ],
+          [
+            994.0,
+            162.6,
+            1034.0
+          ],
+          [
+            994.0,
+            162.6,
+            1014.0
+          ]
+        ],
+        "view": [
+          1062.0,
+          161.0,
+          980.0
+        ]
+      }
+    },
+    {
+      "asset": "dustreach-gate-v1-wall",
+      "position": [
+        904.0,
+        120.461,
+        819.0
+      ],
+      "yaw": 20.0
+    },
+    {
+      "asset": "dustreach-gate-v1-wall",
+      "position": [
+        1144.0,
+        120.461,
+        1229.0
+      ],
+      "yaw": 200.0
+    },
+    {
+      "asset": "dustreach-gate-v1-wall",
+      "position": [
+        1159.0,
+        147.214,
+        874.0
+      ],
+      "yaw": -35.0
+    },
+    {
+      "asset": "dustreach-gate-v1-wall",
+      "position": [
+        889.0,
+        147.214,
+        1174.0
+      ],
+      "yaw": 145.0
+    },
+    {
+      "asset": "dustreach-gate-v1-columns",
+      "position": [
+        819.0,
+        137.447,
+        929.0
+      ],
+      "yaw": 70.0
+    },
+    {
+      "asset": "dustreach-gate-v1-columns",
+      "position": [
+        1229.0,
+        137.447,
+        1119.0
+      ],
+      "yaw": 250.0
+    },
+    {
+      "asset": "dustreach-gate-v1-columns",
+      "position": [
+        1094.0,
+        124.41,
+        939.0
+      ],
+      "yaw": 10.0
+    },
+    {
+      "asset": "dustreach-gate-v1-columns",
+      "position": [
+        954.0,
+        124.41,
+        1109.0
+      ],
+      "yaw": 190.0
+    },
+    {
+      "asset": "dustreach-gate-v1-wall",
+      "position": [
+        1214.0,
+        114.89,
+        774.0
+      ],
+      "yaw": 55.0
+    },
+    {
+      "asset": "dustreach-gate-v1-wall",
+      "position": [
+        834.0,
+        114.89,
+        1274.0
+      ],
+      "yaw": 235.0
+    },
+    {
+      "asset": "dustreach-gate-v1-columns",
+      "position": [
+        964.0,
+        132.849,
+        874.0
+      ],
+      "yaw": -15.0
+    },
+    {
+      "asset": "dustreach-gate-v1-columns",
+      "position": [
+        1084.0,
+        132.849,
+        1174.0
+      ],
+      "yaw": 165.0
+    }
+  ],
+  "ambient_emitters": [
+    [
+      1024,
+      172,
+      1024,
+      0.25,
+      400,
+      2400
+    ]
+  ],
+  "sky": {
+    "visibleDistance": "2600",
+    "fogDistance": "1500"
+  },
+  "asset_sha256": "1138f4068321067301b5cae0a2942c05fa1737155e533d556780a2fa7f670f49",
+  "gate_asset_sha256": "463844e0c681ff0a7a7a2a9b69757aab937db8a846413c8e03cadccec9339e2d",
+  "structure_kit_sha256": "0636249d6eb133db27977b895a48d7d50ce7b8882ec8ba8fd0a63908b5f04630",
+  "terrain_source_sha256": "50971178d060d8750aef922af61852b77700f019d659199784a1d182b8235162",
+  "material_source_sha256": "46e919d56b58c04eda219ac0529d9583e98e5d8bcf76586485b5ca2e6a33f838",
+  "provenance": "PeakRunner original Dustreach geometry, original procedural dune terrain, original material kit, sky and synthesized wind; no extracted assets, no external height data, no recordings",
+  "definition_sha256": "3c8dbe0b1b75922fbf6a1a4a1ab87eaca781f9cd9a3f3f2a4c37975db5623583",
+  "files": {
+    "height.bin": "640d7e9ac7c0b2b7ecf2e64b631e0d93a6f44ed2fc29a4bac4a4e80a9fc95a55",
+    "vertices.bin": "65a4789ab4504e30d451d879f3814c9c34dadaec688d11f72765b3caf4027202",
+    "collision.bin": "480542f1de54aa166c21f38f5a8f7ba279cfa63a1ebcccfb741dfed9a00076ce",
+    "weights.rgba": "36d0686ffa7cede185dd35170c29a13bd0b83fd7e1a948771eb2647857930be5",
+    "textures.rgba": "8efe9c285ab53b0ebfd9653f5c78b0e086cc2db74f79f985b462f0cc6ab6bf8b",
+    "ambient.f32": "a3938b139d99dbdde7156268f817497624177809ab733a0f0ccc8ccce3782462"
+  }
+}

@@ -148,9 +148,6 @@ impl MapId {
     pub fn parse(key: &str) -> Option<Self> {
         [Self::Valley, Self::Raindance, Self::BroadsideClone, Self::StonehengeClone, Self::SnowblindClone, Self::DesertOfDeathClone].into_iter().find(|id| id.key().eq_ignore_ascii_case(key))
     }
-    pub fn is_private_clone(self) -> bool {
-        matches!(self, Self::SnowblindClone | Self::DesertOfDeathClone)
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -214,21 +211,20 @@ fn all_maps() -> [MapInfo; 6] {
         MapInfo { id: MapId::StonehengeClone, name: "Cairnhold",
             note: "Hillside bunkers, trench-linked flag towers and a central ring on rugged ground.",
             size: RAIN_SIZE, ember: Vec3::new(1024.,191.,844.), glacier: Vec3::new(1024.,191.,1204.), res: RAIN_N },
-        MapInfo { id: MapId::SnowblindClone, name: "Snowblind Clone",
-            note: "Reference snow-bunker layout. Geometry starts here.", size:RAIN_SIZE,
-            ember:Vec3::ZERO, glacier:Vec3::ZERO, res:RAIN_N },
-        MapInfo { id: MapId::DesertOfDeathClone, name: "Desert of Death Clone",
-            note: "Reference desert-ruin layout. Geometry starts here.", size:RAIN_SIZE,
-            ember:Vec3::ZERO, glacier:Vec3::ZERO, res:RAIN_N },
+        // Original map in the former Snowblind Clone slot; the key stays for rotations.
+        MapInfo { id: MapId::SnowblindClone, name: "Frostline",
+            note: "Polar research stations on steep mountain shelves, a beacon ridge and whiteout fog.",
+            size: RAIN_SIZE, ember: Vec3::new(1024.,233.,624.), glacier: Vec3::new(1024.,233.,1424.), res: RAIN_N },
+        // Original map in the former Desert of Death Clone slot; the key stays for rotations.
+        MapInfo { id: MapId::DesertOfDeathClone, name: "Dustreach",
+            note: "Sandstone citadels across rolling dunes, joined by the Sun Gate on the central saddle.",
+            size: RAIN_SIZE, ember: Vec3::new(1024.,130.,679.), glacier: Vec3::new(1024.,130.,1369.), res: RAIN_N },
     ]
 }
 
 pub fn maps() -> Vec<MapInfo> {
-    let mut maps=vec![info(MapId::Raindance),info(MapId::BroadsideClone),info(MapId::StonehengeClone)];
-    for id in [MapId::SnowblindClone, MapId::DesertOfDeathClone] {
-        if crate::map_pack::on(id).is_some() { maps.push(info(id)); }
-    }
-    maps
+    [MapId::Raindance, MapId::BroadsideClone, MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone]
+        .into_iter().map(info).collect()
 }
 
 pub fn info(id: MapId) -> MapInfo {
@@ -464,7 +460,6 @@ mod map_tests {
     #[test]
     fn tower_complex_is_embedded_with_floating_decks_and_clear_spawns() {
         let id = MapId::BroadsideClone;
-        assert!(!id.is_private_clone());
         assert!(maps().iter().any(|m| m.id == id && m.name == "Tower Complex"));
         let pack = crate::map_pack::on(id).expect("embedded Tower Complex");
         assert!(maps().iter().all(|m| m.id != MapId::Valley));
@@ -502,9 +497,50 @@ mod map_tests {
     }
 
     #[test]
+    fn frostline_and_dustreach_are_embedded_with_grounded_spawns_and_flag_decks() {
+        for (id, name) in [(MapId::SnowblindClone, "Frostline"), (MapId::DesertOfDeathClone, "Dustreach")] {
+            let info = maps().into_iter().find(|m| m.id == id).expect("always listed");
+            assert_eq!(info.name, name);
+            let pack = crate::map_pack::on(id).expect("embedded pack");
+            assert!(!pack.manifest.private_reference);
+            assert_eq!(pack.manifest.name, name);
+            assert!(pack.asset("textures.rgba").unwrap().len() > 1_000_000);
+            let bases = [info.ember, info.glacier];
+            for team in [true, false] {
+                let spawn = spawn_on(id, team);
+                let floor = support_on(id, spawn).0;
+                assert!((spawn.y-floor-1.2).abs() < 0.05, "{name} spawn support {floor} {spawn:?}");
+                assert!(pack.sweep(spawn, spawn+Vec3::Y*2., PLAYER_RADIUS).is_none());
+            }
+            for (team, flag) in pack.manifest.flags.iter().enumerate() {
+                let flag = Vec3::from_array(*flag);
+                let (deck, _) = pack.floor(flag+Vec3::Y*0.5).expect("flag has a solid deck");
+                assert!((flag.y-deck).abs() < 3.0, "{name} team {team} flag {flag:?} deck {deck}");
+            }
+            for (team, points) in pack.manifest.spawn_points.iter().enumerate() {
+                assert_eq!(points.len(), 8, "{name} team {team} spawn count");
+                for p in points {
+                    let spawn = Vec3::new(p[0], p[1], p[2]);
+                    let (own, enemy) = ((spawn-bases[team]).length(), (spawn-bases[1-team]).length());
+                    assert!(own < 250.0 && own < enemy, "{name} team {team} spawn {spawn:?} is not on its own side");
+                    let floor = pack.floor(spawn).expect("spawn has a floor").0;
+                    assert!((spawn.y - floor - 1.2).abs() < 0.01, "{name} spawn {spawn:?} floor {floor}");
+                    assert!(pack.body_sweep(spawn, spawn + Vec3::Y*0.2).is_none(), "{name} spawn {spawn:?} head clearance");
+                    assert!([Vec3::X,-Vec3::X,Vec3::Z,-Vec3::Z].iter().any(|d| pack.body_sweep(spawn, spawn + *d*0.5).is_none()),
+                        "{name} spawn {spawn:?} boxed in");
+                }
+            }
+            for other in [MapId::Raindance, MapId::BroadsideClone, MapId::StonehengeClone] {
+                assert_ne!(pack.fingerprint, crate::map_pack::on(other).unwrap().fingerprint);
+            }
+        }
+        assert_ne!(crate::map_pack::on(MapId::SnowblindClone).unwrap().fingerprint,
+            crate::map_pack::on(MapId::DesertOfDeathClone).unwrap().fingerprint);
+    }
+
+    #[test]
     fn cairnhold_is_embedded_with_grounded_spawns_and_flag_decks() {
         let id = MapId::StonehengeClone;
-        assert!(!id.is_private_clone());
         assert!(maps().iter().any(|m| m.id == id && m.name == "Cairnhold"));
         let pack = crate::map_pack::on(id).expect("embedded Cairnhold");
         assert!(!pack.manifest.private_reference);

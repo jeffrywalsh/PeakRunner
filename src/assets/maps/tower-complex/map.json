@@ -621,10 +621,10 @@
     "visibleDistance": "2500",
     "fogDistance": "1500"
   },
-  "asset_sha256": "9b86db50ae4cf1718e7f4c1da19a9c3f16d5906d9d5a8b6de316c92e2935d072",
+  "asset_sha256": "f484e3a2cd97d26b7fbff854281ba09d64d1da7225749eadd5e382b6bbeb49d0",
   "pad_asset_sha256": "e08760880694f1e3903e43d2ed1761e8537bf477e8212b3cffddca00786a85d8",
   "terrain_source_sha256": "b0eb73f41448b92fc1b37552b7c5e300eb4892e17d819966405cb5fdf3e7e72b",
-  "material_source_sha256": "ca7bd56bdacc2d21a61c1bb635e3fa902de6340766e498a698bf40784ff59918",
+  "material_source_sha256": "d86aa4cb8e7facef1838d50786a3ae0486303984f7428e3381169d18ee6d4293",
   "provenance": "PeakRunner original tower-complex geometry, original procedural terrain and original material kit; no extracted assets or external height data",
   "definition_sha256": "2c57b9bb44f141cadfec2f0f31aaff50ecd384f111a84699434cfac7bc8a7193",
   "files": {

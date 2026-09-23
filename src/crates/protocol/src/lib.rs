@@ -8,24 +8,19 @@ pub const GAME_VERSION: &str = "0.1.0-private.20260921.1";
 /// A different local map must never silently join a server simulating another
 /// layout. Keep directory discovery independent of gameplay/map assets.
 pub fn game_protocol() -> String {
-    let mut protocol = match peakrunner_core::map_pack::active() {
-        // maps5: Skybreak is removed; the broadside-clone slot is the embedded
-        // Tower Complex and the stonehenge-clone slot is the embedded Cairnhold.
-        // muzzle1: player shots are clamped to the shooter's side of walls.
-        Some(pack) => format!("{PROTOCOL}:equipment3:blast3:chat2:names1:ping1:fov1:muzzle1:maps5:{}:{}:{}",pack.fingerprint,
-            peakrunner_core::map_pack::on(peakrunner_core::terrain::MapId::BroadsideClone).expect("Tower Complex").fingerprint,
-            peakrunner_core::map_pack::on(peakrunner_core::terrain::MapId::StonehengeClone).expect("Cairnhold").fingerprint),
-        None => format!("{PROTOCOL}:equipment3:blast3:chat2:names1:ping1:fov1:muzzle1"),
-    };
-    // Installed reference packs join the compatibility marker. A missing or
-    // changed pack is rejected before a player slot is granted.
     use peakrunner_core::{map_pack, terrain::MapId};
-    for map in [MapId::SnowblindClone, MapId::DesertOfDeathClone] {
-        if let Some(pack) = map_pack::on(map) {
-            protocol.push_str(&format!(":private1:{}:{}", map.key(), pack.fingerprint));
-        }
+    match map_pack::active() {
+        // maps6: every rotation slot is an embedded original map. Tower Complex,
+        // Cairnhold, Frostline and Dustreach hold the four former clone slots;
+        // no private reference packs remain.
+        // muzzle1: player shots are clamped to the shooter's side of walls.
+        Some(pack) => format!("{PROTOCOL}:equipment3:blast3:chat2:names1:ping1:fov1:muzzle1:maps6:{}:{}:{}:{}:{}",pack.fingerprint,
+            map_pack::on(MapId::BroadsideClone).expect("Tower Complex").fingerprint,
+            map_pack::on(MapId::StonehengeClone).expect("Cairnhold").fingerprint,
+            map_pack::on(MapId::SnowblindClone).expect("Frostline").fingerprint,
+            map_pack::on(MapId::DesertOfDeathClone).expect("Dustreach").fingerprint),
+        None => format!("{PROTOCOL}:equipment3:blast3:chat2:names1:ping1:fov1:muzzle1"),
     }
-    protocol
 }
 
 #[derive(Debug, Serialize, Deserialize)]

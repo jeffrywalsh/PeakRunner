@@ -68,19 +68,17 @@ pub fn validate_catalog(maps: &[MapDescriptor]) -> Result<(), &'static str> {
 mod tests {
     use super::*;
     #[test]
-    fn original_slots_are_embedded_and_reference_packs_are_listed_only_when_installed() {
+    fn every_rotation_slot_is_an_embedded_original_map() {
         use crate::{map_pack,terrain::{self,MapId}};
-        assert_eq!(MapId::parse("broadside-clone"),Some(MapId::BroadsideClone));
-        assert_eq!(MapId::parse("stonehenge-clone"),Some(MapId::StonehengeClone));
         let listed=terrain::maps();
-        for id in [MapId::BroadsideClone,MapId::StonehengeClone] {
-            assert!(listed.iter().any(|m|m.id==id));
-            assert!(!map_pack::on(id).unwrap().manifest.private_reference);
-        }
-        for id in [MapId::SnowblindClone,MapId::DesertOfDeathClone] {
-            let installed=map_pack::on(id);
-            assert_eq!(listed.iter().any(|m|m.id==id),installed.is_some());
-            if let Some(pack)=installed { assert!(pack.manifest.private_reference); }
+        let slots=[(MapId::Raindance,"raindance"),(MapId::BroadsideClone,"broadside-clone"),
+            (MapId::StonehengeClone,"stonehenge-clone"),(MapId::SnowblindClone,"snowblind-clone"),
+            (MapId::DesertOfDeathClone,"desert-of-death-clone")];
+        assert_eq!(listed.len(),slots.len());
+        for (id,key) in slots {
+            assert_eq!(MapId::parse(key),Some(id));
+            assert!(listed.iter().any(|m|m.id==id),"{key} listed");
+            assert!(!map_pack::on(id).expect("embedded pack").manifest.private_reference,"{key} is original");
         }
     }
     fn descriptor() -> MapDescriptor {

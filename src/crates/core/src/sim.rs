@@ -3100,7 +3100,7 @@ mod spawn_point_tests {
         // Regression: a spawn centre only 0.2 m above a 1 m slab started the
         // support ray inside the slab, so the player never counted as grounded
         // and coasted without ground braking (the "slick" spawn).
-        let map = MapId::BroadsideClone;
+        for map in [MapId::BroadsideClone, MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone] {
         let mut world = World::new();
         world.set_map(map);
         world.start_match(true);
@@ -3118,7 +3118,7 @@ mod spawn_point_tests {
                 world.input = Input::default();
                 for _ in 0..30 { world.step_players(STEP); }
                 let p = &world.players[0];
-                assert!(p.on_ground, "not grounded at {pos:?}");
+                assert!(p.on_ground, "{map:?} not grounded at {pos:?}");
                 assert!((p.pos.y - floor - PLAYER_RADIUS).abs() < 0.05, "sunk or floating at {pos:?}: {}", p.pos.y);
                 // Walk forward for half a second, release, and stop like flat ground.
                 let start = p.pos;
@@ -3126,12 +3126,19 @@ mod spawn_point_tests {
                 for _ in 0..30 { world.step_players(STEP); }
                 world.input.move_z = 0.0;
                 let released = world.players[0].pos;
+                // Brakes are only meaningful on the spawn's own floor; walking
+                // off a deck edge onto hillside is terrain, not a slick floor.
+                // Likewise a walk that bumps a wall can leave the body briefly
+                // airborne; air coasting isn't the floor-friction regression.
+                if (crate::terrain::support_on(map, released).0 - floor).abs() > 0.3
+                    || (released.y - floor - PLAYER_RADIUS).abs() > 0.05 { continue; }
                 for _ in 0..90 { world.step_players(STEP); }
                 let p = &world.players[0];
                 let coast = Vec2::new(p.pos.x - released.x, p.pos.z - released.z).length();
-                assert!(p.on_ground && coast < 2.2, "slides {coast} m after release from {start:?}");
+                assert!(p.on_ground && coast < 2.2, "{map:?} slides {coast} m after release from {start:?}");
                 assert!(Vec2::new(p.vel.x, p.vel.z).length() < 0.05);
             }
+        }
         }
     }
 
@@ -3309,6 +3316,61 @@ mod line_of_sight_tests {
         let by_room:Vec<usize>=(0..5).map(|r|seen.iter().filter(|s|s.1==r).count()).collect();
         assert!(seen.is_empty(),"{} interior points visible to turrets (bunker, trench, hut, tower floor, landing: {by_room:?}), e.g. {:?}",
             seen.len(),&seen[..seen.len().min(8)]);
+    }
+
+    /// Same rule for Frostline and Dustreach, over the rooms their Python
+    /// suites check (local base coordinates; team 0 is yawed 180 degrees).
+    /// Allowed: the airlock/entry vestibules between each door and its
+    /// baffle, which lie outside these boxes.
+    #[test]
+    fn frostline_and_dustreach_turrets_cannot_see_into_base_rooms() {
+        // (x0, x1, z0, z1, floor above the base origin)
+        let frost:&[(f32,f32,f32,f32,f32)]=&[
+            (-9.8,12.8,-9.4,5.4,0.),       // station hall, east of the ramp
+            (-12.8,12.8,7.2,12.8,0.),      // generator room
+            (-12.8,12.8,-12.8,12.8,7.5),   // command deck (flag level)
+            (98.1,109.9,-77.9,-69.,20.)];  // relay outpost behind its baffle
+        let dust:&[(f32,f32,f32,f32,f32)]=&[
+            (-12.6,12.6,-11.8,-0.6,5.)];   // keep spawn hall
+        for (map,rooms,min) in [(MapId::SnowblindClone,frost,1500),(MapId::DesertOfDeathClone,dust,350)] {
+            let pack=crate::map_pack::on(map).unwrap();
+            let info=crate::terrain::info(map);
+            let to_world=|team:u8,lx:f32,y:f32,lz:f32| if team==0 {
+                Vec3::new(info.ember.x-lx,info.ember.y+y,info.ember.z-lz)
+            } else {Vec3::new(info.glacier.x+lx,info.glacier.y+y,info.glacier.z+lz)};
+            // Frostline's command deck has no floor over the ramp opening.
+            let skip=|lx:f32,y:f32,lz:f32| map==MapId::SnowblindClone && y==7.5
+                && (-13.4..=-10.4).contains(&lx) && (-10.0..=-2.6).contains(&lz);
+            let mut targets=Vec::new();
+            for team in [0u8,1] {
+                for &(x0,x1,z0,z1,y) in rooms {
+                    let mut lx=x0; while lx<=x1+0.01 { let mut lz=z0; while lz<=z1+0.01 {
+                        if !skip(lx,y,lz) {
+                            let probe=to_world(team,lx,y+1.5,lz);
+                            if let Some((fy,_))=pack.floor(probe) {
+                                let pos=Vec3::new(probe.x,fy+1.2,probe.z);
+                                if (fy-(info.ember.y+y)).abs()<1.5 && pack.body_sweep(pos,pos+Vec3::Y*0.01).is_none() {
+                                    targets.push(pos);
+                                }
+                            }
+                        }
+                    lz+=1.;} lx+=1.;}
+                }
+            }
+            assert!(targets.len()>min,"{map:?}: too few interior samples ({})",targets.len());
+            let mut seen=Vec::new();
+            for d in equipment::definitions(map).iter().filter(|d|d.kind==Kind::Turret) {
+                let profile=equipment::profile(d.kind,d.weapon).unwrap();
+                for &pos in &targets {
+                    let enemy=equipment::Candidate {index:0,team:1-d.team,pos,vel:Vec3::ZERO};
+                    if let Some(a)=equipment::acquire_target(d.pos(),d.radius,d.team,&profile,true,[enemy],
+                        |a,b|obstacle_hit(map,&[],a,b,0.).is_none()) {
+                        seen.push((d.id.clone(),a.aim_point));
+                    }
+                }
+            }
+            assert!(seen.is_empty(),"{map:?}: {} interior points visible to turrets, e.g. {:?}",seen.len(),&seen[..seen.len().min(8)]);
+        }
     }
 
     /// The entry baffles must not block the routes they sit on: each front

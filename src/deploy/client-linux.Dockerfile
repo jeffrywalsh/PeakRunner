@@ -8,5 +8,7 @@ COPY crates ./crates
 COPY assets/maps/raindance ./assets/maps/raindance
 COPY assets/maps/tower-complex ./assets/maps/tower-complex
 COPY assets/maps/cairnhold ./assets/maps/cairnhold
+COPY assets/maps/frostline ./assets/maps/frostline
+COPY assets/maps/dustreach ./assets/maps/dustreach
 ENV CARGO_BUILD_JOBS=4
 RUN cargo build --locked --release -p peakrunner --bin peakrunner --example launch_smoke && cargo build --locked --release -p peakrunner-net --example public_smoke

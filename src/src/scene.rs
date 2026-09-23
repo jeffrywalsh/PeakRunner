@@ -1463,7 +1463,6 @@ mod shader_check {
                     .flat_map(|row| row[..w as usize * 4].iter().copied()).collect();
                 let path = if let Ok(key)=std::env::var("QA_COLLECTION") {
                     let map=MapId::parse(&key).expect("known collection map");
-                    assert!(map.is_private_clone());
                     format!("local-assets/{}/qa-{name}.png",map.key())
                 } else if std::env::var_os("QA_STONEHENGE").is_some() {
                     format!("local-assets/stonehenge-clone/qa-{name}.png")

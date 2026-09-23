@@ -1,13 +1,15 @@
 # Making an original map
 
-This is the process used for Tower Complex (replacing Broadside Clone) and
-Cairnhold (replacing Stonehenge Clone). Follow it for every new or replacement
+This is the process used for Tower Complex, Cairnhold, Frostline and Dustreach,
+which replaced the Broadside, Stonehenge, Snowblind and Desert of Death clones. Follow it for every new or replacement
 map. Commands run from `src/`; Python uses the numpy venv at
 `../research/local-assets/tools/venv/bin/python`.
 
 ## 0. Rules that never bend
 
-- **Original only.** A private reference pack may be studied for statistics and
+- **Original only.** Every rotation slot is now an original embedded map; no
+  slot loads a private pack. A private reference pack in ignored `research/`
+  or `local-assets/` may still be studied for statistics and
   design intent. Never copy, trace, resample, blend or fit its heights,
   geometry, textures, positions or audio. Say so in the map's doc.
 - Study notes, reference renders and captures live in ignored `research/`.
@@ -86,20 +88,21 @@ Design checklist (each item has bitten us once):
 
 ## 4. Look at it before wiring
 
-Before a map is embedded, load it through a private-pack slot:
+Before a map is embedded, preview it in the Raindance slot. There are no
+private-pack slots any more; `PEAKRUNNER_MAP_PACK` loads any pack there through
+the same validating `MapPack::load`, with no manifest patching:
 
-1. Copy the pack to a scratch `<slot-key>/` directory. Patch only the copy's
-   `map.json` if the slot's loader needs `private_reference: true`.
-2. `PEAKRUNNER_PRIVATE_MAPS_DIR=<scratch> QA_LOCAL=1 QA_MAP=<slot-key>`, plus
-   `QA_CAPTURE_PATH` and `QA_FLYCAM=x,y,z,yaw,pitch,fov` from
-   `examples/launch_smoke.rs`.
+1. Build into ignored `local-assets/<id>/`.
+2. `PEAKRUNNER_MAP_PACK=<absolute path to local-assets/<id>> QA_LOCAL=1
+   QA_MAP=raindance`, plus `QA_CAPTURE_PATH` and
+   `QA_FLYCAM=x,y,z,yaw,pitch,fov` from `examples/launch_smoke.rs`.
 3. Capture: aerial, landmark, base exterior, base interior, flag area, each
    turret emplacement, ground-level slopes, one spawn. Compute cameras from
    world-space anchors: a room corner at eye height looking across, never
    into a wall. View every image and re-aim bad ones.
 4. Captures time out once the display sleeps. Run them straight after the
    build, and stop and report missing views instead of retrying for long.
-5. Delete the scratch redirect. Screenshots go to `research/screenshots/`.
+5. Screenshots go to `research/screenshots/`.
 
 ## 5. Tests
 
@@ -123,19 +126,20 @@ Mirror the Tower Complex and Cairnhold commits:
 
 - Build into `src/assets/maps/<id>/`. Two builds must be byte-identical.
 - `crates/core/src/map_pack.rs`: embed through the shared helper.
-- `crates/core/src/terrain.rs`: no longer a private clone; always listed;
-  `MapInfo` with the real name and base positions.
+- `crates/core/src/terrain.rs`: always listed; `MapInfo` with the real name
+  and base positions. A new slot needs a new `MapId` variant and key.
 - Update tests in `map_catalog.rs`, `rotation.rs` and `server/src/lib.rs`.
   Add acceptance tests: spawns grounded, flags on a deck, and turrets can't
   see into rooms (the `sim.rs` sightline tests).
-- `crates/protocol/src/lib.rs`: bump the `mapsN` marker, add the new
-  fingerprint, and drop the slot's `private1` segment.
-- Remove the slot from `scripts/stage-private-maps.py`.
+- `crates/protocol/src/lib.rs`: bump the `mapsN` marker and add the new
+  fingerprint.
+- Add the pack to the server, client and launcher Dockerfiles
+  (`COPY assets/maps/<id> ...`), or Docker builds fail on `include_bytes!`.
 - Update AGENTS.md, `docs/multi-map-system.md`, the package release-notes
   input and the map's own doc. Never edit records of a published release.
 - Verify with the Build and verification list in AGENTS.md, plus the ignored
-  connected-rotation test with any remaining private packs staged. Capture
-  spawn and aerial shots through the normal path with no redirect.
+  connected-rotation test (no private packs needed). Capture spawn and aerial
+  shots through the normal path with no `PEAKRUNNER_MAP_PACK`.
 
 ## 7. Commit
 

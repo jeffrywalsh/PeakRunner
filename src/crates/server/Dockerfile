@@ -5,6 +5,8 @@ COPY src ./src
 COPY assets/maps/raindance ./assets/maps/raindance
 COPY assets/maps/tower-complex ./assets/maps/tower-complex
 COPY assets/maps/cairnhold ./assets/maps/cairnhold
+COPY assets/maps/frostline ./assets/maps/frostline
+COPY assets/maps/dustreach ./assets/maps/dustreach
 COPY crates ./crates
 RUN cargo build --locked --release -p peakrunner-server --bin peakrunner-server
 

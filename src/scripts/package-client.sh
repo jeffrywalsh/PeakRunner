@@ -22,15 +22,11 @@ case "$platform" in
     cp assets/Info.plist "$app/Contents/Info.plist"
     if test -f assets/AppIcon.icns; then cp assets/AppIcon.icns "$app/Contents/Resources/"; fi
     chmod +x "$app/Contents/MacOS/peakrunner"
-    python3 scripts/stage-private-maps.py "$app/Contents/Resources/private-maps"
     sh scripts/sign-mac-app.sh "$app"
     ;;
   windows-x64) cp "$binary" "$release_dir/PeakRunner.exe" ;;
   linux-x64) cp "$binary" "$release_dir/peakrunner"; chmod +x "$release_dir/peakrunner" ;;
 esac
-if test "$platform" != macos-arm64; then
-  python3 scripts/stage-private-maps.py "$release_dir/private-maps"
-fi
 archive="PeakRunner-$package_version-$platform"
 case "$platform" in
   linux-x64) tar -czf "$release_dir/../$archive.tar.gz" -C "$release_dir" . ;;

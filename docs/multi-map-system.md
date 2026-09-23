@@ -2,12 +2,13 @@
 
 The six-map rotation is published. See
 [release record](release-20260921-1.md) and the six-map section in AGENTS.md.
-Snowblind and Desert of Death are reference layouts to rebuild.
-Current source loads them when their packs are installed. In source, the
-Broadside Clone slot (key `broadside-clone`) is now the original, embedded Tower
-Complex and the Stonehenge Clone slot (key `stonehenge-clone`) is the original,
-embedded Cairnhold; the published release still runs the old clones. See
-[tower-complex.md](tower-complex.md) and [cairnhold.md](cairnhold.md).
+In source all four former clone slots now hold original maps embedded in the
+binary: Tower Complex (`broadside-clone`), Cairnhold (`stonehenge-clone`),
+Frostline (`snowblind-clone`) and Dustreach (`desert-of-death-clone`). No
+private reference packs are loaded by any slot; compatibility is `maps6`. The
+published release still runs the old clones. See
+[tower-complex.md](tower-complex.md), [cairnhold.md](cairnhold.md),
+[frostline.md](frostline.md) and [dustreach.md](dustreach.md).
 Skybreak Bastions is removed from source (it derived from Broadside
 measurements), so the source rotation is five maps; the published release still
 has it. New maps follow [map-pipeline.md](map-pipeline.md).

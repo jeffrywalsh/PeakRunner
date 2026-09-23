@@ -18,7 +18,6 @@ impl Rotation {
         let maps = entries.into_iter().map(|e| {
             match e.mode { SupportedMode::Ctf => {} }
             let id = MapId::parse(&e.map).ok_or_else(|| unknown_map(&e.map))?;
-            require_reference_pack(id)?;
             if !cfg!(test) && id == MapId::Valley { return Err(format!("Valley is retired; {AVAILABLE}")); }
             Ok(id)
         }).collect::<Result<Vec<_>, _>>()?;
@@ -30,7 +29,7 @@ impl Rotation {
 }
 
 pub(crate) const AVAILABLE: &str =
-    "use raindance, broadside-clone (Tower Complex), stonehenge-clone (Cairnhold), snowblind-clone or desert-of-death-clone";
+    "use raindance, broadside-clone (Tower Complex), stonehenge-clone (Cairnhold), snowblind-clone (Frostline) or desert-of-death-clone (Dustreach)";
 
 /// Removed maps get a specific startup error, so an old config fails loudly.
 pub(crate) fn unknown_map(key: &str) -> String {
@@ -39,13 +38,6 @@ pub(crate) fn unknown_map(key: &str) -> String {
     } else {
         format!("map is not installed: {key}")
     }
-}
-
-pub(crate) fn require_reference_pack(map: MapId) -> Result<(), String> {
-    if map.is_private_clone() && peakrunner_core::map_pack::on(map).is_none() {
-        return Err(format!("Reference map is not installed: {}", map.key()));
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -68,13 +60,9 @@ mod tests {
         }
         let removed = Rotation::parse(r#"[{"map":"raindance","mode":"ctf"},{"map":"skybreak-bastions","mode":"ctf"}]"#).err().unwrap();
         assert!(removed.contains("Skybreak Bastions was removed"), "{removed}");
-        // The broadside-clone and stonehenge-clone slots hold embedded originals.
-        assert!(Rotation::parse(r#"[{"map":"broadside-clone","mode":"ctf"}]"#).is_ok());
-        assert!(Rotation::parse(r#"[{"map":"stonehenge-clone","mode":"ctf"}]"#).is_ok());
-        for key in ["snowblind-clone", "desert-of-death-clone"] {
-            let json = format!(r#"[{{"map":"{key}","mode":"ctf"}}]"#);
-            let installed = peakrunner_core::map_pack::on(MapId::parse(key).unwrap()).is_some();
-            assert_eq!(Rotation::parse(&json).is_ok(), installed, "{key}");
+        // Every former clone slot holds an embedded original; none needs a pack.
+        for key in ["broadside-clone", "stonehenge-clone", "snowblind-clone", "desert-of-death-clone"] {
+            assert!(Rotation::parse(&format!(r#"[{{"map":"{key}","mode":"ctf"}}]"#)).is_ok(), "{key}");
         }
         assert!(Rotation::parse(&" ".repeat(8193)).is_err());
         assert!(Rotation::parse(&format!("[{}]", vec![r#"{"map":"valley","mode":"ctf"}"#;33].join(","))).is_err());

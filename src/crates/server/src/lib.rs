@@ -31,14 +31,14 @@ mod tests {
         }
     }
     #[test]
-    #[ignore = "requires the two reference packs and PEAKRUNNER_PRIVATE_MAPS_DIR"]
-    fn private_collection_rotates_connected_clients_and_resets() {
+    #[ignore = "slow connected-socket rotation; run explicitly"]
+    fn rotation_cycles_connected_clients_through_every_map_and_resets() {
         use peakrunner_core::terrain::MapId;
         let maps = [MapId::Raindance, MapId::BroadsideClone,
             MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone];
         let policy = serde_json::to_string(&maps.iter().map(|m|
             serde_json::json!({"map":m.key(),"mode":"ctf"})).collect::<Vec<_>>()).unwrap();
-        let mut host = GameHost::bind("127.0.0.1:0", "Private rotation QA", 8, "raindance")
+        let mut host = GameHost::bind("127.0.0.1:0", "Rotation QA", 8, "raindance")
             .unwrap().with_rotation(&policy).unwrap();
         host.accelerated_rounds = true;
         let port = host.local_addr().port();

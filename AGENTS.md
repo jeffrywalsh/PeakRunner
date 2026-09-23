@@ -31,50 +31,41 @@ The old checkout and legacy browser prototype remain at
   See workspace-layout for image provenance, capture and limitations. This was
   not a deployment; real GPU performance and audio playback remain untested.
 
-## Six-map rotation
+## Map rotation (five original maps in source)
 
 **Making or replacing a map:** follow `docs/map-pipeline.md` (study, concept,
 build, visual QA, tests, embed, commit). It lists the checks every map must pass.
 
-In source the rotation is five maps: Raindance, Tower Complex
-(`broadside-clone` key), Cairnhold (`stonehenge-clone` key), Snowblind Clone and
-Desert of Death Clone. Raindance, Tower Complex and Cairnhold are original
-PeakRunner maps; the last two are reference layouts still to be replaced. Valley
-stays an internal fixture.
+In source the rotation is five maps, all ORIGINAL and embedded in the binary,
+always listed, with no private packs: Raindance, Tower Complex
+(`broadside-clone` key), Cairnhold (`stonehenge-clone`), Frostline
+(`snowblind-clone`) and Dustreach (`desert-of-death-clone`). The old clone keys
+stay so rotation configs keep working. Valley stays an internal fixture.
+Gameplay compatibility is `maps6` with the five map fingerprints and no
+`private1` segments. None of this is deployed: the live server and published
+clients still run `0.1.0-private.20260921.1` with Skybreak and the four clone
+packs; switching needs a full matching client/server release.
 
-**Skybreak Bastions removed (source only, not deployed):** it was built from
-decoded Broadside measurements, so it is gone from source: no `MapId`, no
-embedded pack, no builder. A `skybreak-bastions` rotation entry now fails at
-server startup with a "was removed" error. The published release and the live
-server still include it until the next full release.
-
-**Tower Complex (source only, not deployed):** in source, the `broadside-clone`
-key/`MapId::BroadsideClone` slot is now the ORIGINAL Tower Complex, embedded in
-the binary from `src/assets/maps/tower-complex/` (no private pack, always listed).
-Gameplay compatibility is now `maps5` (below). Its terrain is original
-procedural rolling hills (`scripts/assets/tower_complex_terrain.py`); Broadside was
-studied for statistics only, privately, and none of its height data is used.
-Optional manifest `spawn_points` (per team `[x,y,z,yaw]`, centre 1.2 m above the
-floor) make the server pick a random spawn each respawn; maps without it are
-unchanged. Spawn centres must be 1.2 m above the floor: lower ones start the
-support ray inside the slab and leave players frictionless. See `docs/tower-complex.md`.
-
-**Cairnhold (source only, not deployed):** likewise, the `stonehenge-clone`
-key/`MapId::StonehengeClone` slot is now the ORIGINAL Cairnhold, embedded from
-`src/assets/maps/cairnhold/` and always listed. Compatibility is `maps5` with the
-Raindance, Tower Complex and Cairnhold fingerprints (Skybreak's was dropped). Stonehenge was
-studied privately for statistics only; no Stonehenge data is used. Two private
-reference packs remain: Snowblind and Desert of Death. The live server and
-published clients still run the old Broadside and Stonehenge clone packs;
-deploying needs a full matching client/server release. See `docs/cairnhold.md`.
-
-There is no private-test switch. A dedicated server loads a reference map when
-its pack is installed and rejects that map when the pack is missing.
-`PEAKRUNNER_PRIVATE_MAPS_DIR/<map-key>` is where the server reads those packs.
-Packaged clients find them in `private-maps/` beside the executable, or in
-macOS `Contents/Resources/private-maps/`. Development builds also read
-`local-assets/<map-key>/installed`. Client packaging now copies the two
-remaining packs (it copied four for the published release).
+- **Tower Complex:** floating towers over original rolling hills
+  (`src/assets/maps/tower-complex/`). See `docs/tower-complex.md`.
+- **Cairnhold:** hillside bunkers, trench-linked flag towers, central ring
+  (`src/assets/maps/cairnhold/`). See `docs/cairnhold.md`.
+- **Frostline:** polar research stations on steep shelves, beacon ridge,
+  whiteout fog (`src/assets/maps/frostline/`). See `docs/frostline.md`.
+- **Dustreach:** sandstone citadels in dunes, the Sun Gate on the central
+  saddle (`src/assets/maps/dustreach/`). See `docs/dustreach.md`.
+- The replaced reference maps (Broadside, Stonehenge, Snowblind, Desert of
+  Death) were studied privately for statistics only; none of their data is in
+  any build. Their packs remain only in ignored `research/` for future study.
+- **Skybreak Bastions removed:** it was built from decoded Broadside
+  measurements, so it is gone from source. A `skybreak-bastions` rotation entry
+  fails at server startup with a "was removed" error.
+- Optional manifest `spawn_points` (per team `[x,y,z,yaw]`) make the server pick
+  a random spawn on each respawn. Spawn centres must be 1.2 m above the floor:
+  lower ones start the support ray inside the slab and leave players frictionless.
+- `MapPack::load` (and `PEAKRUNNER_MAP_PACK`) remain for the private reference
+  apps and QA. No rotation slot reads `PEAKRUNNER_PRIVATE_MAPS_DIR` any more,
+  `scripts/stage-private-maps.py` is deleted, and packaging copies no private maps.
 
 The published game `0.1.0-private.20260921.1` was built before this removal.
 That server image still checks `PEAKRUNNER_PRIVATE_TEST`, and the running VPS
@@ -303,7 +294,7 @@ Find a Rift preferences are in the published `.20260921.1` client. See
 ## Historical build notes
 
 These notes record how the maps and the checkout were built. Current
-publication, rotation, and git state are in the six-map section above. `main`
+publication, rotation, and git state are in the map rotation section above. `main`
 is the only branch, locally and on `origin`. There is no `map/skybreak-fortress`
 branch, no recovery stash, and no review worktree. The live game is
 `0.1.0-private.20260921.1`, launcher `0.1.0-r1`, feed `2026092102`. Sentences
@@ -570,7 +561,12 @@ Tower Complex build/test, from `src/` (numpy venv):
 Its build places bases at z 820/1228 (408 m apart) over rolling terrain.
 Cairnhold likewise: `scripts/build-cairnhold.py [OUTPUT] [--no-bake]` (default
 `assets/maps/cairnhold`) and `scripts/test-cairnhold.py`; bunkers at z 844/1204,
-flags 532 m apart.
+flags 532 m apart. Frostline: `scripts/build-frostline.py` / `scripts/test-frostline.py`
+(default `assets/maps/frostline`; stations at z 624/1424, flags 816 m apart).
+Dustreach: `scripts/build-dustreach.py` / `scripts/test-dustreach.py` (default
+`assets/maps/dustreach`; citadels at z 679/1369, flags 724 m apart).
+The connected rotation test needs no private packs:
+`cargo test -p peakrunner-server --lib rotation_cycles_connected_clients -- --ignored`.
 
 Optional `QA_FLYCAM=x,y,z,yaw_deg,pitch_deg,fov_deg` (`src/drawlist.rs`) renders
 one frame from an arbitrary world-space camera instead of the player's actual
