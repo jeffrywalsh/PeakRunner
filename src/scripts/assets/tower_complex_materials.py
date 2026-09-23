@@ -1,5 +1,5 @@
 """Deterministic original tower-complex surfaces. No reference images are
-sampled. Distinct from fortress_materials.py's warm floating-fortress
+sampled. Distinct from the retired Skybreak fortress's warm
 palette: this base reads as a cooler, more industrial defense outpost, with
 amber/black hazard striping ('grate') on the exposed traversal hazards: the
 turret bridges, ramps and the open center shaft. Team identity comes from 'ember' (red)

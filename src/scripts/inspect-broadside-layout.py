@@ -3,7 +3,7 @@
 
 Deeper than inspect-broadside-reference.py's floor-area histogram: this
 clusters actual triangles into wall segments, ramp runs and floor polygons
-per level so authored geometry (scripts/assets/floating_fortress.py) can be
+per level so authored geometry (formerly the retired Skybreak fortress) can be
 checked against real connectivity, not just floor heights. Same rules as the
 sibling script: user-owned DIF only, no source triangles/textures ever leave
 this PRIVATE report, output must be a new directory under ignored local-assets/.

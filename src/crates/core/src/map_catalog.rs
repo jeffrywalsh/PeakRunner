@@ -90,7 +90,7 @@ mod tests {
     }
     #[test]
     fn identities_are_safe_and_unambiguous() {
-        for id in [crate::terrain::MapId::Valley, crate::terrain::MapId::Raindance, crate::terrain::MapId::Skybreak,
+        for id in [crate::terrain::MapId::Valley, crate::terrain::MapId::Raindance,
             crate::terrain::MapId::BroadsideClone, crate::terrain::MapId::StonehengeClone,
             crate::terrain::MapId::SnowblindClone, crate::terrain::MapId::DesertOfDeathClone] {
             assert_eq!(crate::terrain::MapId::parse(id.key()), Some(id));
@@ -98,6 +98,8 @@ mod tests {
         }
         assert_eq!(crate::terrain::MapId::parse("RAINDANCE"), Some(crate::terrain::MapId::Raindance));
         assert_eq!(crate::terrain::MapId::parse("../raindance"), None);
+        // Retired: stored preferences and old rotation configs name it.
+        assert_eq!(crate::terrain::MapId::parse("skybreak-bastions"), None);
         for id in ["", "../raindance", "a/b", "A", "a\\b", "a b", "-a", "a-", "a--b", ".", "é"] {
             assert!(!valid_id(id), "{id}");
         }

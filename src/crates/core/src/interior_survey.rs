@@ -45,15 +45,7 @@ impl BaseFrame {
     }
 }
 
-pub fn skybreak_frames() -> [BaseFrame; 2] {
-    // Mesh.point yaw: world offset is (right*sign, up, forward*sign).
-    // Ember yaw is 180 degrees, glacier yaw is 0. Matches the fortress tests.
-    [
-        signed_frame(Vec3::new(1024.0, 240.0, 875.0), -1.0),
-        signed_frame(Vec3::new(1024.0, 240.0, 1173.0), 1.0),
-    ]
-}
-
+#[cfg(test)]
 fn signed_frame(origin: Vec3, sign: f32) -> BaseFrame {
     BaseFrame {
         origin,
@@ -76,12 +68,9 @@ pub fn reference_frames(bases: &[ReferenceBase]) -> Vec<BaseFrame> {
     }).collect()
 }
 
-pub fn frames_for(pack: &MapPack, map: MapId) -> Result<Vec<BaseFrame>, String> {
+pub fn frames_for(pack: &MapPack, _map: MapId) -> Result<Vec<BaseFrame>, String> {
     if !pack.manifest.reference_bases.is_empty() {
         return Ok(reference_frames(&pack.manifest.reference_bases));
-    }
-    if map == MapId::Skybreak {
-        return Ok(skybreak_frames().to_vec());
     }
     Err("This map has no base frame. Refusing to guess one.".into())
 }
@@ -221,18 +210,6 @@ mod tests {
     use crate::terrain::MapId;
 
     #[test]
-    fn skybreak_survey_frame_matches_the_fortress_flag() {
-        let pack = crate::map_pack::on(MapId::Skybreak).unwrap();
-        let frame = &skybreak_frames()[0];
-        let flag = nearest_flag_local(pack, frame).unwrap();
-        assert!(flag.x.abs() < 0.05, "{flag:?}");
-        assert!((flag.y + 12.0).abs() < 0.05, "{flag:?}");
-        assert!((flag.z - 15.05).abs() < 0.05, "{flag:?}");
-        let world = frame.to_world(Vec3::new(0.0, -12.0, 15.05));
-        assert!((world - Vec3::new(1024.0, 255.05, 887.0)).length() < 0.02);
-    }
-
-    #[test]
     fn reference_frame_matches_the_overlay_matrix() {
         let base = crate::map_pack::ReferenceBase {
             name: "Base".into(),
@@ -247,28 +224,26 @@ mod tests {
     }
 
     #[test]
-    fn skybreak_hall_stand_matches_the_overlay_ray() {
-        let pack = crate::map_pack::on(MapId::Skybreak).unwrap();
-        let frame = &skybreak_frames()[0];
-        let stands = column_stands(pack, frame, 0.0, 10.0);
-        let hall = stands.iter().find(|s| (s.floor - 7.0).abs() < 0.2).expect("hall floor");
-        assert!(hall.fits, "{hall:?}");
-        assert!((hall.left - 11.0).abs() < 0.15 && (hall.right_clear - 11.0).abs() < 0.15, "{hall:?}");
-        assert!((hall.back - 17.5).abs() < 0.15 && (hall.front - 12.5).abs() < 0.15, "{hall:?}");
-        // Probe at height 9 reads a 14 m ceiling, so the lid is near 23, not 14.
-        assert!((hall.headroom - 15.48).abs() < 0.25, "{hall:?}");
-        let rays = probe_at(pack, frame, "hall", [0.0, 10.0, 9.0]).rays;
-        assert!((rays.left.unwrap() - 11.0).abs() < 0.15);
-        assert!((rays.right.unwrap() - 11.0).abs() < 0.15);
-    }
-
-    #[test]
-    fn skybreak_hall_wall_is_not_a_standing_cell() {
-        let pack = crate::map_pack::on(MapId::Skybreak).unwrap();
-        let frame = &skybreak_frames()[0];
-        let stands = column_stands(pack, frame, 11.5, 10.0);
-        let wall: Vec<_> = stands.iter().filter(|s| (s.floor - 7.0).abs() < 0.4).collect();
-        assert!(!wall.is_empty(), "{stands:?}");
-        assert!(wall.iter().all(|s| !s.fits), "{wall:?}");
+    fn survey_column_finds_a_standable_floor_at_a_spawn_point() {
+        // Authored spawns are 1.2 m over a clear floor, so the survey must
+        // report a fitting stand there and locate the flag relative to the frame.
+        let pack = crate::map_pack::on(MapId::BroadsideClone).unwrap();
+        let mut found = 0;
+        for points in &pack.manifest.spawn_points {
+            for p in points {
+                // The scan starts 78 m over the frame and stops after 48 faces;
+                // put the frame 73.5 m below the floor so it starts 4.5 m overhead.
+                let floor = p[1] - 1.2;
+                let frame = signed_frame(Vec3::new(p[0], floor - 73.5, p[2]), 1.0);
+                let stands = column_stands(pack, &frame, 0.0, 0.0);
+                let stand = stands.iter().find(|s| (s.floor - 73.5).abs() < 0.05)
+                    .unwrap_or_else(|| panic!("spawn floor in survey column: {stands:?}"));
+                assert!(stand.headroom > 2.0, "{stand:?}");
+                if stand.fits { found += 1; }
+                let flag = nearest_flag_local(pack, &frame).unwrap();
+                assert!(Vec3::new(flag.x, flag.y, flag.z - 73.5).length() < 80.0, "{flag:?}");
+            }
+        }
+        assert!(found > 0, "no spawn column reported a fitting stand");
     }
 }

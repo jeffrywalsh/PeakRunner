@@ -15,7 +15,7 @@ const SKY_SIZE: u64 = 96;
 const EMIT_SIZE: u64 = 80;
 
 fn precipitation_count(map: MapId, available: usize) -> usize {
-    match map { MapId::Valley => available, MapId::Raindance | MapId::Skybreak | MapId::BroadsideClone | MapId::StonehengeClone | MapId::SnowblindClone | MapId::DesertOfDeathClone => 0 }
+    match map { MapId::Valley => available, MapId::Raindance | MapId::BroadsideClone | MapId::StonehengeClone | MapId::SnowblindClone | MapId::DesertOfDeathClone => 0 }
 }
 
 #[repr(C)]
@@ -1512,7 +1512,7 @@ mod shader_check {
                 return;
             }
             if std::env::var_os("QA_ROTATION").is_some() {
-                for map in [MapId::Raindance, MapId::Skybreak, MapId::BroadsideClone,
+                for map in [MapId::Raindance, MapId::BroadsideClone,
                     MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone,
                     MapId::Raindance] {
                     world.set_map(map); world.start_match(true); world.players.truncate(1);
@@ -1548,7 +1548,7 @@ mod shader_check {
                 }
                 return;
             }
-            if std::env::var_os("QA_SKYBREAK").is_none() && std::env::var_os("QA_REFERENCE").is_none() {
+            if std::env::var_os("QA_REFERENCE").is_none() {
             world.set_map(MapId::Raindance);
             world.flyby = 0.6;
             shoot(&mut scene, &world, "menu", 1280, 800);
@@ -1561,17 +1561,6 @@ mod shader_check {
             shoot(&mut scene, &world, "ahead", 1280, 800);
             world.players[0].pitch = -0.62;
             shoot(&mut scene, &world, "down", 1280, 800);
-            }
-            if std::env::var_os("QA_DOCKING").is_some() {
-                world.set_map(MapId::Raindance);
-                world.start_match(true);
-                world.players.truncate(1);
-                let metadata:serde_json::Value=serde_json::from_slice(&std::fs::read(std::path::Path::new(&std::env::var_os("PEAKRUNNER_MAP_PACK").unwrap()).join("map.json")).unwrap()).unwrap();
-                let base=&metadata["instances"][0];
-                let p=&base["anchors"]["docking_bay"];
-                world.players[0].pos=glam::Vec3::new(p[0].as_f64().unwrap() as f32,p[1].as_f64().unwrap() as f32,p[2].as_f64().unwrap() as f32);
-                world.players[0].yaw=0.;world.players[0].pitch=0.;
-                shoot(&mut scene,&world,"docking-interior",1280,800);
             }
             if std::env::var_os("QA_REFERENCE").is_some() {
                 let capture_map=if std::env::var_os("QA_INSTALLED_CLONE").is_some() {MapId::BroadsideClone} else {MapId::Raindance};
@@ -1605,36 +1594,6 @@ mod shader_check {
                     world.players[0].yaw=(-direction.x).atan2(-direction.z);world.players[0].pitch=0.;
                     shoot(&mut scene,&world,name,1280,800);
                 }
-            }
-            if std::env::var_os("QA_SKYBREAK").is_some() {
-                world.set_map(MapId::Skybreak);
-                world.start_match(true);
-                world.players.truncate(1);
-                world.players[0].pos = glam::Vec3::new(1240., 310., 960.);
-                world.players[0].yaw = 0.67;
-                world.players[0].pitch = -0.16;
-                shoot(&mut scene, &world, "skybreak-exterior", 1280, 800);
-                world.players[0].pos = glam::Vec3::new(1024., 241.2, 1133.);
-                world.players[0].yaw = std::f32::consts::PI;
-                world.players[0].pitch = 0.;
-                shoot(&mut scene, &world, "fortress-entry", 1280, 800);
-                world.players[0].pos = glam::Vec3::new(1015., 255.2, 1161.);
-                world.players[0].yaw = -2.;
-                shoot(&mut scene, &world, "fortress-hall", 1280, 800);
-                world.players[0].pos = glam::Vec3::new(1009., 255.2, 1191.);
-                world.players[0].yaw = 0.;
-                world.players[0].pitch = 0.;
-                shoot(&mut scene, &world, "fortress-loft", 1280, 800);
-                world.players[0].pos = glam::Vec3::new(1002., 260.7, 1181.);
-                world.players[0].pitch = 0.25;
-                shoot(&mut scene, &world, "fortress-stairwell", 1280, 800);
-                world.players[0].pos = glam::Vec3::new(1004., 266.2, 1156.);
-                world.players[0].yaw = -2.;
-                world.players[0].pitch = 0.;
-                shoot(&mut scene, &world, "fortress-armory", 1280, 800);
-                world.players[0].pos = glam::Vec3::new(1016., 279.2, 1185.);
-                world.players[0].yaw = std::f32::consts::PI;
-                shoot(&mut scene, &world, "fortress-generator", 1280, 800);
             }
         });
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Floor-plan/profile cuts for our own compiled tower-complex pack, same
-technique as inspect-skybreak-fortress.py. Schematic collision-geometry cuts,
+technique as the retired Skybreak inspector. Schematic collision-geometry cuts,
 not a textured render -- use alongside a real launch_smoke.rs GPU screenshot,
 not instead of one. Not a private diagnostic (this is our original asset);
 output can go anywhere.

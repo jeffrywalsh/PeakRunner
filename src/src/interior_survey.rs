@@ -40,9 +40,8 @@ struct Report {
 
 pub fn run(path: &Path, which: &str) -> Result<(), String> {
     let (map, label) = match which {
-        "skybreak" => (MapId::Skybreak, "skybreak"),
         "reference" | "broadside" => (MapId::Raindance, "reference"),
-        other => return Err(format!("PEAKRUNNER_SURVEY_MAP must be reference or skybreak, not {other}")),
+        other => return Err(format!("PEAKRUNNER_SURVEY_MAP must be reference, not {other}")),
     };
     let pack = peakrunner_core::map_pack::on(map).ok_or("that map has no collision pack")?;
     if map == MapId::Raindance && !pack.manifest.private_reference {

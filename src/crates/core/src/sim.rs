@@ -3158,7 +3158,6 @@ mod spawn_point_tests {
             assert!(used.len() >= points.len() - 1, "{team:?} used only {used:?}");
         }
         // Legacy single-spawn maps keep their old path (no spawn_points).
-        assert!(crate::terrain::spawn_points_on(MapId::Skybreak, true).is_empty());
         assert!(crate::terrain::spawn_points_on(MapId::Raindance, false).is_empty());
     }
 }
@@ -3371,7 +3370,7 @@ mod line_of_sight_tests {
     /// wall. A shot must start on the shooter's side and stop there.
     #[test]
     fn point_blank_shots_never_spawn_past_a_wall() {
-        for map in [MapId::BroadsideClone,MapId::Skybreak] {
+        for map in [MapId::BroadsideClone,MapId::StonehengeClone] {
             let pack=crate::map_pack::on(map).unwrap();
             let mut cases=0;
             for spot in spawns(map) {
@@ -3439,7 +3438,7 @@ mod targeting_equivalence {
     fn shared_targeting_matches_the_previous_inline_rule() {
         let mut seed=0x9e37_79b9u32;
         let mut rnd=move || {seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;(seed as f32/u32::MAX as f32)*2.-1.};
-        for map in [MapId::BroadsideClone,MapId::Skybreak,MapId::Raindance] {
+        for map in [MapId::BroadsideClone,MapId::StonehengeClone,MapId::Raindance] {
             let defs=equipment::definitions(map);
             let (mut scenarios,mut acquired,mut leading,mut sensed_only)=(0,0,0,0);
             for d in defs.iter().filter(|d|matches!(d.kind,Kind::Sensor|Kind::Turret)) {
@@ -3466,7 +3465,7 @@ mod targeting_equivalence {
                 }
             }
             assert!(acquired>0 && sensed_only>0,"{map:?}: {scenarios} scenarios, {acquired} acquired, {sensed_only} sensed-only");
-            if matches!(map,MapId::Skybreak|MapId::Raindance) {assert!(leading>0,"{map:?}: no plasma intercept case exercised");}
+            if matches!(map,MapId::StonehengeClone|MapId::Raindance) {assert!(leading>0,"{map:?}: no plasma intercept case exercised");}
         }
     }
 }

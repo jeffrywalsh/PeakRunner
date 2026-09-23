@@ -34,7 +34,7 @@ mod tests {
     #[ignore = "requires the two reference packs and PEAKRUNNER_PRIVATE_MAPS_DIR"]
     fn private_collection_rotates_connected_clients_and_resets() {
         use peakrunner_core::terrain::MapId;
-        let maps = [MapId::Raindance, MapId::Skybreak, MapId::BroadsideClone,
+        let maps = [MapId::Raindance, MapId::BroadsideClone,
             MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone];
         let policy = serde_json::to_string(&maps.iter().map(|m|
             serde_json::json!({"map":m.key(),"mode":"ctf"})).collect::<Vec<_>>()).unwrap();
@@ -82,16 +82,16 @@ mod tests {
     #[test]
     fn server_rotation_selects_initial_map_for_real_clients() {
         let host = GameHost::bind("127.0.0.1:0", "Rotation test", 8, "Valley").unwrap()
-            .with_rotation(r#"[{"map":"skybreak-bastions","mode":"ctf"},{"map":"raindance","mode":"ctf"}]"#).unwrap();
+            .with_rotation(r#"[{"map":"stonehenge-clone","mode":"ctf"},{"map":"raindance","mode":"ctf"}]"#).unwrap();
         let port = host.local_addr().port();
         let host = host.spawn();
         let a = connect_private("127.0.0.1", port, "Alpha", "").unwrap();
         let b = connect_private("127.0.0.1", port, "Beta", "").unwrap();
         wait(|| a.lobby().snapshot.is_some() && b.lobby().snapshot.is_some());
         for client in [&a, &b] {
-            assert_eq!(client.lobby().snapshot.unwrap().map, peakrunner_core::terrain::MapId::Skybreak);
+            assert_eq!(client.lobby().snapshot.unwrap().map, peakrunner_core::terrain::MapId::StonehengeClone);
         }
-        wait(|| host.status.lock().unwrap().map == "Skybreak Bastions");
+        wait(|| host.status.lock().unwrap().map == "Cairnhold");
         a.leave(); b.leave();
         wait(|| host.players.load(std::sync::atomic::Ordering::Relaxed) == 0);
     }

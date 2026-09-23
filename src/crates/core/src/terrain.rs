@@ -134,7 +134,6 @@ pub fn pillars() -> Vec<Pillar> {
 pub enum MapId {
     Valley,
     Raindance,
-    Skybreak,
     BroadsideClone,
     StonehengeClone,
     SnowblindClone,
@@ -144,10 +143,10 @@ pub enum MapId {
 impl MapId {
     /// Stable identity, independent of display labels and filesystem locations.
     pub fn key(self) -> &'static str {
-        match self { Self::Valley => "valley", Self::Raindance => "raindance", Self::Skybreak => "skybreak-bastions", Self::BroadsideClone => "broadside-clone", Self::StonehengeClone => "stonehenge-clone", Self::SnowblindClone => "snowblind-clone", Self::DesertOfDeathClone => "desert-of-death-clone" }
+        match self { Self::Valley => "valley", Self::Raindance => "raindance", Self::BroadsideClone => "broadside-clone", Self::StonehengeClone => "stonehenge-clone", Self::SnowblindClone => "snowblind-clone", Self::DesertOfDeathClone => "desert-of-death-clone" }
     }
     pub fn parse(key: &str) -> Option<Self> {
-        [Self::Valley, Self::Raindance, Self::Skybreak, Self::BroadsideClone, Self::StonehengeClone, Self::SnowblindClone, Self::DesertOfDeathClone].into_iter().find(|id| id.key().eq_ignore_ascii_case(key))
+        [Self::Valley, Self::Raindance, Self::BroadsideClone, Self::StonehengeClone, Self::SnowblindClone, Self::DesertOfDeathClone].into_iter().find(|id| id.key().eq_ignore_ascii_case(key))
     }
     pub fn is_private_clone(self) -> bool {
         matches!(self, Self::SnowblindClone | Self::DesertOfDeathClone)
@@ -170,7 +169,7 @@ const RAIN_N: usize = 256;
 /// New landscapes can supply palettes/scales here without adding grass geometry.
 pub fn surface_style(map: MapId) -> crate::grass::SurfaceStyle {
     match map {
-        MapId::Raindance | MapId::Skybreak | MapId::BroadsideClone | MapId::StonehengeClone | MapId::SnowblindClone | MapId::DesertOfDeathClone => crate::grass::HIGHLAND,
+        MapId::Raindance | MapId::BroadsideClone | MapId::StonehengeClone | MapId::SnowblindClone | MapId::DesertOfDeathClone => crate::grass::HIGHLAND,
         MapId::Valley => crate::grass::SurfaceStyle {
             cover: [0.66, 0.73, 0.79, 5.0],
             soil: [0.42, 0.55, 0.64, 35.0],
@@ -186,7 +185,7 @@ const RAIN_SIZE: f32 = 2040.0;
 // Authored procedural heightfield; no extracted source-game data in the build.
 static RAIN: &[u8] = include_bytes!("../../../assets/maps/raindance/height.bin");
 
-fn all_maps() -> [MapInfo; 7] {
+fn all_maps() -> [MapInfo; 6] {
     [
         MapInfo {
             id: MapId::Valley,
@@ -221,14 +220,11 @@ fn all_maps() -> [MapInfo; 7] {
         MapInfo { id: MapId::DesertOfDeathClone, name: "Desert of Death Clone",
             note: "Reference desert-ruin layout. Geometry starts here.", size:RAIN_SIZE,
             ember:Vec3::ZERO, glacier:Vec3::ZERO, res:RAIN_N },
-        MapInfo { id: MapId::Skybreak, name: "Skybreak Bastions",
-            note: "Floating fortresses. Indoor flags, jet hatches and landing wings.",
-            size: RAIN_SIZE, ember: Vec3::new(1024.,240.,875.), glacier: Vec3::new(1024.,240.,1173.), res: RAIN_N },
     ]
 }
 
 pub fn maps() -> Vec<MapInfo> {
-    let mut maps=vec![info(MapId::Raindance),info(MapId::Skybreak),info(MapId::BroadsideClone),info(MapId::StonehengeClone)];
+    let mut maps=vec![info(MapId::Raindance),info(MapId::BroadsideClone),info(MapId::StonehengeClone)];
     for id in [MapId::SnowblindClone, MapId::DesertOfDeathClone] {
         if crate::map_pack::on(id).is_some() { maps.push(info(id)); }
     }
@@ -249,7 +245,7 @@ pub fn info(id: MapId) -> MapInfo {
 fn source_height(id: MapId, x: f32, z: f32) -> f32 {
     match id {
         MapId::Valley => height(x, z),
-        MapId::Raindance | MapId::Skybreak | MapId::BroadsideClone | MapId::StonehengeClone | MapId::SnowblindClone | MapId::DesertOfDeathClone => height_pack(id, x, z),
+        MapId::Raindance | MapId::BroadsideClone | MapId::StonehengeClone | MapId::SnowblindClone | MapId::DesertOfDeathClone => height_pack(id, x, z),
     }
 }
 
@@ -412,12 +408,11 @@ pub fn overview_height(id:MapId)->f32 {
     // Map packs are immutable for the process lifetime, so cache the scan.
     static VALLEY:std::sync::OnceLock<f32>=std::sync::OnceLock::new();
     static RAIN:std::sync::OnceLock<f32>=std::sync::OnceLock::new();
-    static SKY:std::sync::OnceLock<f32>=std::sync::OnceLock::new();
     static CLONE:std::sync::OnceLock<f32>=std::sync::OnceLock::new();
     static STONE:std::sync::OnceLock<f32>=std::sync::OnceLock::new();
     static SNOW: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
     static DESERT: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
-    let cache=match id {MapId::Valley=>&VALLEY,MapId::Raindance=>&RAIN,MapId::Skybreak=>&SKY,MapId::BroadsideClone=>&CLONE,MapId::StonehengeClone=>&STONE,MapId::SnowblindClone=>&SNOW,MapId::DesertOfDeathClone=>&DESERT};
+    let cache=match id {MapId::Valley=>&VALLEY,MapId::Raindance=>&RAIN,MapId::BroadsideClone=>&CLONE,MapId::StonehengeClone=>&STONE,MapId::SnowblindClone=>&SNOW,MapId::DesertOfDeathClone=>&DESERT};
     *cache.get_or_init(|| {
         let map=info(id);let step=map.size/(map.res-1) as f32;
         let mut top=f32::NEG_INFINITY;
@@ -467,29 +462,12 @@ mod map_tests {
     use super::*;
 
     #[test]
-    fn skybreak_flags_are_inside_and_spawn_decks_are_clear() {
-        let id = MapId::Skybreak;
-        let pack = crate::map_pack::on(id).unwrap();
-        assert!(maps().iter().all(|m| m.id != MapId::Valley));
-        for team in [true, false] {
-            let spawn = spawn_on(id, team);
-            let floor = support_on(id, spawn).0;
-            assert!((spawn.y-floor-1.2).abs() < 0.05, "spawn support {floor} {spawn:?}");
-            assert!(pack.sweep(spawn, spawn+Vec3::Y*2., PLAYER_RADIUS).is_none());
-            let flag = Vec3::from_array(pack.manifest.flags[usize::from(!team)]);
-            assert!(flag.y-height_on(id,flag.x,flag.z)>30., "fortress must float");
-            assert!(pack.sweep(flag+Vec3::Y,flag+Vec3::Y*80.,0.).is_some(), "flag has solid roof");
-            assert!(pack.floor(flag).is_some(), "flag has solid deck");
-        }
-        assert_ne!(pack.fingerprint, crate::map_pack::active().unwrap().fingerprint);
-    }
-
-    #[test]
     fn tower_complex_is_embedded_with_floating_decks_and_clear_spawns() {
         let id = MapId::BroadsideClone;
         assert!(!id.is_private_clone());
         assert!(maps().iter().any(|m| m.id == id && m.name == "Tower Complex"));
         let pack = crate::map_pack::on(id).expect("embedded Tower Complex");
+        assert!(maps().iter().all(|m| m.id != MapId::Valley));
         assert!(!pack.manifest.private_reference);
         assert_eq!(pack.manifest.name, "Tower Complex");
         assert!(pack.asset("textures.rgba").unwrap().len() > 1_000_000);
@@ -518,7 +496,7 @@ mod map_tests {
                     "spawn {spawn:?} boxed in");
             }
         }
-        for other in [MapId::Raindance, MapId::Skybreak] {
+        for other in [MapId::Raindance] {
             assert_ne!(pack.fingerprint, crate::map_pack::on(other).unwrap().fingerprint);
         }
     }
@@ -560,143 +538,8 @@ mod map_tests {
                     "spawn {spawn:?} boxed in");
             }
         }
-        for other in [MapId::Raindance, MapId::Skybreak, MapId::BroadsideClone] {
+        for other in [MapId::Raindance, MapId::BroadsideClone] {
             assert_ne!(pack.fingerprint, crate::map_pack::on(other).unwrap().fingerprint);
-        }
-    }
-
-    #[test]
-    fn fortress_entry_and_split_ramps_have_continuous_support_and_headroom() {
-        let pack = crate::map_pack::on(MapId::Skybreak).unwrap();
-        // Both independently transformed instances use the same prefab routes.
-        for (base_z, sign) in [(875.,-1.),(1173.,1.)] {
-            let point = |x:f32,y:f32,z:f32| Vec3::new(1024.+x*sign,240.+y,base_z+z*sign);
-            let mut route = Vec::new();
-            let mut ramps=vec![(0.,-20.,-2.,0.,-6.),(0.,6.,22.,-6.,0.),
-                (0.,0.,6.,31.,38.),(0.,20.,26.,38.,44.),(0.,8.,18.,44.,57.)];
-            for side in [-1.,1.] {
-                ramps.extend([(side*11.,22.,30.,0.,7.),(side*18.,-2.,12.,7.,14.),
-                    (side*21.,22.,30.,14.,21.),(side*16.,10.,-6.,21.,25.),
-                    (side*6.,-6.,-2.,25.,31.)]);
-            }
-            for (x,z0,z1,y0,y1) in ramps {
-                for i in 0..=80 {
-                    let t=i as f32/80.;
-                    route.push((x,y0+(y1-y0)*t,z0+(z1-z0)*t));
-                }
-            }
-            // Flat connectors matter as much as isolated ramps: both loft
-            // corridors must reach the flag room without a forced jet jump.
-            for side in [-1.,1.] {
-                for i in 0..=60 {
-                    route.push((side*15.,14.,18.-i as f32*0.5));
-                }
-            }
-            for (x,y,z) in route {
-                let feet=point(x,y,z);
-                let floor=pack.floor(feet+Vec3::Y*0.08).expect("route support").0;
-                assert!((floor-feet.y).abs()<0.08,"route floor {x},{y},{z}: {floor}");
-                assert!(pack.sweep(feet+Vec3::Y*0.8,feet+Vec3::Y*2.5,0.4).is_none(),
-                    "route headroom {x},{y},{z}");
-            }
-            for (x,z) in [(0.,-40.),(0.,40.)] {
-                let p=point(x,2.,z);
-                let axis=if x==0. {Vec3::Z} else {Vec3::X};
-                assert!(pack.sweep(p-axis*3.,p+axis*3.,0.52).is_none(),"door blocked");
-            }
-        }
-        assert_eq!(pack.manifest.entities.iter().filter(|e|e.kind==crate::equipment::Kind::Turret).count(),4);
-    }
-
-    #[test]
-    fn fortress_reference_profile_and_enclosed_entry_regressions() {
-        let pack = crate::map_pack::on(MapId::Skybreak).unwrap();
-        for (base_z, sign) in [(875.,-1.),(1173.,1.)] {
-            let point = |x:f32,y:f32,z:f32| Vec3::new(1024.+x*sign,240.+y,base_z+z*sign);
-            // Outside envelope, not the narrower interior walls from section cuts.
-            for (height, half_width) in [(40.,24.),(50.,24.),(60.,14.8)] {
-                let (t,_) = pack.sweep(point(60.,height,6.),point(0.,height,6.),0.)
-                    .expect("solid tower exterior");
-                assert!((60.*(1.-t)-half_width).abs()<0.1,"outer profile at {height}");
-            }
-            for (z,floor) in [(-12.,-8./3.),(2.,-6.),(14.,-3.)] {
-                let (t,_) = pack.sweep(point(0.,floor+2.,z),point(0.,floor+10.,z),0.)
-                    .expect("entrance passage ceiling");
-                assert!(t*8.<6.,"entry must read as a tunnel, not an atrium");
-            }
-            assert!(pack.sweep(point(0.,17.,-12.),point(0.,17.,-21.),0.4).is_some(),
-                "flag room back wall");
-        }
-    }
-
-    #[test]
-    fn fortress_storeys_have_solid_ceilings_and_walkable_upper_rooms() {
-        let pack = crate::map_pack::on(MapId::Skybreak).unwrap();
-        for (base_z, sign) in [(875.,-1.),(1173.,1.)] {
-            let point = |x:f32,y:f32,z:f32| Vec3::new(1024.+x*sign,240.+y,base_z+z*sign);
-            for (x,y,z,ceiling) in [(0.,7.,-16.,14.),(-9.,14.,-12.,22.),
-                                  (0.,25.,-12.,32.),(8.,38.,15.,45.)] {
-                assert!(pack.sweep(point(x,y+2.,z),point(x,ceiling+1.,z),0.4).is_some(),"missing ceiling");
-                let floor=pack.floor(point(x,y+0.08,z)).unwrap().0;
-                assert!((floor-(240.+y)).abs()<0.08);
-                assert!(pack.sweep(point(x,y+0.8,z),point(x,y+2.5,z),0.4).is_none());
-            }
-            for x in [-15.,15.] {
-                assert!(pack.sweep(point(x,16.,-9.),point(x,16.,-5.),0.52).is_none(),"flag doorway blocked");
-            }
-            for x in [-20.,-10.,0.,10.,20.] {
-                assert!(pack.sweep(point(x,16.,-9.),point(x,16.,-5.),0.52).is_some(),"flag doorway wall missing");
-            }
-        }
-    }
-
-    #[test]
-    fn fortress_measured_hall_and_flag_boundaries() {
-        let pack=crate::map_pack::on(MapId::Skybreak).unwrap();
-        for (base_z,sign) in [(875.,-1.),(1173.,1.)] {
-            let point=|x:f32,y:f32,z:f32|Vec3::new(1024.+x*sign,240.+y,base_z+z*sign);
-            for (origin,direction,expected) in [
-                ((0.,9.,10.),Vec3::X,11.),((0.,9.,10.),-Vec3::X,11.),
-                ((0.,9.,10.),Vec3::Z,12.5),((0.,9.,10.),-Vec3::Z,17.5),
-                ((0.,16.,-12.),Vec3::Z,4.),((0.,16.,-12.),-Vec3::Z,4.),
-                ((0.,16.,-12.),Vec3::Y,4.)] {
-                let p=point(origin.0,origin.1,origin.2);
-                let d=Vec3::new(direction.x*sign,direction.y,direction.z*sign);
-                let (t,_)=pack.sweep(p,p+d*60.,0.).expect("measured room boundary");
-                assert!((t*60.-expected).abs()<0.02,"boundary {origin:?}: {} vs {expected}",t*60.);
-            }
-        }
-    }
-
-    #[test]
-    fn fortress_entry_to_roof_connections_have_no_gaps_or_blocked_portals() {
-        let pack=crate::map_pack::on(MapId::Skybreak).unwrap();
-        // Includes landings and lateral movement, not only isolated ramp axes.
-        let route=[(0.,0.,-30.),(0.,0.,-20.),(0.,-6.,-2.),(0.,-6.,6.),
-            (0.,0.,22.),(11.,0.,22.),(11.,7.,30.),(18.,7.,30.),(18.,7.,20.),
-            (0.,7.,20.),(0.,7.,-4.),(18.,7.,-4.),(18.,7.,-2.),(18.,14.,12.),(15.,14.,12.),
-            (15.,14.,-12.),(15.,14.,22.),(21.,14.,21.),(21.,14.,22.),(21.,21.,30.),
-            (21.,21.,31.4),(16.,21.,31.4),(16.,21.,10.),(16.,25.,-6.),(6.,25.,-6.),
-            (6.,31.,-2.),(6.,31.,-1.),(0.,31.,-1.),(0.,31.,0.),(0.,38.,6.),(0.,38.,7.),(6.,38.,7.),(8.,38.,19.),(0.,38.,19.),(0.,38.,20.),
-            (0.,44.,26.),(0.,44.,27.),(8.,44.,27.),(8.,44.,7.),(0.,44.,7.),(0.,44.,8.),
-            (0.,57.,18.),(0.,57.,20.),(8.,57.,20.)];
-        for (base_z,rotation) in [(875.,-1.),(1173.,1.)] {
-            for side in [-1.,1.] {
-                let point=|(x,y,z):(f32,f32,f32)|Vec3::new(1024.+x*side*rotation,240.+y,base_z+z*rotation);
-                for segment in route.windows(2) {
-                    let a=point(segment[0]);let b=point(segment[1]);
-                    let mut previous=a+Vec3::Y*1.2;
-                    for i in 0..=100 {
-                        let feet=a.lerp(b,i as f32/100.);
-                        let floor=pack.floor(feet+Vec3::Y*0.08).expect("connector floor").0;
-                        assert!((floor-feet.y).abs()<0.08,"floor gap at {feet:?}");
-                        let center=feet+Vec3::Y*1.2;
-                        assert!(pack.sweep(previous,center,0.52).is_none(),"blocked connector at {feet:?}");
-                        assert!(pack.sweep(center,feet+Vec3::Y*2.4,0.4).is_none(),"connector headroom at {feet:?}");
-                        previous=center;
-                    }
-                }
-            }
         }
     }
 

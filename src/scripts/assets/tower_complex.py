@@ -5,8 +5,7 @@ tapered keel and thruster nozzles underneath.
 
 No source mesh, texture, lightmap or parser is used by this builder. Local
 X/Z are horizontal, Y is up. -Z is the front (field-facing) side; +Z is the
-rear. Caller supplies placement and ownership, same convention as
-floating_fortress.build().
+rear. Caller supplies placement and ownership through mesh.origin/mesh.yaw.
 
 Design simplification: the spec this was drawn from described the center
 shaft "leading down to the tunnels" via a separate basement junction. This

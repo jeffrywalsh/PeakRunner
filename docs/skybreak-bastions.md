@@ -1,3 +1,5 @@
+> **Retired:** Skybreak Bastions and its fortress builders were removed from source because they derived from Broadside measurements. Kept as history only.
+
 # Skybreak Bastions — original floating-base CTF playtest
 
 The user requested consolidating this development checkpoint and its multi-map

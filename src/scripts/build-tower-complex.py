@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Original tower/generator/ship-platform/turret-pod CTF base, using
-PeakRunner's original material kit. Modeled on build-skybreak.py; this
+PeakRunner's original material kit. Modeled on the retired Skybreak build; this
 replaces the concept the Broadside Clone reference layout is being retired
 in favor of, so it stays fully original (no Torque/DIF-derived geometry).
 """

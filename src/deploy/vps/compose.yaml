@@ -8,7 +8,7 @@ services:
       PEAKRUNNER_MATCH_NAME: Springdale Central
       PEAKRUNNER_MATCH_MAP: Raindance
       PEAKRUNNER_PRIVATE_MAPS_DIR: /opt/peakrunner/private-maps
-      PEAKRUNNER_MATCH_ROTATION: '[{"map":"raindance","mode":"ctf"},{"map":"skybreak-bastions","mode":"ctf"},{"map":"broadside-clone","mode":"ctf"},{"map":"stonehenge-clone","mode":"ctf"},{"map":"snowblind-clone","mode":"ctf"},{"map":"desert-of-death-clone","mode":"ctf"}]'
+      PEAKRUNNER_MATCH_ROTATION: '[{"map":"raindance","mode":"ctf"},{"map":"broadside-clone","mode":"ctf"},{"map":"stonehenge-clone","mode":"ctf"},{"map":"snowblind-clone","mode":"ctf"},{"map":"desert-of-death-clone","mode":"ctf"}]'
       PEAKRUNNER_MATCH_PASSWORD: ${PEAKRUNNER_MATCH_PASSWORD:-}
     ports:
       - "7777:7777/udp"

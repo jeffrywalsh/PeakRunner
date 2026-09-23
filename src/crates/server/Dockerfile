@@ -3,7 +3,8 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY assets/maps/raindance ./assets/maps/raindance
-COPY assets/maps/skybreak-bastions ./assets/maps/skybreak-bastions
+COPY assets/maps/tower-complex ./assets/maps/tower-complex
+COPY assets/maps/cairnhold ./assets/maps/cairnhold
 COPY crates ./crates
 RUN cargo build --locked --release -p peakrunner-server --bin peakrunner-server
 

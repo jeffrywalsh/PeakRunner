@@ -14,8 +14,8 @@ slope distribution, distances and what each base element is for.
 
 **Status.** v2 is embedded in source from `src/assets/maps/cairnhold/` and holds
 the `stonehenge-clone` slot (`MapId::StonehengeClone`, menu name "Cairnhold"),
-always listed, with no private pack. Gameplay compatibility is `maps4`, which
-adds its fingerprint. Not deployed: the live server still runs the old
+always listed, with no private pack. Gameplay compatibility is `maps5`, which
+includes its fingerprint. Not deployed: the live server still runs the old
 Stonehenge clone. The v1 pack is kept in ignored `local-assets/cairnhold-v1/`.
 
 **v2 base pass.** The bunker front is a stepped, crenellated gatehouse facade

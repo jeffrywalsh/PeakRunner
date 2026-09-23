@@ -33,17 +33,25 @@ The old checkout and legacy browser prototype remain at
 
 ## Six-map rotation
 
-Raindance, Skybreak Bastions, Broadside Clone, Stonehenge Clone, Snowblind
-Clone, and Desert of Death Clone are the server rotation. Raindance and
-Skybreak are original PeakRunner maps. The four clones are reference layouts
-brought in so the bases and routes start in the right place. The next work is
-to change their geometry and art until the maps are PeakRunner's own. Valley
+**Making or replacing a map:** follow `docs/map-pipeline.md` (study, concept,
+build, visual QA, tests, embed, commit). It lists the checks every map must pass.
+
+In source the rotation is five maps: Raindance, Tower Complex
+(`broadside-clone` key), Cairnhold (`stonehenge-clone` key), Snowblind Clone and
+Desert of Death Clone. Raindance, Tower Complex and Cairnhold are original
+PeakRunner maps; the last two are reference layouts still to be replaced. Valley
 stays an internal fixture.
 
+**Skybreak Bastions removed (source only, not deployed):** it was built from
+decoded Broadside measurements, so it is gone from source: no `MapId`, no
+embedded pack, no builder. A `skybreak-bastions` rotation entry now fails at
+server startup with a "was removed" error. The published release and the live
+server still include it until the next full release.
+
 **Tower Complex (source only, not deployed):** in source, the `broadside-clone`
-key/`MapId::BroadsideClone` slot is now the ORIGINAL Tower Complex, embedded like
-Skybreak from `src/assets/maps/tower-complex/` (no private pack, always listed).
-Gameplay compatibility is now `maps4` (below). Its terrain is original
+key/`MapId::BroadsideClone` slot is now the ORIGINAL Tower Complex, embedded in
+the binary from `src/assets/maps/tower-complex/` (no private pack, always listed).
+Gameplay compatibility is now `maps5` (below). Its terrain is original
 procedural rolling hills (`scripts/assets/tower_complex_terrain.py`); Broadside was
 studied for statistics only, privately, and none of its height data is used.
 Optional manifest `spawn_points` (per team `[x,y,z,yaw]`, centre 1.2 m above the
@@ -53,8 +61,8 @@ support ray inside the slab and leave players frictionless. See `docs/tower-comp
 
 **Cairnhold (source only, not deployed):** likewise, the `stonehenge-clone`
 key/`MapId::StonehengeClone` slot is now the ORIGINAL Cairnhold, embedded from
-`src/assets/maps/cairnhold/` and always listed. Compatibility is `maps4` with the
-Raindance, Skybreak, Tower Complex and Cairnhold fingerprints. Stonehenge was
+`src/assets/maps/cairnhold/` and always listed. Compatibility is `maps5` with the
+Raindance, Tower Complex and Cairnhold fingerprints (Skybreak's was dropped). Stonehenge was
 studied privately for statistics only; no Stonehenge data is used. Two private
 reference packs remain: Snowblind and Desert of Death. The live server and
 published clients still run the old Broadside and Stonehenge clone packs;
@@ -91,7 +99,8 @@ TLS verification and infrastructure hardening.
   runtime packs alongside clients and server. Keep them in ignored research and
   release storage; do not commit/push imported packs, captures, source archives,
   credentials or signing keys. This is not a general original-assets-only release.
-- Original Raindance/Skybreak build inputs remain in `src/assets/maps/`.
+- Original Raindance build inputs remain in `src/assets/maps/` (Skybreak's were
+  removed from source after this release).
   Private inputs via `src/local-assets`: Broadside `broadside-clone/compiled-donut-v1`;
   Stonehenge, Snowblind and Desert of Death each `<map-key>/installed`.
   Copy only `map.json` and its six verified runtime payloads, not editable source,
@@ -300,6 +309,9 @@ branch, no recovery stash, and no review worktree. The live game is
 `0.1.0-private.20260921.1`, launcher `0.1.0-r1`, feed `2026092102`. Sentences
 below that call the clones offline-only, say nothing is deployed, or name
 `.20260919.4` as the live download describe the state before that publication.
+Skybreak Bastions and its builders (`build-skybreak.py`, `floating_fortress.py`,
+`docking_bay.py`, `fortress_materials.py`, the fortress audit/inspect scripts)
+were later removed from source; notes below that use them are history only.
 
 - 2026-09-21 collection extension: **Snowblind Clone** and **Desert of Death
   Clone** are installed in the normal native game's wrapped map menu, at

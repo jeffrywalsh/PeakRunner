@@ -110,7 +110,7 @@ Numbers live in one table, `equipment::profile(kind, weapon)`:
 | Plasma turret | 80 m | 150 m | 80 m/s | 3 s | 1.2 s | yes |
 
 The table reproduces the numbers the inline code used; a test compares the old
-rule with the shared one across Tower Complex, Skybreak and Raindance. Future
+rule with the shared one across Tower Complex, Cairnhold and Raindance. Future
 player-placed turrets should call the same function with their own profile row.
 They will also need placed objects added to the line-of-sight closure, so a
 deployed shield or turret blocks sight, and placement validation (clearance, no

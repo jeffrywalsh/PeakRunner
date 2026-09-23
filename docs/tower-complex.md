@@ -124,7 +124,6 @@ Run these from `src/` with the numpy venv:
 ../research/local-assets/tools/venv/bin/python scripts/build-tower-complex.py            # -> assets/maps/tower-complex
 ../research/local-assets/tools/venv/bin/python scripts/build-tower-complex.py OUT --no-bake
 ../research/local-assets/tools/venv/bin/python scripts/test-tower-complex.py            # 17 tests
-../research/local-assets/tools/venv/bin/python scripts/test-floating-fortress.py        # Skybreak regression
 ```
 
 The builder refuses to overwrite. Two builds produce byte-identical packs,
@@ -167,8 +166,9 @@ about 15 s on 13 processes.
 
 ## Compatibility
 
-`game_protocol()` now uses `maps4:<raindance>:<skybreak>:<tower-complex>:<cairnhold>`
-fingerprints (Tower Complex introduced `maps3`; Cairnhold made it `maps4`).
+`game_protocol()` now uses `maps5:<raindance>:<tower-complex>:<cairnhold>`
+fingerprints (Tower Complex introduced `maps3`, Cairnhold made it `maps4`, and
+removing Skybreak made it `maps5`).
 Broadside and Stonehenge no longer contribute `private1` segments. Only
 Snowblind and Desert of Death do, and only when their packs are installed. Old clients and servers are therefore incompatible
 with this source.
@@ -203,8 +203,3 @@ with this source.
   substitute for a human run.
 - The client keeps its own view yaw after a server respawn; whether the new
   per-point facing is applied on a networked client is unverified.
-- Skybreak's offline bots still spawn at terrain height under its floating
-  decks (the same legacy path Tower used before `spawn_points`).
-- Found but not fixed: Skybreak's build replaces only mip level 0 of its
-  textures, so at a distance they fall back to Raindance's. Skybreak is a
-  published map, so this needs its own change.

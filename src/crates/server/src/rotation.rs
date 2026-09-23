@@ -17,9 +17,9 @@ impl Rotation {
         if entries.is_empty() || entries.len() > 32 { return Err("rotation requires 1–32 entries".into()); }
         let maps = entries.into_iter().map(|e| {
             match e.mode { SupportedMode::Ctf => {} }
-            let id = MapId::parse(&e.map).ok_or_else(|| format!("map is not installed: {}", e.map))?;
+            let id = MapId::parse(&e.map).ok_or_else(|| unknown_map(&e.map))?;
             require_reference_pack(id)?;
-            if !cfg!(test) && id == MapId::Valley { return Err("Valley is retired; use raindance or skybreak-bastions".to_string()); }
+            if !cfg!(test) && id == MapId::Valley { return Err(format!("Valley is retired; {AVAILABLE}")); }
             Ok(id)
         }).collect::<Result<Vec<_>, _>>()?;
         Ok(Self { maps, cursor: 0 })
@@ -27,6 +27,18 @@ impl Rotation {
     pub fn current(&self) -> MapId { self.maps[self.cursor] }
     pub fn advance(&mut self) -> MapId { self.cursor = (self.cursor + 1) % self.maps.len(); self.current() }
     pub fn reset(&mut self) -> MapId { self.cursor = 0; self.current() }
+}
+
+pub(crate) const AVAILABLE: &str =
+    "use raindance, broadside-clone (Tower Complex), stonehenge-clone (Cairnhold), snowblind-clone or desert-of-death-clone";
+
+/// Removed maps get a specific startup error, so an old config fails loudly.
+pub(crate) fn unknown_map(key: &str) -> String {
+    if key.eq_ignore_ascii_case("skybreak-bastions") {
+        format!("Skybreak Bastions was removed; {AVAILABLE}")
+    } else {
+        format!("map is not installed: {key}")
+    }
 }
 
 pub(crate) fn require_reference_pack(map: MapId) -> Result<(), String> {
@@ -54,6 +66,8 @@ mod tests {
             r#"[{"map":"valley","mode":"ctf","script":"x"}]"#] {
             assert!(Rotation::parse(json).is_err(), "{json}");
         }
+        let removed = Rotation::parse(r#"[{"map":"raindance","mode":"ctf"},{"map":"skybreak-bastions","mode":"ctf"}]"#).err().unwrap();
+        assert!(removed.contains("Skybreak Bastions was removed"), "{removed}");
         // The broadside-clone and stonehenge-clone slots hold embedded originals.
         assert!(Rotation::parse(r#"[{"map":"broadside-clone","mode":"ctf"}]"#).is_ok());
         assert!(Rotation::parse(r#"[{"map":"stonehenge-clone","mode":"ctf"}]"#).is_ok());

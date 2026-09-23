@@ -24,7 +24,7 @@ not part of the already published `.4` binaries.
 | 2 | `feature/multi-map-system` | Distinct map IDs/manifests, selectable installed packs, per-map compatibility, spawn metadata and supported modes. Server selects map; launcher distributes signed packs. Preserve Raindance and avoid one-map-slot replacements. |
 | 3 | `map/rift-crossing` | Proposed Dangerous Crossing-inspired original map: readable routes and a central crossing, authored terrain and assets. First prove the multi-map pipeline end to end. |
 | 4 | `map/frostline-basin` | Proposed Katabatic-inspired original snow/alpine map with long ski routes and defensible bases. Independent art/layout/playtest branch. |
-| 5 | `map/skybreak-bastions` | Proposed Broadside-inspired original elevated-base map. Verify jet access, interiors, fall routes and ceilings. No vehicles required for traversal. |
+| 5 | ~~`map/skybreak-bastions`~~ | Removed from source: it derived from Broadside measurements. Tower Complex now fills the elevated-base role. |
 | 6 | `feature/deathmatch` | Server-selected free-for-all rules, score/time limits, safe respawns, self/environment death handling, scoreboard, ties and round reset. Flags/CTF objectives disabled. |
 | 7 | `feature/team-deathmatch` | Team score totals, team-colored spawns, balancing, team chat, explicit friendly-fire policy, victory and empty-server reset. Reuse common round rules. |
 | 8 | `feature/inventory-loadouts` | Server-owned inventory choices, station access/power/team checks, limited carried deployables and loadout UI. No client-authoritative grants. Keep the existing kit as the default. |

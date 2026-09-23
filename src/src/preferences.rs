@@ -279,6 +279,20 @@ mod tests {
         assert_eq!(old.edited("\n", &"x".repeat(2049), "host\n"), old);
     }
     #[test]
+    fn a_stored_map_key_for_a_removed_map_is_ignored() {
+        // Preferences never persist a map; the client starts on its default map.
+        // A file edited by hand or by a future build must not break loading.
+        let dir = temp();
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("client.json");
+        fs::write(&path, br#"{"schema":1,"name":"Pilot","map":"skybreak-bastions"}"#).unwrap();
+        let s = Store::load(path);
+        assert!(s.warning.is_none());
+        assert_eq!(s.saved.name, "Pilot");
+        assert_eq!(peakrunner_core::terrain::MapId::parse("skybreak-bastions"), None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
     fn corrupt_oversized_future_and_unwritable_files_are_nonfatal() {
         let dir = temp();
         fs::create_dir_all(&dir).unwrap();

@@ -60,19 +60,6 @@ pub struct MapPack {
     pub heights: Vec<u8>,
 }
 
-fn skybreak_asset(name: &str) -> Result<&'static [u8], String> {
-    Ok(match name {
-        "map.json" => include_bytes!("../../../assets/maps/skybreak-bastions/map.json"),
-        "vertices.bin" => include_bytes!("../../../assets/maps/skybreak-bastions/vertices.bin"),
-        "collision.bin" => include_bytes!("../../../assets/maps/skybreak-bastions/collision.bin"),
-        "height.bin" => include_bytes!("../../../assets/maps/skybreak-bastions/height.bin"),
-        "weights.rgba" => include_bytes!("../../../assets/maps/skybreak-bastions/weights.rgba"),
-        "textures.rgba" => include_bytes!("../../../assets/maps/skybreak-bastions/textures.rgba"),
-        "ambient.f32" => include_bytes!("../../../assets/maps/skybreak-bastions/ambient.f32"),
-        _ => return Err("Unknown Skybreak asset".into()),
-    })
-}
-
 /// Original Tower Complex, built by `scripts/build-tower-complex.py`. It holds
 /// the `broadside-clone` rotation slot so existing server configs keep working.
 fn tower_complex_asset(name: &str) -> Result<&'static [u8], String> {
@@ -179,10 +166,6 @@ pub fn on(map: crate::terrain::MapId) -> Option<&'static MapPack> {
         crate::terrain::MapId::BroadsideClone => {
             static TOWER: OnceLock<MapPack> = OnceLock::new();
             Some(TOWER.get_or_init(|| embedded_pack(tower_complex_asset, "Tower Complex")))
-        }
-        crate::terrain::MapId::Skybreak => {
-            static SKY: OnceLock<MapPack> = OnceLock::new();
-            Some(SKY.get_or_init(|| embedded_pack(skybreak_asset, "Skybreak")))
         }
     }
 }

@@ -9,11 +9,10 @@ pub const GAME_VERSION: &str = "0.1.0-private.20260921.1";
 /// layout. Keep directory discovery independent of gameplay/map assets.
 pub fn game_protocol() -> String {
     let mut protocol = match peakrunner_core::map_pack::active() {
-        // maps4: the broadside-clone slot is the embedded Tower Complex and the
-        // stonehenge-clone slot is the embedded Cairnhold.
+        // maps5: Skybreak is removed; the broadside-clone slot is the embedded
+        // Tower Complex and the stonehenge-clone slot is the embedded Cairnhold.
         // muzzle1: player shots are clamped to the shooter's side of walls.
-        Some(pack) => format!("{PROTOCOL}:equipment3:blast3:chat2:names1:ping1:fov1:muzzle1:maps4:{}:{}:{}:{}",pack.fingerprint,
-            peakrunner_core::map_pack::on(peakrunner_core::terrain::MapId::Skybreak).expect("Skybreak").fingerprint,
+        Some(pack) => format!("{PROTOCOL}:equipment3:blast3:chat2:names1:ping1:fov1:muzzle1:maps5:{}:{}:{}",pack.fingerprint,
             peakrunner_core::map_pack::on(peakrunner_core::terrain::MapId::BroadsideClone).expect("Tower Complex").fingerprint,
             peakrunner_core::map_pack::on(peakrunner_core::terrain::MapId::StonehengeClone).expect("Cairnhold").fingerprint),
         None => format!("{PROTOCOL}:equipment3:blast3:chat2:names1:ping1:fov1:muzzle1"),

@@ -9,7 +9,8 @@ COPY src ./src
 COPY examples ./examples
 COPY crates ./crates
 COPY assets/maps/raindance ./assets/maps/raindance
-COPY assets/maps/skybreak-bastions ./assets/maps/skybreak-bastions
+COPY assets/maps/tower-complex ./assets/maps/tower-complex
+COPY assets/maps/cairnhold ./assets/maps/cairnhold
 ENV CARGO_BUILD_JOBS=4
 RUN cargo build --locked --release -p peakrunner-launcher --bins --examples && cargo test --locked -p peakrunner-launcher --lib
 RUN cargo build --locked --release -p peakrunner --bin peakrunner --example launch_smoke --features external-map && mkdir -p /artifacts/managed && cp target/release/peakrunner /artifacts/managed/peakrunner && cp target/release/examples/launch_smoke /artifacts/managed/launch_smoke

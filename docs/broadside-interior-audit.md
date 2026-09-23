@@ -1,3 +1,5 @@
+> **Retired:** Skybreak Bastions and its fortress builders were removed from source because they derived from Broadside measurements. Kept as history only.
+
 # Broadside interior audit — v7, 2026-09-20
 
 ## v8 follow-up: gaps and circulation redesign

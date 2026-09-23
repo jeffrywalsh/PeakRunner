@@ -1,6 +1,6 @@
 # PeakRunner native playtest
 
-Original Raindance, Skybreak Bastions, Tower Complex and Cairnhold map assets are embedded
+Original Raindance, Tower Complex and Cairnhold map assets are embedded
 in the standalone executable. No Tribes install or separate asset download is needed.
 Version .20260921.1 requires a matching server and map collection; older
 .20260919.4 clients and servers are incompatible. This release adds saved Find
@@ -8,7 +8,7 @@ match preferences (never passwords) and server-selected CTF map rotation.
 Packages include Snowblind Clone and Desert of Death Clone as reference
 layouts. Those two are the starting geometry, and they are being rebuilt. Tower
 Complex and Cairnhold, the original replacements for Broadside Clone and
-Stonehenge Clone, take their rotation slots. Map traversal and balance still need human playtesting. Approved
+Stonehenge Clone, take their rotation slots. Skybreak Bastions is removed. Map traversal and balance still need human playtesting. Approved
 movement constants are unchanged.
 
 - macOS: Apple Silicon only. Extract the ZIP and open PeakRunner.app. The bundle

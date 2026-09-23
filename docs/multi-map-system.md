@@ -8,6 +8,9 @@ Broadside Clone slot (key `broadside-clone`) is now the original, embedded Tower
 Complex and the Stonehenge Clone slot (key `stonehenge-clone`) is the original,
 embedded Cairnhold; the published release still runs the old clones. See
 [tower-complex.md](tower-complex.md) and [cairnhold.md](cairnhold.md).
+Skybreak Bastions is removed from source (it derived from Broadside
+measurements), so the source rotation is five maps; the published release still
+has it. New maps follow [map-pipeline.md](map-pipeline.md).
 Collection-wide admission and signed delivery are verified for those six maps;
 the general installed-pack registry and selected-map-only admission remain open.
 

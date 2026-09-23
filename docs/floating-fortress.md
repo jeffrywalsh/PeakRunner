@@ -1,3 +1,5 @@
+> **Retired:** Skybreak Bastions and its fortress builders were removed from source because they derived from Broadside measurements. Kept as history only.
+
 # Reusable floating fortress
 
 ## Current revision: v9 upper-floor plans
