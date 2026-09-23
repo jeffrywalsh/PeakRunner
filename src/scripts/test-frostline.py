@@ -107,21 +107,26 @@ class FrostlineTests(unittest.TestCase):
         samples += [(x, z, st.L1) for x, z in ((-8, 10), (8, 10))]
         samples += [(x, z, st.L2) for x, z in ((-5, -5), (5, -9), (0, 3), (-8, 10), (12, 0))]
         samples += [(OX+x, OZ+z, st.OG) for x, z in ((-5, -5), (5.5, 2), (0, 5), (-4, 2))]
+        samples += [(x, z, st.B_FLOOR) for x, z in ((-2, -5), (3, -5), (-3, 6), (6.4, -4), (6.4, 5))]
+        samples += [(x, -4, st.B_FLOOR) for x in (9, 12, 15)]
+        samples += [(x, z, st.G) for x, z in ((28, -5), (30, -1), (24.5, -2))]
         for x, z, y in samples:
             t, ny = self.soup.hits((x, y+3, z), (0, -1, 0))
             self.assertTrue(len(t) and abs(3-t[0]) < 1e-6 and ny[0] > .999, (x, z, y, 'floor'))
             self.assertGreater(self.soup.first((x, y+.2, z), (0, 1, 0)), 2.4, (x, z, y, 'headroom'))
 
-    def test_west_ramp_climbs_with_headroom_and_a_closed_underside(self):
-        x = sum(st.RAMP_X)/2
-        for z in np.arange(st.RAMP_TOP_Z+.5, st.RAMP_FOOT_Z, 1.0):
-            y = st.ramp_surface(z)
-            t, ny = self.soup.hits((x, y+1, z), (0, -1, 0))
-            self.assertLess(abs(1-t[0]), .02, (z, 'ramp surface'))
-            self.assertGreater(ny[0], .85, z)
-            self.assertGreater(self.soup.first((x, y+.2, z), (0, 1, 0)), 2.4, (z, 'ramp headroom'))
-        for z in np.arange(st.RAMP_TOP_Z+.5, 2.5, 1.0):
-            self.assertLess(self.soup.first((st.RAMP_X[1]+1, st.L1+.5, z), (-1, 0, 0)), 1.01, z)
+    def test_both_ramps_climb_with_headroom_and_a_closed_underside(self):
+        for (x0, x1), side in ((st.RAMP_X, 1), (st.E_RAMP_X, -1)):
+            x = (x0+x1)/2
+            for z in np.arange(st.RAMP_TOP_Z+.5, st.RAMP_FOOT_Z, 1.0):
+                y = st.ramp_surface(z)
+                t, ny = self.soup.hits((x, y+1, z), (0, -1, 0))
+                self.assertLess(abs(1-t[0]), .02, (x, z, 'ramp surface'))
+                self.assertGreater(ny[0], .85, z)
+                self.assertGreater(self.soup.first((x, y+.2, z), (0, 1, 0)), 2.4, (x, z, 'ramp headroom'))
+            inner = x1 if side > 0 else x0
+            for z in np.arange(st.RAMP_TOP_Z+.5, 2.5, 1.0):
+                self.assertLess(self.soup.first((inner+side, st.L1+.5, z), (-side, 0, 0)), 1.01, (x, z))
         self.assertLess(math.degrees(math.atan((st.L2-st.L1)/(st.RAMP_FOOT_Z-st.RAMP_TOP_Z))), 27)
 
     def test_stairs_and_emplacement_ramp_are_continuous(self):
@@ -130,6 +135,7 @@ class FrostlineTests(unittest.TestCase):
         top = st.EG+st.E_H
         e_surface = lambda z: top+(st.EG-top)*min(max((z-EZ-st.E_RAMP[0])/(st.E_RAMP[1]-st.E_RAMP[0]), 0), 1)
         routes.append(((EX,), EZ+st.E_RAMP[0]+.3, EZ+st.E_RAMP[1]-.3, e_surface))
+        routes.append(((sum(st.B_STAIR[:2])/2,), st.B_STAIR[2]+.3, st.B_STAIR[3]-.3, st.basement_stair_surface))
         for xs, z0, z1, surface in routes:
             for x in xs:
                 for z in np.arange(z0, z1, .8):
@@ -138,6 +144,15 @@ class FrostlineTests(unittest.TestCase):
                     self.assertLess(abs(1-t[0]), .03, (x, z))
                     self.assertGreater(self.soup.first((x, y+.2, z), (0, 1, 0)), 2.4, (x, z, 'stair headroom'))
             self.assertLess(math.degrees(math.atan(abs(surface(z1)-surface(z0))/(z1-z0))), 27)
+        # Stairs that climb along x: the east door's and the shed's sunken one.
+        for z, x0, x1, surface in ((sum(st.EAST_DOOR)/2, st.SX+.3, st.EAST_STAIR_FOOT_X-.3, st.east_stair_surface),
+                                   (sum(st.T_IN)/2, st.X_STAIR[0]+.3, st.X_STAIR[1]-.3, st.exit_stair_surface)):
+            for x in np.arange(x0, x1, .8):
+                y = surface(x)
+                t, _ = self.soup.hits((x, y+1, z), (0, -1, 0))
+                self.assertLess(abs(1-t[0]), .03, (x, z))
+                self.assertGreater(self.soup.first((x, y+.2, z), (0, 1, 0)), 2.4, (x, z, 'stair headroom'))
+            self.assertLess(math.degrees(math.atan(abs(surface(x1)-surface(x0))/(x1-x0))), 27)
 
     def test_standing_support_is_the_floor_top_everywhere(self):
         """The engine's support ray starts 0.15 m above the feet: wherever a
@@ -150,7 +165,10 @@ class FrostlineTests(unittest.TestCase):
                    (OX-st.OH+.9, OX+st.OH-.9, OZ-st.OH+.9, OZ+st.OH-.9, st.OG),
                    (OX-st.O_PORCH_X+.3, OX+st.O_PORCH_X-.3, OZ+st.OH+.2, OZ+st.OH+st.O_PORCH_D-.2, st.OG),
                    (OX-st.OH+.8, OX+st.OH-.8, OZ-st.OH+.8, OZ+st.OH-.8, st.OG+st.O_ROOF),
-                   (EX-4, EX+4, EZ-4, EZ+4, st.EG+st.E_H)]
+                   (EX-4, EX+4, EZ-4, EZ+4, st.EG+st.E_H),
+                   (st.B_IN[0]+.4, st.B_IN[1]-.4, st.B_IN[2]+.4, st.B_IN[3]-.4, st.B_FLOOR),
+                   (st.T_CELLS[0]+.4, st.X_STAIR[0]-.4, st.T_IN[0]+.4, st.T_IN[1]-.4, st.B_FLOOR),
+                   (st.X_STAIR[1]+.4, st.ANNEX[1]-1.0, st.ANNEX[2]+1.0, st.ANNEX[3]-1.0, st.G)]
         checked = 0
         for x0, x1, z0, z1, level in regions:
             for x in np.arange(x0, x1+.01, .8):
@@ -169,6 +187,10 @@ class FrostlineTests(unittest.TestCase):
         for i in np.where((n[:, 1] > .3) & (n[:, 1] < .9999))[0]:
             x, y, z = cen[i]
             if st.RAMP_X[0] <= x <= st.RAMP_X[1] and st.RAMP_TOP_Z <= z <= st.RAMP_FOOT_Z: continue
+            if st.E_RAMP_X[0] <= x <= st.E_RAMP_X[1] and st.RAMP_TOP_Z <= z <= st.RAMP_FOOT_Z: continue
+            if st.B_STAIR[0] <= x <= st.B_STAIR[1] and st.B_STAIR[2] <= z <= st.B_STAIR[3]: continue
+            if st.SX <= x <= st.EAST_STAIR_FOOT_X and st.EAST_DOOR[0] <= z <= st.EAST_DOOR[1]: continue
+            if st.X_STAIR[0] <= x <= st.X_STAIR[1] and st.T_IN[0] <= z <= st.T_IN[1]: continue
             if abs(x) <= st.STAIR_X and st.STAIR_FOOT_Z <= z <= st.PORCH_Z: continue
             if rx0 <= x <= rx1 and st.SZ1 <= z <= st.REAR_STAIR_FOOT_Z: continue
             if abs(x-EX) <= 1.6 and EZ+st.E_RAMP[0] <= z <= EZ+st.E_RAMP[1]: continue
@@ -270,22 +292,31 @@ class FrostlineTests(unittest.TestCase):
     # --- Sightlines ---------------------------------------------------------
     def test_turrets_cannot_see_into_rooms(self):
         """No turret on the map has a clear line from its barrel to a player's
-        chest anywhere inside the station hall, generator room, command deck
-        or the outpost behind its baffle. Allowed: the airlock vestibules
-        between each door and its baffle."""
+        chest anywhere inside the station hall, rear hall, command deck, the
+        basement generator room, its tunnel, or the outpost behind its baffle.
+        Allowed: the vestibules between each door and its baffle."""
         spec, mesh, soup, _ = whole_map()
-        rooms = [(st.RAMP_X[1]+.6, st.IX-.6, st.BAFFLE_Z[1]+.6, st.PARTITION_Z[0]-.6, st.L1),
-                 (-st.IX+.6, st.IX-.6, st.PARTITION_Z[1]+.6, st.IZ1-.6, st.L1),
+        rooms = [(st.RAMP_X[1]+.6, st.E_RAMP_X[0]-.6, st.BAFFLE_Z[1]+.6, st.PARTITION_Z[0]-.6, st.L1),
+                 (-st.IX+.6, st.EAST_BAFFLE[0]-.6, st.PARTITION_Z[1]+.6, st.IZ1-.6, st.L1),
                  (-st.IX+.6, st.IX-.6, st.IZ0+.6, st.IZ1-.6, st.L2),
+                 (st.B_IN[0]+.6, st.B_BAFFLE[0]-.6, st.B_IN[2]+.6, st.B_IN[3]-.6, st.B_FLOOR),
+                 (st.B_BAFFLE[0], st.B_IN[1]-.6, st.B_BAFFLE[3]+.6, st.B_IN[3]-.6, st.B_FLOOR),
+                 (st.T_CELLS[0]+.6, st.X_STAIR[0]-.6, st.T_IN[0]+.6, st.T_IN[1]-.6, st.B_FLOOR),
                  (OX-st.OH+st.OW+.6, OX+st.OH-st.OW-.6, OZ-st.OH+st.OW+.6, OZ+st.O_BAFFLE_Z[0]-.6, st.OG)]
+        def no_floor(x, y, z):
+            if y == st.L2:
+                return any(x0 <= x <= x1 and st.OPENING_Z[0] <= z <= st.OPENING_Z[1] for x0, x1 in (st.RAMP_X, st.E_RAMP_X))
+            if y == st.L1:
+                bx0, bx1, bz0, bz1 = st.B_OPENING
+                return bx0-.3 <= x <= bx1+.3 and bz0 <= z <= bz1+.3
+            return False
         targets = []
         for b in spec['bases']:
             m = kit.Mesh(); m.origin = tuple(b['position']); m.yaw = math.radians(b['yaw'])
             for x0, x1, z0, z1, y in rooms:
                 for x in np.arange(x0, x1+.01, 1.0):
                     for z in np.arange(z0, z1+.01, 1.0):
-                        if y == st.L2 and st.RAMP_X[0] <= x <= st.RAMP_X[1] and st.OPENING_Z[0] <= z <= st.OPENING_Z[1]:
-                            continue          # the ramp opening has no floor
+                        if no_floor(x, y, z): continue   # ramp and stair openings have no floor
                         if soup.first(m.point((x, y+.1, z)), (0, 1, 0), 2.3) < 2.3: continue   # inside a prop
                         targets.append(m.point((x, y+LIFT+.8, z)))
         targets = np.array(targets)
@@ -298,6 +329,26 @@ class FrostlineTests(unittest.TestCase):
             clear = ~soup.blocked_many(starts, targets[near])
             self.assertEqual(int(clear.sum()), 0, (e['id'], targets[near][clear][:5]))
         self.assertGreater(len(targets), 1500)
+
+    def test_generators_are_underground_in_covered_cut_cells(self):
+        spec, mesh, soup, grid = whole_map()
+        cells = set(build.holes(spec))
+        self.assertEqual(len(cells), 2*sum((x1-x0)*(z1-z0)/64 for x0, x1, z0, z1 in st.HOLES.values()))
+        gens = [e for e in mesh.entities if e['kind'] == 'generator']
+        self.assertEqual(len(gens), 2)
+        for e, b in zip(gens, spec['bases']):
+            x, y, z = e['position']
+            self.assertIn(int(z//8)*256+int(x//8), cells, e['id'])
+            self.assertLess(y, b['position'][1]+st.G, 'generator is below the shelf')
+        # Every cut cell is roofed at or above ground: no exposed hole or lid.
+        for c in cells:
+            ix, iz = c % 256, c//256
+            for fx in (.1, .5, .9):
+                for fz in (.1, .5, .9):
+                    x, z = (ix+fx)*8, (iz+fz)*8
+                    ground = build.terrain_height(x, z, grid)
+                    t = soup.first((x, ground+60, z), (0, -1, 0))
+                    self.assertGreater(ground+60-t, ground-.1, (c, x, z, 'exposed cut'))
 
     # --- Terrain, sites, flora ----------------------------------------------
     def test_terrain_is_symmetric_steep_and_matches_targets(self):
@@ -324,6 +375,7 @@ class FrostlineTests(unittest.TestCase):
         for b in spec['bases']:
             oy = b['position'][1]
             checks = [(x, z, st.G) for x in np.arange(-st.SX, st.SX+.1, 2) for z in np.arange(st.STAIR_FOOT_Z-4, st.REAR_STAIR_FOOT_Z+4, 2)]
+            checks += [(x, z, st.G) for x in np.arange(st.SX, st.ANNEX[1]+2.1, 2) for z in np.arange(st.ANNEX[2]-2, st.EAST_DOOR[1]+3, 2)]
             checks += [(x, z, st.G) for x in np.arange(AX-st.APRON_HALF[0], AX+st.APRON_HALF[0]+.1, 2)
                        for z in np.arange(AZ-st.APRON_HALF[1], AZ+st.APRON_HALF[1]+.1, 2)]
             checks += [(x, z, st.OG) for x in np.arange(OX-st.OH, OX+st.OH+.1, 2) for z in np.arange(OZ-st.OH, OZ+st.OH+st.O_PORCH_D+.1, 1.5)]
@@ -384,6 +436,27 @@ class FrostlineTests(unittest.TestCase):
                 digests.append({f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in out.iterdir()})
             self.assertEqual(digests[0], digests[1])
             self.assertEqual(len(digests[0]), 7)
+
+class RouteCounts(unittest.TestCase):
+    """Walking routes on the committed pack (assets/route_checks.py): the
+    station is not a one-door camp. At least three independent ways into its
+    floors, two onto the flag deck, and exactly two into the generator room."""
+    def test_station_routes(self):
+        from assets import route_checks
+        pack = route_checks.Pack(Path(__file__).resolve().parent.parent/'assets/maps/frostline')
+        for base in build.spec()['bases']:
+            ox, oy, oz = base['position']
+            def box(lx0, lx1, ly0, ly1, lz0, lz1):
+                (ax, az), (bx, bz) = build.to_world(base, lx0, lz0), build.to_world(base, lx1, lz1)
+                return (min(ax, bx), max(ax, bx), oy+ly0, oy+ly1, min(az, bz), max(az, bz))
+            found = route_checks.base_entries(pack, (ox, oz), {
+                'station': box(-st.SX, st.SX, st.L1-1, st.ROOF-1, st.SZ0, st.SZ1),
+                'deck': box(-st.SX, st.SX, st.L2-1, st.L2+1.5, st.SZ0, st.SZ1),
+                'generator': box(*st.B_IN[:2], st.B_FLOOR-.5, st.B_FLOOR+1.5, *st.B_IN[2:])})
+            self.assertGreaterEqual(len(found['station']), 3, (base['team'], found['station']))
+            self.assertGreaterEqual(len(found['deck']), 2, (base['team'], found['deck']))
+            self.assertEqual(len(found['generator']), 2, (base['team'], found['generator']))
+
 
 class SpawnForwardClearance(unittest.TestCase):
     """Every committed spawn faces open floor: a clear body-width view for

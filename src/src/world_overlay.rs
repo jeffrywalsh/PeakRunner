@@ -49,6 +49,35 @@ pub fn name_tag(viewer: &Player, viewer_idx: usize, target: &Player, target_idx:
 
 fn head(p: &Player) -> Vec3 { p.pos + Vec3::Y * 2.35 }
 
+/// Top of the kit model above its entity point (generator cap, sensor vane,
+/// turret head), so the ceiling probe starts clear of the model itself.
+fn model_top(kind: Kind) -> f32 {
+    match kind { Kind::Generator => 3.3, Kind::Sensor => 2.1, _ => 1.6 }
+}
+
+/// Where a hit bar hangs: above the equipment, but never through a low
+/// ceiling (a generator in a basement), so the bar stays in the room it
+/// belongs to instead of poking into the floor above. With no room above the
+/// model, it hangs beside the equipment on the viewer's side.
+pub fn bar_anchor(map: peakrunner_core::terrain::MapId, d: &peakrunner_core::equipment::Definition, eye: Vec3) -> Vec3 {
+    let base = d.pos();
+    let lift = d.radius + 1.1;
+    let top = model_top(d.kind).min(lift - 0.2) + 0.05;
+    let span = lift + 0.5 - top;
+    let from = base + Vec3::Y * top;
+    let ceiling = peakrunner_core::map_pack::on(map)
+        .and_then(|pack| pack.sweep(from, from + Vec3::Y * span, 0.0))
+        .map(|(t, _)| top + span * t);
+    match ceiling {
+        None => base + Vec3::Y * lift,
+        Some(c) if c - 0.4 >= top + 0.2 => base + Vec3::Y * (c - 0.4).min(lift),
+        Some(_) => {
+            let side = (eye - base).with_y(0.0).normalize_or(Vec3::X);
+            base + side * (d.radius + 0.4) + Vec3::Y * 1.0
+        }
+    }
+}
+
 fn with_alpha(c: Color32, a: f32) -> Color32 {
     Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (c.a() as f32 * a.clamp(0.0, 1.0)) as u8)
 }
@@ -80,7 +109,7 @@ pub fn draw(ui: &egui::Ui, world: &World, state: &mut OverlayState, dt: f32) {
     state.note(&world.equipment, dt);
     for (i, (d, s)) in defs.iter().zip(&world.equipment).enumerate() {
         if !matches!(d.kind, Kind::Generator | Kind::Turret | Kind::Sensor) { continue; }
-        let anchor = d.pos() + Vec3::Y * (d.radius + 1.1);
+        let anchor = bar_anchor(world.map, d, eye);
         let distance = eye.distance(anchor);
         let alpha = fade(distance, HIT_BAR_RANGE);
         if alpha <= 0.0 { continue; }
@@ -198,6 +227,31 @@ mod tests {
         assert!(project(eye, dir, 70.0, rect, Vec3::Z * 50.0).is_none(), "behind the camera");
         assert!(project(eye, dir, 70.0, rect, Vec3::new(500.0, 0.0, -50.0)).is_none(), "off the side of the screen");
         assert!(project(eye, dir, 70.0, rect, Vec3::new(10.0, 0.0, -50.0)).unwrap().x > centre.x, "right is right");
+    }
+
+    /// Generator bars in basements: visible from inside the generator room,
+    /// never from the floor above. Cairnhold's well leaves room over the
+    /// generator; Dustreach's cistern doesn't, so its bar hangs beside it.
+    #[test]
+    fn basement_bars_stay_in_their_room() {
+        // (map, a viewpoint in the room, a viewpoint on the floor above), in
+        // base-local coordinates (team 1 is unrotated; team 0 is turned 180).
+        let cases = [(MapId::StonehengeClone, Vec3::new(13.2, -1.65, -3.0), Vec3::new(6.8, 1.7, 7.7)),
+                     (MapId::DesertOfDeathClone, Vec3::new(-12.4, -0.2, -15.4), Vec3::new(0.0, 6.7, -5.0))];
+        for (map, inside, above) in cases {
+            let info = peakrunner_core::terrain::info(map);
+            let mut w = World::new(); w.set_map(map);
+            for d in peakrunner_core::equipment::definitions(map).iter().filter(|d| d.kind == Kind::Generator) {
+                let home = if d.team == 0 { info.ember } else { info.glacier };
+                let s = if d.team == 0 { -1.0 } else { 1.0 };
+                let world = |l: Vec3| Vec3::new(home.x + s * l.x, home.y + l.y, home.z + s * l.z);
+                let (inside, above) = (world(inside), world(above));
+                let seen = bar_anchor(map, d, inside);
+                assert!(w.sight_clear(inside, seen), "{map:?} generator {}: bar {seen} hidden from its room", d.id);
+                let from_above = bar_anchor(map, d, above);
+                assert!(!w.sight_clear(above, from_above), "{map:?} generator {}: bar {from_above} visible from above", d.id);
+            }
+        }
     }
 
     #[test]

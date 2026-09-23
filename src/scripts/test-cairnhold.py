@@ -83,7 +83,14 @@ class CairnholdTests(unittest.TestCase):
 
     # --- Floors, headroom and standing support ----------------------------
     def test_room_floors_have_floor_and_headroom(self):
-        samples = [(x, z, 0) for x in (-12, -8, 8, 12) for z in (-13, -6, 2)]      # hall
+        hx0, hx1, hz0, hz1 = base.HALL_HOLE
+        samples = [(x, z, 0) for x in (-12, -8, 8, 12) for z in (-13, -6, 2)
+                   if not (hx0 <= x <= hx1 and hz0 <= z <= hz1)]                        # hall, off the stair opening
+        samples += [(x, z, base.VAULT_FLOOR) for x in (4.2, 9.8) for z in (-8, -2)]      # vault
+        samples += [(x, z, base.VAULT_FLOOR) for x in (12.0, 14.4) for z in (4, 11)]      # walkway by the well
+        samples += [(x, z, base.PIT_FLOOR) for x, z in ((4.0, 11.2), (9.6, 11.2), (6.8, 4.4))]  # generator well
+        samples += [(x, 8, 3.0) for x in (48, 64, 84)] + [(84, z, 3.0) for z in (-4, -16)]  # sally port, level runs
+        samples += [(x, z, base.EXIT_GROUND) for x in (82, 86) for z in (-42.2, -37)]    # exit house
         samples += [(x, z, 0) for x in (-12, 12) for z in (6, 10)]                  # inventory room
         samples += [(x, 16, 0) for x in (0, 10, 13)]                                # generator room
         samples += [(x, z, base.HUT_FLOOR) for x in (-5, 0, 6) for z in (base.HZ0+4, base.HZ0+12, base.HZ0+20)]  # hut
@@ -135,6 +142,11 @@ class CairnholdTests(unittest.TestCase):
         regions.append((px-H, px+H, pz-H, pz+H, base.PAD_TOP))
         bx, bz = base.BATTERY; r = base.BATTERY_R*.9
         regions.append((bx-r, bx+r, bz-r, bz+r, base.BATTERY_GROUND+base.BATTERY_H))
+        vx0, _, vz0, vz1 = base.VAULT
+        regions += [(vx0+.6, base.STAIR[0]-.6, vz0+.6, vz1-.6, base.VAULT_FLOOR),
+                    (base.PIT[0]+.6, base.PIT[1]-.6, base.PIT[2]+.6, base.PIT[3]-.6, base.PIT_FLOOR),
+                    (41.5, 87.0, 5.4, 10.6, 3.0), (81.4, 86.6, -19.5, 4.0, 3.0),
+                    (81.4, 86.6, -42.6, -36.2, base.EXIT_GROUND)]
         checked = 0
         for x0, x1, z0, z1, level in regions:
             for x in np.arange(x0, x1+.01, .8):
@@ -154,6 +166,12 @@ class CairnholdTests(unittest.TestCase):
         for i in np.where((n[:, 1] > .3) & (n[:, 1] < .9999))[0]:
             x, y, z = cen[i]
             if base.TX0 <= x <= base.TX1 and base.TZ0 <= z <= base.TZ1: continue        # trench floor/roof
+            if base.STAIR[0] <= x <= base.STAIR[1] and base.STAIR[2] <= z <= base.STAIR[3]: continue  # vault stair
+            if base.PIT_RAMP[0] <= x <= base.PIT_RAMP[1] and base.PIT_RAMP[2] <= z <= base.PIT_RAMP[3]: continue  # well ramp
+            if 16 <= x <= 41.1 and base.T_EAST[2] <= z <= base.T_EAST[3]: continue       # sally port, east climb
+            if base.T_SOUTH[0] <= x <= base.T_SOUTH[1] and -36 <= z <= -20: continue    # sally port, south climb
+            if y > 5 and any(x0 <= x <= x1 and z0 <= z <= z1 for name, (x0, x1, z0, z1) in base.HOLES.items()
+                             if name.startswith('tunnel')): continue                     # lids: ground over the tunnel
             if r0 <= x <= r1 and zh <= z <= zl: continue                                 # hut ramp
             if base.R1[0] <= x <= base.R1[1] and base.R1[2] <= z <= base.R1[3]: continue  # tower R1
             if base.R2[0] <= x <= base.R2[1] and base.R2[3] <= z <= base.R2[2]: continue  # tower R2
@@ -305,12 +323,131 @@ class CairnholdTests(unittest.TestCase):
         for h in (.3, 1.0, 1.8):
             self.assertGreater(self.soup.first((base.BRIDGE[0]+1, base.TOWER_TOP+h, 77.8), (1, 0, 0)), 9, h)
 
+    # --- Vault and sally port (v3) ------------------------------------------
+    def test_vault_has_exactly_two_ways_in(self):
+        """The vault's walls have one opening (the tunnel door); the only other
+        way in is the stair from the hall. Its ceiling is closed except over
+        the stair, and the generator stands on its floor."""
+        F = base.VAULT_FLOOR
+        vx0, vx1, vz0, vz1 = base.VAULT
+        gx, gy, gz = self.anchors['generator']
+        px0, px1, pz0, pz1 = base.PIT
+        self.assertTrue(px0 < gx < px1 and pz0 < gz < pz1 and gy == base.PIT_FLOOR)
+        # The 5.8 m kit generator clears the ceiling with room for its hit bar
+        # (3.9 m over its entity point, 2.5 m up the model).
+        self.assertGreater(self.soup.first((gx+2.6, base.PIT_FLOOR+5.9, gz), (0, 1, 0)), .9, 'no room over the generator')
+        self.assertLess(base.PIT_FLOOR+2.5+3.9, base.VAULT_CEIL-.3)
+        # Its ramp is under 30 degrees and closed beneath.
+        r0, r1, rza, rzb = base.PIT_RAMP
+        self.assertLess(math.degrees(math.atan((F-base.PIT_FLOOR)/(rzb-rza))), 30)
+        for z in np.arange(rza+.3, rzb-.2, .6):
+            y = F+(base.PIT_FLOOR-F)*(z-rza)/(rzb-rza)
+            t, ny = self.soup.hits(((r0+r1)/2, y+1, z), (0, -1, 0))
+            self.assertLess(abs(1-t[0]), .02, z); self.assertGreater(ny[0], .85, z)
+        step = .25
+        sides = {'south': [((x, vz0+.3), (0, 0, -1)) for x in np.arange(vx0+.3, base.STAIR[0]-.29, step)],
+                 'north': [((x, vz1-.3), (0, 0, 1)) for x in np.arange(vx0+.3, vx1-.29, step)],
+                 'west': [((vx0+.3, z), (-1, 0, 0)) for z in np.arange(vz0+.3, vz1-.29, step)],
+                 'east': [((vx1-.3, z), (1, 0, 0)) for z in np.arange(base.STAIR[3]+.4, vz1-.29, step)]}
+        runs = {}
+        for name, probes in sides.items():
+            widths, width = [], 0
+            for (x, z), d in probes + [((0, 0), None)]:
+                if d is not None and all(self.soup.first((x, F+h, z), d, 2.0) == np.inf for h in (.6, 1.6)): width += step
+                elif width: widths.append(width); width = 0
+            runs[name] = widths
+        self.assertEqual(runs['south'], []); self.assertEqual(runs['west'], []); self.assertEqual(runs['north'], [])
+        self.assertEqual(len(runs['east']), 1, runs['east'])
+        self.assertAlmostEqual(runs['east'][0], base.TUN_DOOR[1]-base.TUN_DOOR[0]-.3, delta=.6)
+        for x in np.arange(vx0+.5, base.STAIR[0], 1.0):
+            for z in np.arange(vz0+.5, vz1, 1.0):
+                self.assertLess(self.soup.first((x, F+.3, z), (0, 1, 0)), 5.5, (x, z, 'open ceiling'))
+        # The stair: under 30 degrees, headroom all the way, closed beneath its open edge.
+        s0, s1, zh, zf = base.STAIR
+        self.assertLess(math.degrees(math.atan(-F/(zf-zh))), 30)
+        for z in np.arange(zh+.3, zf-.2, .7):
+            for x in (s0+.6, (s0+s1)/2, s1-.6):
+                y = base.stair_y(z)
+                t, ny = self.soup.hits((x, y+1, z), (0, -1, 0))
+                self.assertLess(abs(1-t[0]), .02, (x, z)); self.assertGreater(ny[0], .85, (x, z))
+                # The engine's body sweep reaches 2.64 m above a surface.
+                self.assertGreater(self.soup.first((x, y+.2, z), (0, 1, 0)), 2.6, (x, z, 'headroom'))
+            if base.stair_y(z)-.9 > F+.3:
+                self.assertLess(self.soup.first((s0-1, F+.3, z), (1, 0, 0)), 1.01, (z, 'open under the stair'))
+
+    def test_sally_port_is_walkable_roofed_and_lidded(self):
+        """Along the whole tunnel: a floor at `tunnel_floor`, 4.3 m of headroom,
+        walls either side, no slope over 22 degrees, and its lid top flush with
+        the ring height it pins the terrain to."""
+        path = [(x, 8.0) for x in np.arange(16.3, 84.0, .7)] + [(84.0, z) for z in np.arange(8.0, -42.5, -.7)]
+        for (x0, z0), (x1, z1) in zip(path, path[1:]):
+            dy = base.tunnel_floor(x1, z1)-base.tunnel_floor(x0, z0)
+            self.assertLess(math.degrees(math.atan(abs(dy)/math.hypot(x1-x0, z1-z0))), 22.0, (x0, z0))
+        for x, z in path:
+            y = base.tunnel_floor(x, z)
+            t, ny = self.soup.hits((x, y+1, z), (0, -1, 0))
+            self.assertLess(abs(1-t[0]), .03, (x, z)); self.assertGreater(ny[0], .9, (x, z))
+            self.assertGreater(self.soup.first((x, y+.2, z), (0, 1, 0)), 4.2, (x, z, 'headroom'))
+            if x > base.T_SOUTH[0] and z > base.T_SOUTH[3]-.1: continue                  # the open corner
+            if z < base.T_EXIT[3]: continue                                              # exit house (door, vestibule)
+            across = (0, 0, 1) if z > base.T_SOUTH[3]-.1 else (1, 0, 0)
+            for s in (1, -1):
+                self.assertLess(self.soup.first((x, y+1.2, z), np.multiply(across, s), 8.0), 3.4, (x, z, 'wall'))
+        for name in ('tunnel east', 'tunnel south'):
+            x0, x1, z0, z1 = base.HOLES[name]
+            for x in np.arange(x0+.2, x1, 2.0):
+                for z in np.arange(z0+.2, z1, 2.0):
+                    t = self.soup.first((x, 60, z), (0, -1, 0))
+                    self.assertAlmostEqual(60-t, base.ring_height(name, x, z), delta=.02, msg=(name, x, z))
+
+    def test_exit_vestibule_hides_the_tunnel(self):
+        """The battery's barrel sees nothing past the exit house's vestibule,
+        and nobody on the bench outside sees up the tunnel. The door,
+        vestibule and tunnel still connect for a walking body."""
+        ox0, ox1, oz0, oz1 = base.T_EXIT
+        g = base.EXIT_GROUND
+        fx0, fx1, fz0, fz1 = base.EXIT_BAFFLE
+        house = [(x, g+1.5, z) for x in np.arange(ox0+1.4, fx0-.5, 1.0) for z in np.arange(oz0+1.4, oz1, 1.0)]
+        tunnel = [(x, base.south_floor(z)+1.5, z) for x in (81.6, 84.0, 86.4) for z in np.arange(-35.5, -10, 2.0)]
+        bx, bz = base.BATTERY
+        barrel = [(bx+dx, base.BATTERY_GROUND+base.BATTERY_H+2.6, bz+dz) for dx in (-2.8, 0, 2.8) for dz in (-2.8, 0, 2.8)]
+        bench = []
+        for ang in np.linspace(-.5*np.pi, .5*np.pi, 13):                  # the bench east of the door
+            for dist in (4.0, 10.0, 25.0):
+                for h in (1.7, 4.0, 9.0):
+                    bench.append((ox1+dist*math.cos(ang), g+h, sum(base.EXIT_DOOR)/2+dist*math.sin(ang)))
+        for viewers, targets in ((barrel, house+tunnel), (bench, tunnel)):
+            starts = np.array([v for v in viewers for _ in targets], float)
+            ends = np.array([t for _ in viewers for t in targets], float)
+            blocked = self.soup.blocked_many(starts, ends)
+            self.assertTrue(blocked.all(), [tuple(starts[i])+tuple(ends[i]) for i in np.flatnonzero(~blocked)[:3]])
+        door_z = sum(base.EXIT_DOOR)/2
+        route = [(ox1+3, door_z), ((fx1+ox1-.8)/2, door_z), ((fx1+ox1-.8)/2, (fz0+oz0+.8)/2),
+                 (fx0-1.6, (fz0+oz0+.8)/2), (fx0-1.6, oz1+1.0)]
+        for (x0, z0), (x1, z1) in zip(route, route[1:]):
+            for off in (-.5, 0, .5):     # a body's width, not just a line
+                dx, dz = x1-x0, z1-z0; n = math.hypot(dx, dz); px, pz = -dz/n*off, dx/n*off
+                a, c = np.array((x0+px, g+1.2, z0+pz)), np.array((x1+px, g+1.2, z1+pz))
+                d = c-a
+                self.assertEqual(self.soup.first(a, d/n, n), np.inf, ((x0, z0), (x1, z1), off))
+
+    def test_no_spawn_camps_the_generator(self):
+        """No spawn in the hall, the vault or the tunnel; all at least 15 m in
+        a straight line (further on foot) from the stair head."""
+        hx, _, hz = self.anchors['stair_head']
+        for x, y, z, _ in self.anchors['spawn_points']:
+            self.assertFalse(-base.BX < x < base.BX and base.BAFFLE_Z[1] < z < base.PART_A[0] and y < 2, (x, z, 'in the hall'))
+            self.assertGreater(y, 0, (x, z, 'below the hall floor'))
+            self.assertGreaterEqual(math.hypot(x-hx, z-hz), 15.0, (x, z))
+
     def test_hole_cells_never_fall_through(self):
         """Every point over a dug-in footprint has collision under it at or
         above that structure's lowest floor, so there is no seam to drop
         through between the cut terrain and the structure."""
-        floors = {'bunker': lambda z: -.05, 'trench': lambda z: base.trench_floor(z)-.05,
-                  'hut': lambda z: base.HUT_FLOOR-.05}
+        floors = {'bunker': lambda x, z: -.05, 'trench': lambda x, z: base.trench_floor(z)-.05,
+                  'hut': lambda x, z: base.HUT_FLOOR-.05,
+                  'tunnel east': lambda x, z: base.east_floor(x)-1.05, 'tunnel south': lambda x, z: base.south_floor(z)-1.05,
+                  'sally exit': lambda x, z: base.EXIT_GROUND-1.05}
         for name, (x0, x1, z0, z1) in base.HOLES.items():
             xs = np.concatenate([np.arange(x0+.1, x1, 1.0), [x0+.02, x1-.02]])
             zs = np.concatenate([np.arange(z0+.1, z1, 1.0), [z0+.02, z1-.02]])
@@ -318,7 +455,7 @@ class CairnholdTests(unittest.TestCase):
                 for z in zs:
                     t = self.soup.first((x, 90, z), (0, -1, 0))
                     self.assertLess(t, np.inf, (name, x, z))
-                    self.assertGreaterEqual(90-t, floors[name](z), (name, x, z, 90-t))
+                    self.assertGreaterEqual(90-t, floors[name](x, z), (name, x, z, 90-t))
 
     def test_trench_is_sunk_flush_with_the_hillside(self):
         spec, _, _, grid, _ = self.whole_map()
@@ -371,11 +508,19 @@ class CairnholdTests(unittest.TestCase):
         baffle) and the ramp directly under the stand's open roof hatch."""
         spec, mesh, soup, _, _ = self.whole_map()
         tx0, tx1, tz0, tz1 = base.TW
-        rooms = [(-15, 15, base.BAFFLE_Z[1]+.6, 19, lambda z: 0.0),
-                 (base.TX0+1.6, base.TX1-1.6, base.TZ0+.6, base.TZ1-.6, base.trench_floor),
-                 (base.HX0+1.4, base.HX1-1.4, base.HZ0+1.4, base.HZ1-1.4, lambda z: base.HUT_FLOOR),
-                 (tx0+1.4, tx1-1.4, tz0+1.4, tz1-1.4, lambda z: base.HUT_ROOF),
-                 (tx0+1.4, tx1-1.4, base.LANDING_Z[0]+.4, base.LANDING_Z[1]-.3, lambda z: base.TOWER_MID)]
+        vx0, _, vz0, vz1 = base.VAULT
+        ex = base.EXIT_BAFFLE
+        rooms = [(-15, 15, base.BAFFLE_Z[1]+.6, 19, lambda x, z: 0.0),
+                 (base.TX0+1.6, base.TX1-1.6, base.TZ0+.6, base.TZ1-.6, lambda x, z: base.trench_floor(z)),
+                 (base.HX0+1.4, base.HX1-1.4, base.HZ0+1.4, base.HZ1-1.4, lambda x, z: base.HUT_FLOOR),
+                 (tx0+1.4, tx1-1.4, tz0+1.4, tz1-1.4, lambda x, z: base.HUT_ROOF),
+                 (tx0+1.4, tx1-1.4, base.LANDING_Z[0]+.4, base.LANDING_Z[1]-.3, lambda x, z: base.TOWER_MID),
+                 (vx0+.6, base.STAIR[0]-.6, vz0+.6, base.PIT_RAMP[2]-.2, lambda x, z: base.VAULT_FLOOR),  # vault
+                 (base.PIT[0]+.6, base.PIT[1]-.6, base.PIT[2]+.6, base.PIT[3]-.6, lambda x, z: base.PIT_FLOOR),  # well
+                 (base.STAIR[0]+.6, base.VAULT[1]-.6, base.STAIR[3]+.4, vz1-.6, lambda x, z: base.VAULT_FLOOR),  # walkway
+                 (16.6, 86.6, 5.4, 10.6, lambda x, z: base.east_floor(x)),                     # sally port, east
+                 (81.4, 86.6, -38.4, 4.0, lambda x, z: base.south_floor(z)),                   # sally port, south
+                 (81.4, ex[0]-.6, -42.6, -36.2, lambda x, z: base.EXIT_GROUND)]                # exit house, off the vestibule
         r0, r1, zl, zh = base.RAMP; h0, h1, hz0, hz1 = base.HATCH
         targets = []
         for b in spec['bases']:
@@ -383,7 +528,7 @@ class CairnholdTests(unittest.TestCase):
             for x0, x1, z0, z1, floor in rooms:
                 for x in np.arange(x0, x1+.01, 1.0):
                     for z in np.arange(z0, z1+.01, 1.0):
-                        y = floor(z)
+                        y = floor(x, z)
                         if y != base.TOWER_MID and h0-.5 <= x <= h1 and hz0 <= z <= hz1+2: continue   # hatch columns
                         if soup.first(m.point((x, y+.1, z)), (0, 1, 0), 2.3) < 2.3: continue   # inside a prop
                         targets.append(m.point((x, y+LIFT+.8, z)))
@@ -442,16 +587,13 @@ class CairnholdTests(unittest.TestCase):
                         expected.add(int(wz//8)*256+int(wx//8))
         self.assertEqual(hole_set, expected)
         _, rings = build.holes_and_rings(spec)
-        spans = {'bunker': lambda z: (-4, base.ROOF),
-                 'trench': lambda z: (base.trench_wall_bottom(z), base.trench_roof(z)),
-                 'hut': lambda z: (base.HUT_FLOOR-5, base.HUT_ROOF)}
         for (vx, vz), y in rings.items():
             self.assertEqual(grid[vz, vx], y)
             for b in spec['bases']:
                 lx, lz = build.to_local(b, vx*8, vz*8)
                 for name, (x0, x1, z0, z1) in base.HOLES.items():
                     if x0-1e-6 <= lx <= x1+1e-6 and z0-1e-6 <= lz <= z1+1e-6:
-                        lo, hi = spans[name](lz)
+                        lo, hi = base.wall_span(name, lx, lz)
                         self.assertTrue(lo < y-b['position'][1] <= hi+1e-6, (name, lx, lz, y))
 
     def test_ground_stays_under_decks_ramps_and_the_ring(self):

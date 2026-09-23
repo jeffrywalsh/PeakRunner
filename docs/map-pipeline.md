@@ -75,7 +75,13 @@ Design checklist (each item has bitten us once):
   `equipment::acquire_target` (line of sight + per-type range profile).
 - **Walkable routes:** ramps need headroom and a floor opening above them, and
   closed undersides so players can't walk under a low ramp end. Shafts need an
-  open face per level. Check every route with body sweeps.
+  open face per level. Check every route with body sweeps. The engine's body
+  sweep reaches 2.64 m above a surface, so any ceiling edge over a ramp needs
+  about 2.8 m of clearance (Cairnhold's stair opening had to grow for this).
+- **Generator rooms:** the kit generator is 5.8 m tall and its hit bar hangs
+  6.4 m over its floor, so a generator room needs about 7 m of clear height (or
+  a well, as in Cairnhold). With less, the bar hangs beside the generator
+  (Dustreach's cistern). Keep spawns well away from the only ways in.
 - **Decoration is non-solid.** Trim, liners, markings, lamps and landing
   circles use `solid=False`, so nothing slick or snaggy sits on a floor.
 - **Budget:** at most 4500 collision triangles per base, including its

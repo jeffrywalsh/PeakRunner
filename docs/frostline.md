@@ -26,11 +26,12 @@ What's new and ours:
 - **Name:** Frostline. The other candidates were Whitecap Station and Hollowdrift.
 - **Bases:** on the ground. Each team has a polar research station on a
   mountain shelf, raised on an insulated plinth.
-  - Level 1 has the spawn hall, two inventory stations and the generator room.
+  - Level 1 has the spawn hall with two inventory stations and a rear hall.
   - Level 2 is the command deck with the flag, glazed window bands and a roof
     hatch for attackers.
-  - A ramp along the west wall joins the levels.
-  - Every door is an airlock: a narrow porch outside and a baffle wall inside.
+  - Ramps along the west and east walls join the levels (see the anti-camp
+    pass below).
+  - Every door has a baffle wall inside; the front one is also a porch.
 - **Relay outpost:** a hut 20 m above the station floor on the right-flank
   ridge shoulder, with an inventory station, a repair pad, and a turret and
   sensor on the roof. Three of the eight team spawns are here.
@@ -124,10 +125,46 @@ takes about 20 s with the bake, and two builds are byte-identical.
 - Two outpost spawns were re-aimed or moved to face open floor
   (`scripts/assets/spawn_checks.py`).
 
+## Anti-camp pass (station v3)
+
+The user found the station "easy to camp in. one way in and out". A walk-graph
+check (`scripts/assets/route_checks.py`) confirmed it: two ways into the
+floors (front airlock, and a rear door that led straight through the
+generator room), **one** approach to the flag deck (the west ramp) and a
+generator room on the rear route. Changes, per base:
+
+- **East side door** into the rear hall, with a baffle inside and a stair down
+  to the shelf. The station now has doors on three sides.
+- **East ramp**, the mirror of the west one. The flag deck has two approaches
+  from opposite sides, and you can leave by the other ramp.
+- **Basement generator room** under the hall, 7 m below the hall floor
+  (the kit generator is 5.8 m tall), in cut terrain cells (6 per base). It has
+  exactly two ways in: a railed stair down from the hall, and a tunnel door
+  behind a baffle.
+- **Tunnel** (6.4 m wide, 3.6 m headroom) east under the shelf to a sunken
+  stair inside a new **service shed**, whose south door has a baffle. A cable
+  duct covers the short lid between the station and the shed, so no cut cell
+  is exposed.
+- **Spawns** moved off the old choke: two in the front hall, one in the rear
+  hall, two on the deck, three at the outpost. None in the basement.
+
+Route counts on the committed pack, both teams (walking only, no jets):
+
+| Region | Before | After |
+|---|---|---|
+| Ways into the station floors | 2 | 4 (front, rear, east door, up from the basement via the shed) |
+| Approaches to the flag deck | 1 | 2 (west and east ramps) |
+| Ways into the generator room | 2 (on the rear route) | exactly 2 (hall stair, tunnel) |
+
+Collision is 2,366 triangles per base (budget 4,500); 19,976 render triangles
+for the map; 12 lightmap pages. `test-frostline.py` checks the route counts,
+the covered cut cells, the new floors, stairs and ramps, and that no turret can
+see into the basement, tunnel or halls.
+
 ## Known gaps
 
-- One relay-outpost spawn faces its baffle about 4.5 m ahead; walking straight
-  out bumps the wall. Worth re-aiming in the cleanup pass.
+- Bots don't use the basement stair or tunnel.
+- The roof hatch is a drop-in only; the walk-only route check doesn't count it.
 - **Not playtested by a human:** skiing feel on 36° median slopes, how far the
   outpost is from the station, and how readable the fog is are all unverified.
 - No real glow or bloom; the lit surfaces are bright textures.

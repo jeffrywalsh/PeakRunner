@@ -3304,15 +3304,24 @@ mod line_of_sight_tests {
         let to_world=|team:u8,lx:f32,y:f32,lz:f32| if team==0 {
             Vec3::new(info.ember.x-lx,info.ember.y+y,info.ember.z-lz)
         } else {Vec3::new(info.glacier.x+lx,info.glacier.y+y,info.glacier.z+lz)};
-        let trench=|z:f32| 22.*((z-20.)/56.).clamp(0.,1.);
-        let level=|y:f32| move |_z:f32| y;
-        // (x0,x1,z0,z1,floor(z),skip hatch columns)
-        let rooms:[(f32,f32,f32,f32,&dyn Fn(f32)->f32,bool);5]=[
-            (-15.,15.,-15.,19.,&level(0.),false),       // bunker: spawn hall, stores, generator
+        let trench=|_x:f32,z:f32| 22.*((z-20.)/56.).clamp(0.,1.);
+        let level=|y:f32| move |_x:f32,_z:f32| y;
+        // Sally port floors: vault door -6 -> 3 over x 17..41; south leg 3 -> 8 over z -20..-36.
+        let east=|x:f32,_z:f32| -6.+9.*((x-17.)/24.).clamp(0.,1.);
+        let south=|_x:f32,z:f32| 3.+5.*((-20.-z)/16.).clamp(0.,1.);
+        // (x0,x1,z0,z1,floor(x,z),skip hatch columns)
+        let rooms:[(f32,f32,f32,f32,&dyn Fn(f32,f32)->f32,bool);11]=[
+            (-15.,15.,-15.,19.,&level(0.),false),       // bunker: hall, inventory and back rooms
             (1.6,6.4,20.6,75.4,&trench,false),            // covered trench
             (-6.6,14.6,77.4,98.6,&level(22.),true),       // guard hut
             (3.4,14.6,77.4,94.6,&level(29.),true),        // tower floor over the hut
-            (3.4,14.6,92.4,94.9,&level(35.),false)];      // tower landing
+            (3.4,14.6,92.4,94.9,&level(35.),false),       // tower landing
+            (3.8,10.6,-9.2,-0.8,&level(-6.),false),       // vault (generator room)
+            (3.8,9.8,4.,11.4,&level(-8.2),false),         // generator well
+            (11.8,14.6,2.2,11.4,&level(-6.),false),       // walkway to the tunnel door
+            (16.6,86.6,5.4,10.6,&east,false),             // sally port, east leg
+            (81.4,86.6,-35.4,4.,&south,false),            // sally port, south leg
+            (81.4,84.4,-42.6,-36.2,&level(8.),false)];    // exit house past its vestibule
         let (mut sampled,mut seen)=(0,Vec::new());
         for d in defs.iter().filter(|d|matches!(d.kind,Kind::Turret)) {
             let profile=equipment::profile(d.kind,d.weapon).unwrap();
@@ -3320,7 +3329,7 @@ mod line_of_sight_tests {
                 for (r,&(x0,x1,z0,z1,floor,hatch)) in rooms.iter().enumerate() {
                     let mut lx=x0; while lx<=x1 { let mut lz=z0; while lz<=z1 {
                         if !(hatch && (9.5..=15.2).contains(&lx) && (80.0..=94.0).contains(&lz)) {
-                            let y=floor(lz);
+                            let y=floor(lx,lz);
                             let probe=to_world(team,lx,y+1.5,lz);
                             if let Some((fy,_))=pack.floor(probe) {
                                 let pos=Vec3::new(probe.x,fy+1.2,probe.z);
@@ -3341,8 +3350,8 @@ mod line_of_sight_tests {
             }
         }
         assert!(sampled>3000,"too few interior samples ({sampled})");
-        let by_room:Vec<usize>=(0..5).map(|r|seen.iter().filter(|s|s.1==r).count()).collect();
-        assert!(seen.is_empty(),"{} interior points visible to turrets (bunker, trench, hut, tower floor, landing: {by_room:?}), e.g. {:?}",
+        let by_room:Vec<usize>=(0..11).map(|r|seen.iter().filter(|s|s.1==r).count()).collect();
+        assert!(seen.is_empty(),"{} interior points visible to turrets (bunker, trench, hut, tower floor, landing, vault, well, walkway, east, south, exit: {by_room:?}), e.g. {:?}",
             seen.len(),&seen[..seen.len().min(8)]);
     }
 
@@ -3388,9 +3397,12 @@ mod line_of_sight_tests {
     fn frostline_and_dustreach_turrets_cannot_see_into_base_rooms() {
         // (x0, x1, z0, z1, floor above the base origin)
         let frost:&[(f32,f32,f32,f32,f32)]=&[
-            (-9.8,12.8,-9.4,5.4,0.),       // station hall, east of the ramp
-            (-12.8,12.8,7.2,12.8,0.),      // generator room
+            (-9.8,9.8,-9.4,5.4,0.),        // station hall, between the two ramps
+            (-12.8,10.,7.2,12.8,0.),       // rear hall, west of the east door's baffle
             (-12.8,12.8,-12.8,12.8,7.5),   // command deck (flag level)
+            (-6.8,4.2,-6.8,6.8,-7.),       // basement generator room, west of its baffle
+            (4.8,6.8,1.,6.8,-7.),          // basement, north of the baffle
+            (8.6,15.4,-6.6,-1.4,-7.),      // tunnel to the service shed
             (98.1,109.9,-77.9,-69.,20.)];  // relay outpost behind its baffle
         let dust:&[(f32,f32,f32,f32,f32)]=&[
             (-12.6,12.6,-11.8,-0.6,5.),    // keep spawn hall
@@ -3406,9 +3418,11 @@ mod line_of_sight_tests {
             let to_world=|team:u8,lx:f32,y:f32,lz:f32| if team==0 {
                 Vec3::new(info.ember.x-lx,info.ember.y+y,info.ember.z-lz)
             } else {Vec3::new(info.glacier.x+lx,info.glacier.y+y,info.glacier.z+lz)};
-            // Frostline's command deck has no floor over the ramp opening.
-            let skip=|lx:f32,y:f32,lz:f32| map==MapId::SnowblindClone && y==7.5
-                && (-13.4..=-10.4).contains(&lx) && (-10.0..=-2.6).contains(&lz);
+            // Frostline has no floor over its two ramp openings or its
+            // basement stair's opening in the hall.
+            let skip=|lx:f32,y:f32,lz:f32| map==MapId::SnowblindClone && (
+                (y==7.5 && ((-13.4..=-10.4).contains(&lx) || (10.4..=13.4).contains(&lx)) && (-10.0..=-2.6).contains(&lz))
+                || (y==0. && (-7.7..=-4.1).contains(&lx) && (-7.4..=0.3).contains(&lz)));
             let mut targets=Vec::new();
             for team in [0u8,1] {
                 for &(x0,x1,z0,z1,y) in rooms {
@@ -3475,6 +3489,40 @@ mod line_of_sight_tests {
                     let (a,b)=(world(pair[0]),world(pair[1]));
                     assert!(pack.body_sweep(a,b).is_none(),"team {team} {name}: blocked between {:?} and {:?}",pair[0],pair[1]);
                 }
+            }
+        }
+    }
+
+    /// Cairnhold's generator route is walkable end to end with the full body
+    /// (engine body sweep, 0.6 m above each floor or ramp), for both teams:
+    /// hall -> stair -> vault -> sally port (east, then south) -> exit house ->
+    /// round its vestibule -> out onto the battery bench.
+    #[test]
+    fn cairnhold_vault_and_sally_port_route_is_walkable() {
+        let map=MapId::StonehengeClone;
+        let pack=crate::map_pack::on(map).unwrap();
+        let info=crate::terrain::info(map);
+        let stair=|z:f32| -6.*((z+9.)/10.7).clamp(0.,1.);
+        let east=|x:f32| -6.+9.*((x-17.)/24.).clamp(0.,1.);
+        let south=|z:f32| 3.+5.*((-20.-z)/16.).clamp(0.,1.);
+        let route=[(13.2,0.,-13.),(13.2,0.,-9.),(13.2,stair(-5.),-5.),(13.2,stair(1.4),1.4),(13.2,-6.,2.8),(13.2,-6.,8.),
+            (15.6,-6.,8.),(17.,-6.,8.),(29.,east(29.),8.),(41.,3.,8.),(60.,3.,8.),(84.,3.,8.),(84.,3.,4.),(84.,3.,-20.),
+            (84.,south(-28.),-28.),(84.,8.,-36.),(82.8,8.,-38.),(82.8,8.,-42.5),(86.3,8.,-42.5),(86.3,8.,-41.3),
+            (89.,8.,-41.3),(94.,8.,-46.)];
+        for team in [0u8,1] {
+            let world=|(x,y,z):(f32,f32,f32)| if team==0 {
+                Vec3::new(info.ember.x-x,info.ember.y+y+0.6,info.ember.z-z)
+            } else {Vec3::new(info.glacier.x+x,info.glacier.y+y+0.6,info.glacier.z+z)};
+            for pair in route.windows(2) {
+                let (a,b)=(world(pair[0]),world(pair[1]));
+                assert!(pack.body_sweep(a,b).is_none(),"team {team}: blocked between {:?} and {:?}",pair[0],pair[1]);
+            }
+            // The stair head is the only way down from the hall: the rest of
+            // the hall floor is solid over the vault.
+            for (x,z) in [(5.,-6.),(9.,0.),(5.,6.)] {
+                let p=world((x,0.,z));
+                let (fy,_)=pack.floor(p).expect("hall or inventory floor");
+                assert!((fy-(p.y-0.6)).abs()<0.01,"team {team}: floor at ({x},{z}) is {fy}");
             }
         }
     }

@@ -40,7 +40,11 @@ faces +Z; blue is red rotated.
 | Bunker | 32 x 40 m, floor 191 m world | Dug into the knoll's forward slope; roof flush with the hill behind |
 | Facade | front 7 m of the roof, wings to x ±24 | Stepped tiers 17 / 14 / 11.5 m, crenellations, buttresses; gatehouse projects 2 m round a 7.4 x 6.2 m portal |
 | Front vestibule + baffle | baffle 4 m inside the door, x ±10.5 | Blocks every turret/battery line through the portal and door |
-| Spawn hall, inventory room (2), generator room | behind the baffle | Generator deepest; bronze-framed doors |
+| Hall, inventory room (2), back room | behind the baffle | Bronze-framed doors; no spawns in the hall (v3) |
+| Vault (v3) | under the hall: x 3.2–15.2, z −9.8–12, floor −6, ceiling −1 | Stone piers, bronze ribs. Exactly two ways in: a 29.3° stair from the hall's east side (railed opening, x 11.2–15.2, z −9 to −2) and the tunnel door (6.4 x 4.5 m) in its east wall |
+| Generator well (v3) | x 3.2–10.4, z 3.4–12, floor −8.2 | The kit generator is 5.8 m tall and its hit bar hangs 6.4 m over the floor, so it stands in a well reached by a 28.8° ramp; a walkway runs from the stair foot to the tunnel door along its east side |
+| Sally port (v3) | east x 16–88 (z 4–12), then south z 4 → −36 (x 80–88) | 6.4 m wide, 4.5 m headroom, sconces every 8 m. Floor climbs −6 → 3 (20.6°), runs level, then 3 → 8 (17.4°). Its stone lid is flush with the hillside it runs under |
+| Exit house (v3) | x 80–88, z −44 to −36, on the battery bench | Door in its east wall behind a dog-leg vestibule (baffle 1.8 m inside, joined to the wall at its north end), at the foot of the battery ramp |
 | Roof turret (bullet) | top of the gatehouse, 17 m | Solid gatehouse mass below it |
 | Covered trench | x 0–8, z 20–76, floor climbs 22 m (21.4°) | Roof 7 → 27.5 m; ground flush with it 10 m to each side |
 | Guard hut | 24 x 24 m, floor +22 | Dug into the knoll (ground 27.5); its roof is a terrace round the tower |
@@ -51,14 +55,17 @@ faces +Z; blue is red rotated.
 | Landing/deploy ledge | left flank (−X), deck +5 m | 24 m paved deck, four marked `deploy_slots` |
 | The Ring (neutral) | map centre, 240 m | Octagonal dais, four axis ramps, eight bronze-seamed pylons; landmark and cover only |
 
-Flags are 532 m apart. Each team has eight `spawn_points` (four in the hall,
-one in the guard hut, one on the battery deck, two on the ledge), every one
-1.2 m above its floor.
+Flags are 532 m apart. Each team has eight `spawn_points` (two in the
+inventory room, two in the back room, one in the guard hut, one on the battery
+deck, two on the ledge), every one 1.2 m above its floor. None is in the hall,
+vault or tunnel; the nearest is 18 m on foot from the stair head
+(`test_no_spawn_camps_the_generator`).
 
 Terrain sites are blended in order bunker (with the wings), apron, hut, ramp
 foot, then trench last, so the trench banks stay exactly flush with its roof.
 
-Dug-in structures cut terrain cells (72 holes). Their outer walls lie exactly on
+Dug-in structures cut terrain cells (102 holes, including the sally port's
+cells). Their outer walls lie exactly on
 the 8 m cell lines, and every boundary vertex is pinned to a height its walls
 cover, so there is no gap between ground and wall. Other structures sit on
 flattened benches that reach at least one cell beyond them.
@@ -133,3 +140,14 @@ Collision: 2,336 triangles per base (budget then 3,000; now 4,500, see `map-pipe
   "glow" is a bright texture. The Ring has no mechanic yet. The attack ramp's
   closed side reads as a large plain stone wedge from the west. The interior is
   unchanged from v1. Nobody has walked or skied the new routes yet.
+- **v3 vault and sally port:** 3,846 collision triangles per base (budget
+  4,500). Python tests cover the vault's two ways in, the stair, the well, the
+  whole tunnel (floor, headroom, walls, lids flush with the pinned ground) and
+  the exit vestibule (the battery's barrel sees nothing past it; nobody on the
+  bench sees up the tunnel). Rust tests walk the full body from the hall down
+  the stair, through the vault, the length of the tunnel and out onto the
+  battery bench, check the generators sit in cut cells 8.2 m down, and keep
+  every turret's sightlines out of the vault, well, walkway, tunnel and exit
+  house. The tunnel is 112 m long, so it is a defenders' and infiltrators'
+  route, not a fast one; whether the stair + tunnel pair is too easy to hold
+  needs a playtest. Bots don't use either.

@@ -79,6 +79,23 @@ def terrain_sites(spec):
     return out
 
 
+def holes(spec):
+    """Terrain cells cut for the basement generator room and its tunnel:
+    sorted cell indices. Every rect must lie on the 8 m grid; every cell lies
+    under the station, the cable duct or the service shed, so no cut is exposed."""
+    cells = set()
+    for base in spec['bases']:
+        for name, (x0, x1, z0, z1) in frostline_station.HOLES.items():
+            (ax, az), (bx, bz) = to_world(base, x0, z0), to_world(base, x1, z1)
+            wx0, wx1, wz0, wz1 = min(ax, bx), max(ax, bx), min(az, bz), max(az, bz)
+            for v in (wx0, wx1, wz0, wz1):
+                if abs(v/STEP-round(v/STEP)) > 1e-9: raise ValueError(f'{name} is not on the 8 m grid')
+            for iz in range(round(wz0/STEP), round(wz1/STEP)):
+                for ix in range(round(wx0/STEP), round(wx1/STEP)):
+                    cells.add((ix, iz))
+    return sorted(iz*256+ix for ix, iz in cells)
+
+
 def terrain_grid(spec):
     return frostline_terrain.heights(spec['seed'], terrain_sites(spec))
 
@@ -182,7 +199,7 @@ def build(output, bake=True):
     manifest['texture_count'] = count
     if lightmap: manifest['lightmap'] = lightmap
     manifest.update(version=1, id=definition['id'], name=definition['name'], flags=flags, spawns=spawns,
-        exact_spawns=True, spawn_points=spawn_points, holes=[], entities=mesh.entities,
+        exact_spawns=True, spawn_points=spawn_points, holes=holes(definition), entities=mesh.entities,
         instances=instances, ambient_emitters=[], sky=dict(FOG), trees=len(pines),
         asset_sha256=pack_writer.source_hash(frostline_station.__file__),
         beacon_asset_sha256=pack_writer.source_hash(frostline_beacon.__file__),

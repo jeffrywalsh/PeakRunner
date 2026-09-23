@@ -16,10 +16,19 @@ origin on a grid vertex in X and 4 m off one in Z (see maps/cairnhold.json).
 The ground either side of the trench is held flush with its roof, so the trench
 reads as sunk into the hill rather than standing on a causeway.
 
+v3 moves the generator down into a stone vault under the hall. It has exactly
+two ways in: a stair from the east side of the hall and a sally-port tunnel
+that runs east, then south under the hillside to an exit house at the foot of
+the plasma battery's ramp. The tunnel's lids lie flush with the ground it runs
+under (the build blends the terrain to them and pins the cut's edge), except
+at the exit house, which stands on the battery bench. No spawn is in the hall,
+the vault or the tunnel: the spawns moved to the inventory and back rooms.
+
 Sightlines: the bunker front door opens into a vestibule closed by a baffle
 behind a recessed portal, so no turret, battery or sniper outside has a
-straight line into the spawn hall. The tower is closed except for the roof
-hatch over its upper ramp.
+straight line into the hall. The exit house's door opens into a vestibule
+closed on its tunnel side. The tower is closed except for the roof hatch over
+its upper ramp.
 
 Interior dressing is render-only and stays within the 0.52 m player radius
 of a solid surface. If the caller's mesh has a `lamps` list, light fixtures
@@ -29,7 +38,7 @@ import math
 
 from assets.structure_kit import Builder
 
-ASSET_ID = 'cairnhold-base-v2'
+ASSET_ID = 'cairnhold-base-v3'
 
 # Bunker: footprint, walls, storey.
 BX, BZ0, BZ1 = 16, -20, 20
@@ -87,7 +96,46 @@ PAD = (-88, -36)
 PAD_TOP, PAD_HALF, PAD_LIP, PAD_GAP = 5.0, 12, .5, 3
 PAD_SLOTS = ((-6.5, -6.5), (6.5, -6.5), (-6.5, 6.5), (6.5, 6.5))
 SPAWN_LIFT = 1.2       # player centre above the floor (support-ray convention)
-HOLES = {'bunker': (-BX, BX, BZ0, BZ1), 'trench': (TX0, TX1, TZ0, TZ1), 'hut': (HX0, HX1, HZ0, HZ1)}
+
+# --- Vault and sally port (v3) ----------------------------------------------
+# The generator moves down into a stone vault under the hall. Exactly two ways
+# in: a stair from the east side of the hall, and the sally-port tunnel, which
+# runs east and then south under the hillside to an exit house at the foot of
+# the plasma battery's ramp. No spawn is in the hall, the vault or the tunnel.
+VAULT_FLOOR, VAULT_CEIL = -6.0, -1.0       # floor top; underside of the hall floor slab
+VAULT = (3.2, 15.2, -9.8, 12.0)            # interior x0, x1, z0, z1
+# The generator stands in a well 2.2 m below the vault floor: the kit model is
+# 5.8 m tall and its hit bar hangs 3.9 m over its centre, so it needs ~7 m.
+PIT_FLOOR = VAULT_FLOOR-2.2
+PIT = (3.2, 10.4, 3.4, 12.0)               # well interior x0, x1, z0, z1
+PIT_RAMP = (3.2, 10.4, -0.6, 3.4)          # x0, x1, z at the vault floor, z at the well floor
+VAULT_GEN = (6.8, PIT_FLOOR, 7.7)
+VAULT_PIERS = ((7.0, -6.5), (7.0, -3.0))
+STAIR = (11.2, 15.2, -9.0, 1.7)            # x0, x1, z at the hall floor (head), z at the vault floor (foot)
+HALL_HOLE = (11.2, 15.2, -9.0, -2.0)       # railed opening in the hall floor over the stair
+TUN_H = 4.5                                # tunnel headroom
+TUN_DOOR = (4.8, 11.2)                     # vault's east door onto the tunnel (z span)
+# Tunnel cells: east leg along +X (z 4..12), then south along -Z (x 80..88),
+# ending in the exit house cell. Local x is on the 8 m grid, local z 4 m off it.
+T_EAST = (16.0, 88.0, 4.0, 12.0)
+T_SOUTH = (80.0, 88.0, -36.0, 4.0)
+T_EXIT = (80.0, 88.0, -44.0, -36.0)
+EXIT_GROUND = 8.0                          # the battery bench
+EXIT_DOOR = (-43.0, -39.6)                 # z span of the door in the exit house's east wall
+# Dog-leg vestibule: a baffle 1.8 m inside the door, joined to the east wall at
+# its north end, so the way in is round its south end.
+EXIT_BAFFLE = (85.0, 85.4, -41.8, -38.2)   # baffle x0, x1, z0 (south end, open), z1 (joined)
+# Floor and lid (roof top, flush with the ground where the ground is higher)
+# heights at the cell boundaries; linear between them.
+T_EAST_FLOOR = ((16.0, VAULT_FLOOR), (17.0, VAULT_FLOOR), (41.0, 3.0), (88.0, 3.0))
+T_EAST_LID = ((16.0, 7.0), (24.0, 7.0), (32.0, 7.5), (40.0, 10.0), (48.0, 12.0), (56.0, 12.5),
+              (64.0, 14.0), (72.0, 16.5), (80.0, 19.0), (88.0, 19.0))
+T_SOUTH_FLOOR = ((-44.0, EXIT_GROUND), (-36.0, EXIT_GROUND), (-20.0, 3.0), (4.0, 3.0))
+T_SOUTH_LID = ((-36.0, 13.5), (-28.0, 12.0), (-20.0, 12.8), (-12.0, 14.5), (-4.0, 16.5), (4.0, 19.0))
+EXIT_ROOF = EXIT_GROUND+TUN_H+1.0
+
+HOLES = {'bunker': (-BX, BX, BZ0, BZ1), 'trench': (TX0, TX1, TZ0, TZ1), 'hut': (HX0, HX1, HZ0, HZ1),
+         'tunnel east': T_EAST, 'tunnel south': T_SOUTH, 'sally exit': T_EXIT}
 
 HULL, INTERIOR, DECK, BRONZE, METAL, GLOW = 'concrete', 'bark', 'panel', 'grate', 'trim', 'light'
 
@@ -124,12 +172,51 @@ def exterior_ramp_y(z):
     return ramp_y(XR, z, HUT_RING, TOWER_TOP)
 
 
+def stair_y(z):
+    """Vault stair surface: hall floor (0) at the head, vault floor at the foot."""
+    return ramp_y(STAIR, z, 0.0, VAULT_FLOOR)
+
+
+def _lerp(points, u):
+    us, ys = zip(*points)
+    if u <= us[0]: return ys[0]
+    if u >= us[-1]: return ys[-1]
+    for (u0, y0), (u1, y1) in zip(points, points[1:]):
+        if u0 <= u <= u1: return y0+(y1-y0)*(u-u0)/(u1-u0)
+
+
+def east_floor(x): return _lerp(T_EAST_FLOOR, x)
+def east_lid(x): return _lerp(T_EAST_LID, x)
+def south_floor(z): return _lerp(T_SOUTH_FLOOR, z)
+def south_lid(z): return _lerp(T_SOUTH_LID, z)
+
+
+def tunnel_floor(x, z):
+    """Walking surface anywhere along the sally port (vault door to exit)."""
+    if z >= T_SOUTH[3]-1e-9 and x < T_SOUTH[0]: return east_floor(x)
+    if z >= T_SOUTH[3]-1e-9: return east_floor(T_EAST[1])
+    return south_floor(z)
+
+
 def ring_height(region, x, z):
     """Pinned height for a terrain vertex on the boundary of a hole region.
     Always within the span of that region's outer walls."""
     if region == 'bunker': return bunker_ground(z)
     if region == 'trench': return trench_roof(z)
+    if region == 'tunnel east': return east_lid(x)
+    if region == 'tunnel south': return south_lid(z)
+    if region == 'sally exit': return EXIT_GROUND
     return HUT_RING
+
+
+def wall_span(region, x, z):
+    """(bottom, top) of a hole region's outer walls at a boundary point."""
+    if region == 'bunker': return (-4.0, ROOF)
+    if region == 'trench': return (trench_wall_bottom(z), trench_roof(z))
+    if region == 'hut': return (HUT_FLOOR-5, HUT_ROOF)
+    if region == 'tunnel east': return (east_floor(x)-1, east_lid(x))
+    if region == 'tunnel south': return (south_floor(z)-1, south_lid(z))
+    return (EXIT_GROUND-1, EXIT_ROOF)
 
 
 def sites():
@@ -146,10 +233,14 @@ def sites():
         # Last of the three: its banks stay exactly flush with the roof, and its
         # clamped surface matches the bunker and hut levels where they meet.
         ('trench', ('rect', TX0-BANK, TX1+BANK, TZ0, TZ1), lambda x, z: trench_roof(z), 16),
+        # The sally port's lids lie flush with the hillside they run under.
+        ('tunnel east', ('rect',) + T_EAST, lambda x, z: east_lid(x), 10),
+        ('tunnel south', ('rect',) + T_SOUTH, lambda x, z: south_lid(z), 10),
         # Flat benches reach at least one 8 m cell past each structure, so no
         # terrain triangle can rise into a deck, plinth or ramp.
         ('battery', ('disc', bx, bz, BATTERY_R+9), lambda x, z: BATTERY_GROUND, 14),
         ('battery ramp', ('rect', bx-10, bx+10, bz, bz+BATTERY_R+18), lambda x, z: BATTERY_GROUND, 14),
+        ('sally apron', ('rect', T_EXIT[0]-4, T_EXIT[1]+8, T_EXIT[2]-6, T_EXIT[3]), lambda x, z: EXIT_GROUND, 8),
         ('pad', ('rect', px-PAD_HALF-8, px+PAD_HALF+8, pz-PAD_HALF-8, pz+PAD_HALF+8), lambda x, z: PAD_TOP-.06, 14),
     ]
 
@@ -200,9 +291,16 @@ def build(mesh, team, circuit):
 
     # --- Bunker shell ------------------------------------------------------
     ix, iz0, iz1 = BX-WALL, BZ0+WALL, BZ1-WALL      # interior bounds
-    slab(-ix, ix, iz0, iz1, 0, DECK)
+    hx0, hx1, hz0, hz1 = HALL_HOLE
+    for x0, x1, z0, z1 in [(-ix, hx0, iz0, iz1), (hx0, ix, iz0, hz0), (hx0, ix, hz1, iz1)]:
+        slab(x0, x1, z0, z1, 0, DECK)
     slab(-BX, BX, BZ0, BZ1, ROOF, HULL)
-    for s in (-1, 1): wall(s*ix, s*BX, BZ0, BZ1, -4, CEIL, HULL)
+    wall(-BX, -ix, BZ0, BZ1, -4, CEIL, HULL)
+    # East wall: full height above the vault door; below it, down to the vault
+    # floor either side of the door.
+    door_top = VAULT_FLOOR+TUN_H
+    wall(ix, BX, BZ0, BZ1, door_top, CEIL, HULL)
+    for z0, z1 in ((BZ0, TUN_DOOR[0]), (TUN_DOOR[1], BZ1)): wall(ix, BX, z0, z1, VAULT_FLOOR-1, door_top, HULL)
     for x0, x1 in [(-ix, DOOR[0]), (DOOR[1], ix)]: wall(x0, x1, BZ0, iz0, -4, CEIL, HULL)
     wall(DOOR[0], DOOR[1], BZ0, iz0, DOOR_TOP, CEIL, HULL)
     wall(DOOR[0], DOOR[1], BZ0, iz0, -4, 0, HULL)
@@ -256,11 +354,132 @@ def build(mesh, team, circuit):
         wall(x-.86, x+.86, z-.86, z+.86, 0, .3, METAL, False)
         wall(x-.84, x+.84, z-.84, z+.84, 1.6, 1.78, accent, False)
 
-    # Inventory room and generator room.
+    # Inventory room; the back room (the old generator room) is now a muster
+    # room with two spawns. The generator is down in the vault.
     for x in (-4, 4): mesh.equipment('inventory', (x, 0, 9), team, circuit)
-    generator = (-7, 0, 16)
+
+    # --- Vault: the generator room under the hall --------------------------
+    # Two ways in: the stair from the hall and the tunnel door. Nothing else.
+    vx0, vx1, vz0, vz1 = VAULT
+    F, C = VAULT_FLOOR, VAULT_CEIL
+    P = PIT_FLOOR
+    px0, px1, pz0, _ = PIT
+    rz_top = PIT_RAMP[2]
+    slab(vx0-WALL, BX, vz0-WALL, rz_top, F, DECK)                  # vault floor south of the well
+    slab(px1+WALL, BX, rz_top, vz1+WALL, F, DECK)                  # walkway along the east side
+    wall(px1, px1+WALL, rz_top, vz1+WALL, P-1, F, HULL)            # the well's east wall, flush with the floor
+    slab(vx0-WALL, px1, pz0, vz1+WALL, P, DECK)                    # well floor
+    mesh.ramp((px0+px1)/2, px1-px0, rz_top, pz0, F, P, BRONZE)     # ramp down into the well
+    wall(vx0-WALL, vx0, vz0-WALL, vz1+WALL, P-1, C, HULL)
+    wall(vx0, vx1, vz0-WALL, vz0, F-1, C, HULL)
+    wall(vx0, vx1, vz1, vz1+WALL, P-1, C, HULL)
+    # Stair from the hall down the east side, closed beneath its open edge,
+    # railed round its opening in the hall floor.
+    s0, s1, sz_head, sz_foot = STAIR
+    mesh.ramp((s0+s1)/2, s1-s0, sz_head, sz_foot, 0.0, F, BRONZE)
+    # Under the stair's open edge: a panel up to the hall slab near the head,
+    # then up to 0.6 m under the stair surface.
+    z_a = sz_head+(-1.0+.6)/((F-0.0)/(sz_foot-sz_head))
+    for pts in ([(s0, F, sz_head), (s0, -1.0, sz_head), (s0, -1.0, z_a), (s0, F, z_a)],):
+        mesh.quad(*pts, HULL); mesh.quad(*pts[::-1], HULL)
+    closed_side(s0, [(z_a, sz_foot, F)], stair_y)
+    wall(hx0-.4, hx0, hz0, hz1+.4, 0, 1.1, METAL)
+    wall(hx0, hx1, hz1, hz1+.4, 0, 1.1, METAL)
+    wall(hx0-.46, hx0+.06, hz0, hz1+.46, 1.1, 1.18, BRONZE, False)
+    wall(hx0-.06, hx1, hz1-.06, hz1+.46, 1.1, 1.18, BRONZE, False)
+    b.face_box('z', hz0, -1, hx0, hx1, -.02, .02, .3, BRONZE)       # bronze lip at the stair head
+    generator = VAULT_GEN
     mesh.equipment('generator', generator, team, circuit)
-    wall(generator[0]-3.2, generator[0]+3.2, 13.4, 18.8, 0, .03, BRONZE, False)
+    gx, _, gz = generator
+    b.prism(gx, gz, 3.4, 3.4, P+.005, P+.02, 16, BRONZE, solid=False)
+    b.prism(gx, gz, 3.0, 3.0, P+.02, P+.03, 16, accent, solid=False)
+    b.dress('x', vx0, 1, [(pz0, vz1)], P, F, pilasters=False)
+    b.dress('z', vz1, -1, [(vx0, px1)], P, F, pilasters=False)
+    b.dress('x', px1, -1, [(pz0, vz1)], P, F, pilasters=False)
+    b.face_box('x', px1, -1, pz0, vz1, F-.08, F+.02, .3, BRONZE)       # bronze lip on the well's edge
+    b.lamp((gx, F-.5, gz), .7)
+    # Squat stone piers with bronze collars, and bronze ribs across the vault.
+    for x, z in VAULT_PIERS:
+        b.prism(x, z, 1.0, 1.0, F, C, 8, HULL, phase=math.pi/8)
+        b.prism(x, z, 1.2, 1.2, F, F+.4, 8, METAL, phase=math.pi/8, solid=False)
+        b.prism(x, z, 1.3, 1.05, C-.6, C, 8, BRONZE, phase=math.pi/8, solid=False, cap=False)
+    for z in (-7.0, -1.5, 4.0, 9.5):
+        wall(vx0, s0, z-.25, z+.25, C-.35, C, BRONZE, False)
+    b.dress('x', vx0, 1, [(vz0, vz1)], F, C)
+    b.dress('z', vz0, 1, [(vx0, s0)], F, C)
+    b.dress('z', vz1, -1, [(vx0, vx1)], F, C)
+    b.dress('x', vx1, -1, [(sz_foot, TUN_DOOR[0]), (TUN_DOOR[1], vz1)], F, C)
+    for x in (5.0, 9.4): b.ceiling_strip('z', x, vz0+1.5, vz1-1.5, C, .7)
+    for into, z in ((-1, TUN_DOOR[0]), (-1, TUN_DOOR[1])):
+        b.face_box('x', vx1, into, z-.3 if z == TUN_DOOR[0] else z, z if z == TUN_DOOR[0] else z+.3,
+                   F, door_top, .12, METAL)
+    b.face_box('x', vx1, -1, TUN_DOOR[0]-.3, TUN_DOOR[1]+.3, door_top, door_top+.3, .14, METAL)
+    b.face_box('x', vx1, -1, TUN_DOOR[0]+.5, TUN_DOOR[1]-.5, door_top+.45, door_top+.7, .06, accent)
+
+    # --- Sally port: vault -> east under the hillside -> south to the battery
+    def blk(x0, x1, z0, z1, yb, yt, mat, solid=True):
+        """Box whose bottom and top heights are linear functions of x or z."""
+        c = [(x0, yb(x0, z0), z0), (x1, yb(x1, z0), z0), (x1, yt(x1, z0), z0), (x0, yt(x0, z0), z0),
+             (x0, yb(x0, z1), z1), (x1, yb(x1, z1), z1), (x1, yt(x1, z1), z1), (x0, yt(x0, z1), z1)]
+        for face in [(0, 3, 2, 1), (4, 5, 6, 7), (0, 4, 7, 3), (1, 2, 6, 5), (0, 1, 5, 4), (3, 7, 6, 2)]:
+            mesh.quad(*(c[i] for i in face), mat, solid)
+
+    ex0, ex1, ez0, ez1 = T_EAST
+    qx0, qx1, qz0, qz1 = T_SOUTH
+    w = WALL
+    ef = lambda x, z: east_floor(x); el = lambda x, z: east_lid(x)
+    sf = lambda x, z: south_floor(z); sl = lambda x, z: south_lid(z)
+    def breaks(points, lo, hi):
+        return sorted({lo, hi} | {u for u, _ in points if lo < u < hi})
+    xs = breaks(T_EAST_FLOOR+T_EAST_LID, ex0, ex1)
+    for a, c_ in zip(xs, xs[1:]):
+        inner = min(c_, qx1-w)
+        if inner > a:   # floor and ceiling inside the walls
+            blk(a, inner, ez0+w, ez1-w, lambda x, z: ef(x, z)-1, ef, DECK)
+            blk(a, inner, ez0+w, ez1-w, lambda x, z: ef(x, z)+TUN_H, lambda x, z: ef(x, z)+TUN_H+.5, HULL)
+        blk(a, c_, ez1-w, ez1, lambda x, z: ef(x, z)-1, lambda x, z: el(x, z)-.5, HULL)          # north wall
+        if a < qx0+w: blk(a, min(c_, qx0+w), ez0, ez0+w, lambda x, z: ef(x, z)-1, lambda x, z: el(x, z)-.5, HULL)
+        blk(a, c_, ez0, ez1, lambda x, z: el(x, z)-.5, el, HULL)                                 # lid
+    blk(ex1-w, ex1, ez0, ez1-w, lambda x, z: ef(x, z)-1, lambda x, z: el(x, z)-.5, HULL)         # corner's east wall
+    zs = breaks(T_SOUTH_FLOOR+T_SOUTH_LID, qz0, qz1)
+    for a, c_ in zip(zs, zs[1:]):
+        top = ez0+w if c_ >= qz1 else c_     # the last piece meets the east leg's floor
+        blk(qx0+w, qx1-w, a, top, lambda x, z: sf(x, z)-1, sf, DECK)
+        blk(qx0+w, qx1-w, a, top, lambda x, z: sf(x, z)+TUN_H, lambda x, z: sf(x, z)+TUN_H+.5, HULL)
+        for x0_, x1_ in ((qx0, qx0+w), (qx1-w, qx1)):
+            blk(x0_, x1_, a, c_ if x0_ == qx0 else min(c_, ez0), lambda x, z: sf(x, z)-1, lambda x, z: sl(x, z)-.5, HULL)
+        blk(qx0, qx1, a, c_, lambda x, z: sl(x, z)-.5, sl, HULL)                                 # lid
+    # Exit house at the battery's ramp foot: roofed, door in its east wall
+    # behind a vestibule wall, so no turret sees down the tunnel.
+    g, roof = EXIT_GROUND, EXIT_ROOF
+    ox0, ox1, oz0, oz1 = T_EXIT
+    slab(ox0+w, ox1-w, oz0+w, oz1, g, DECK)
+    slab(ox0, ox1, oz0, oz1, roof, HULL)
+    wall(ox0, ox1, oz0, oz0+w, g-1, roof-1, HULL)
+    wall(ox0, ox0+w, oz0+w, oz1, g-1, roof-1, HULL)
+    for z0, z1 in _runs_without(oz0+w, oz1, [EXIT_DOOR]): wall(ox1-w, ox1, z0, z1, g-1, roof-1, HULL)
+    fx0, fx1, fz0, fz1 = EXIT_BAFFLE
+    wall(fx0, fx1, fz0, fz1, g, g+TUN_H, HULL)
+    wall(fx1, ox1-w, fz1-.4, fz1, g, g+TUN_H, HULL)
+    # Dressing: liners, lamp strips and sconces the whole way.
+    for x in range(20, 88, 8):
+        y = east_floor(x)
+        for zc, into in ((ez0+w, 1), (ez1-w, -1)):
+            if x > qx0 and zc == ez0+w: continue
+            wall(x-.3, x+.3, zc, zc+into*.25, y+3.1, y+3.6, GLOW, False)
+            b.lamp((x, y+3.3, zc+into*.6), .45)
+    for z in range(0, -40, -8):
+        y = south_floor(z)
+        for xc, into in ((qx0+w, 1), (qx1-w, -1)):
+            wall(xc, xc+into*.25, z-.3, z+.3, y+3.1, y+3.6, GLOW, False)
+            b.lamp((xc+into*.6, y+3.3, z), .45)
+    for z in (-42.0, -38.0):
+        b.ceiling_strip('x', z, ox0+1.5, ox1-1.5, g+TUN_H, .6)
+    for z in EXIT_DOOR:
+        b.face_box('x', ox1, 1, z-.3 if z == EXIT_DOOR[0] else z, z if z == EXIT_DOOR[0] else z+.3, g, g+TUN_H, .12, METAL)
+    b.face_box('x', ox1, 1, EXIT_DOOR[0]-.3, EXIT_DOOR[1]+.3, g+TUN_H, g+TUN_H+.35, .14, METAL)
+    b.face_box('x', ox1, 1, oz0, oz1, roof-.5, roof-.1, .16, METAL)
+    b.lamp((ox1+2.0, g+3.8, sum(EXIT_DOOR)/2), .5)
 
     # --- Facade ------------------------------------------------------------
     # Gatehouse: jambs and lintel projecting round a recessed portal, and the
@@ -558,14 +777,25 @@ def build(mesh, team, circuit):
     lift = SPAWN_LIFT
     return {
         'flag': (fx, top+PLINTH+.05, fz_),
-        'spawn': (-11, lift, -1),
-        # (x, y, z, local yaw): yaw 0 faces the base front (-Z).
-        'spawn_points': [(-11, lift, -1, 0), (11, lift, -1, 0), (-3, lift, 1.5, 0), (3, lift, 1.5, 0),
+        'spawn': (-13.0, lift, 6.0),
+        # (x, y, z, local yaw): yaw 0 faces the base front (-Z). None in the
+        # hall (its east side holds the stair down to the generator): two in
+        # the inventory room, two in the back room.
+        'spawn_points': [(-13.0, lift, 6.0, -math.pi/2), (13.0, lift, 6.0, math.pi/2),
+                         (-10.0, lift, 15.8, -math.pi/2), (10.0, lift, 15.8, math.pi/2),
                          (-3, HUT_FLOOR+lift, HZ0+12, 0),
                          (cx, deck+lift, cz+3.9, -math.pi/4),  # diagonal across the deck, not down the attack ramp
                          (px-5, PAD_TOP+lift, pz+4, 0), (px+5, PAD_TOP+lift, pz+4, 0)],
-        'entrances': [(0, .2, GATE_Z), (mid, .2, TZ0), (mid, HUT_FLOOR+.2, HZ0), ((xa+xb)/2, HUT_RING+.2, zg)],
+        'entrances': [(0, .2, GATE_Z), (mid, .2, TZ0), (mid, HUT_FLOOR+.2, HZ0), ((xa+xb)/2, HUT_RING+.2, zg),
+                      (T_EXIT[1], EXIT_GROUND+.2, sum(EXIT_DOOR)/2)],
         'generator': generator,
+        'gen_entrances': [((HALL_HOLE[0]+HALL_HOLE[1])/2, .2, HALL_HOLE[2]),
+                          (VAULT[1], VAULT_FLOOR+.2, sum(TUN_DOOR)/2)],
+        'stair_head': ((STAIR[0]+STAIR[1])/2, 0.0, STAIR[2]),
+        'vault_view': (VAULT[0]+.8, VAULT_FLOOR+1.7, VAULT[3]-.8),
+        'tunnel_view': (T_EAST[0]+3.0, east_floor(T_EAST[0]+3.0)+1.7, 8.0),
+        'tunnel_corner_view': (T_SOUTH[0]+1.6, 3.0+1.7, 10.4),
+        'exit': (T_EXIT[1], EXIT_GROUND, sum(EXIT_DOOR)/2),
         'roof_turret': ROOF_TURRET,
         'sentry': sentry,
         'battery': battery,

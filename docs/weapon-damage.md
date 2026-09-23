@@ -162,7 +162,11 @@ within 120 m and in line of sight: a thin shield strip (pale violet) above a
 hull bar that turns green, amber, red and is framed in the owning team's
 colour. An unpowered shield shows as a dashed grey strip with OFFLINE; a
 destroyed object says DESTROYED. Bars flash white when the object takes damage,
-and name the object within 45 m (`src/world_overlay.rs`).
+and name the object within 45 m (`src/world_overlay.rs`). A bar never goes
+through a ceiling: `bar_anchor` probes upward from the top of the model and
+hangs the bar 0.4 m under anything it finds, and where there is no room above
+the model (a low basement), it hangs the bar beside the object on the viewer's
+side, so a generator's bar can't be seen from the floor above.
 
 **Name tags.** Other living players get their name above their head: blue for
 teammates up to 150 m, red for enemies up to 80 m, fading near the limit. The

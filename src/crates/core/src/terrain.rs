@@ -559,6 +559,46 @@ mod map_tests {
         }
     }
 
+    /// Cairnhold's generators sit in a well in the vault under each hall,
+    /// 8.2 m below the hall floor, over cut terrain cells.
+    #[test]
+    fn cairnhold_generators_are_underground_in_cut_cells() {
+        let id = MapId::StonehengeClone;
+        let pack = crate::map_pack::on(id).unwrap();
+        let info = info(id);
+        let gens: Vec<_> = crate::equipment::definitions(id).iter()
+            .filter(|d| d.kind == crate::equipment::Kind::Generator).collect();
+        assert_eq!(gens.len(), 2);
+        assert_eq!(pack.manifest.holes.len(), 102);
+        for d in gens {
+            let home = if d.team == 0 { info.ember } else { info.glacier };
+            let p = d.pos();
+            assert!(pack.hole(p.x, p.z), "generator {} is not over a cut cell", d.id);
+            let floor = pack.floor(p - Vec3::Y * 2.4).expect("generator floor").0;
+            assert!((floor - (home.y - 8.2)).abs() < 0.01, "generator {} floor {floor}, base {home:?}", d.id);
+        }
+    }
+
+    /// Frostline's generators sit in a basement under each station hall, on
+    /// a floor 7 m below the hall floor, in cut terrain cells.
+    #[test]
+    fn frostline_generators_are_underground_in_cut_cells() {
+        let id = MapId::SnowblindClone;
+        let pack = crate::map_pack::on(id).unwrap();
+        let info = info(id);
+        let gens: Vec<_> = crate::equipment::definitions(id).iter()
+            .filter(|d| d.kind == crate::equipment::Kind::Generator).collect();
+        assert_eq!(gens.len(), 2);
+        assert_eq!(pack.manifest.holes.len(), 12);
+        for d in gens {
+            let home = if d.team == 0 { info.ember } else { info.glacier };
+            let p = d.pos();
+            assert!(pack.hole(p.x, p.z), "generator {} is not over a cut cell", d.id);
+            let floor = pack.floor(p - Vec3::Y * 2.4).expect("generator floor").0;
+            assert!((floor - (home.y - 7.0)).abs() < 0.01, "generator {} floor {floor}, base {home:?}", d.id);
+        }
+    }
+
     #[test]
     fn cairnhold_is_embedded_with_grounded_spawns_and_flag_decks() {
         let id = MapId::StonehengeClone;
