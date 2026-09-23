@@ -52,9 +52,9 @@ What's new and ours:
 - `maps/frostline.json` — bases and beacon placement.
 - `scripts/build-frostline.py` — builds the pack; `--no-bake` skips lighting.
 - `scripts/assets/frostline_station.py` — station, outpost, emplacement, apron.
-- `scripts/assets/frostline_beacon.py`, `frostline_flora.py`,
-  `frostline_terrain.py`, `frostline_materials.py`.
-- `scripts/test-frostline.py` — 19 tests.
+- `scripts/assets/frostline_beacon.py`, `frostline_cavern.py` (the ice
+  cavern), `frostline_flora.py`, `frostline_terrain.py`, `frostline_materials.py`.
+- `scripts/test-frostline.py` — 28 tests.
 
 Shared modules are used read-only: the kit `Mesh`, `structure_kit`,
 `pack_writer`, `lightmap_bake`, and the noise helpers in `tower_complex_terrain`.
@@ -161,8 +161,65 @@ for the map; 12 lightmap pages. `test-frostline.py` checks the route counts,
 the covered cut cells, the new floors, stairs and ramps, and that no turret can
 see into the basement, tunnel or halls.
 
+## Ice cavern (v5)
+
+From the approved Ascend proposal: a skiable passage **through** the central
+beacon ridge, a second lane beside the climb over the crest. It connects to
+neither base. `scripts/assets/frostline_cavern.py`, both halves point-symmetric.
+
+- **Line:** straight along the flag axis, portals at z 976 and 1072 (48 m either
+  side of the centre), with an open trench 32 m long outside each portal. A
+  skier turns at only v²/28 m/s² (a 128 m radius at 60 m/s), so a bent cavern
+  would put skiers into the wall. On the axis, one straight cavern keeps the map
+  point-symmetric and its mouths on the 8 m grid.
+- **Size:** 24 m wide (three skiers abreast of a 0.52 m body), vertical ice walls
+  8 m tall and a vault to 13 m at the crown, for a jet hop over another
+  player and disc arcs. The trenches are 32 m wide between granite walls.
+- **Floor:** 219 m at the portals, dipping on a cosine to 214 m in the
+  middle (at most about 6°): you roll in and carry through, with no flat
+  dead zone. The trench floor meets the slope at about 220 m.
+- **Terrain:** heights and splat weights are unchanged, so the slope
+  statistics are unchanged (median 35.7°, 90th percentile 52.8°, 0.89% under
+  3°). 80 cells are cut (48 roofed, 32 open trench). The roof is an exact copy
+  of the terrain surface over the roofed cells, with the client's quantized
+  heights, alternating diagonals, normals, UVs and splat path (`layer.y = -2`),
+  appended after the bake. It collides and renders as ridge.
+- **Look:** blue ice-crust walls and vault, a snow floor, a granite sill,
+  amber crown and wall light strips (16 bake lamps), icicles, and one ice
+  boulder per half beside the ski line as cover.
+- **Bake note:** there's no terrain behind surfaces in cut cells, and the bake
+  lights whichever side of a surface looks more open. So every cavern
+  surface has a render-only backing plate 0.4 m behind it. Without them, floor
+  near the walls baked dim and brown, lit from below. The trench and portal
+  backs sit 1 m lower so they stay under the ground. Fronts and backs are
+  emitted in separate pairs so each quad keeps a single lightmap chart.
+- **Counts:** 492 collision triangles (including the 96-triangle roof), 15
+  lightmap pages (12 before).
+
+Tests:
+- `test-frostline.py` (28):
+  - the roof equals the ridge
+  - every trench cell is floored
+  - the roof renders on the terrain path
+  - body-band walk along three lanes from trench end to trench end
+  - both portals open across their full cross-section
+  - no turret or sensor can see inside
+  - no spawn in or near it
+  - no degenerate triangles
+  - budget
+- Rust:
+  - `frostline_cavern_is_seamless_and_open_mouth_to_mouth` (terrain.rs)
+  - `frostline_cavern_skis_through_mouth_to_mouth` (sim.rs): the real movement code, holding ski with no steering, from either end. At 30 m/s in, the skier never drops below 26.7 inside and exits the far trench at 24.8. At 16 m/s in, it's 15.6 inside and 14.0 out.
+
+Screenshots: `research/screenshots/frostline-v5-{ridge,mouth-red,mouth-blue,inside,mid}.png`.
+
 ## Known gaps
 
+- **Cavern not playtested:** whether it becomes the default capping lane
+  instead of an alternative, and how the approach up the 36–40° slope to
+  each trench plays. The approach can't be walked: you ski or jet up, as
+  everywhere on Frostline.
+- Bots don't use the cavern.
 - Bots don't use the basement stair or tunnel.
 - The roof hatch is a drop-in only; the walk-only route check doesn't count it.
 - **Not playtested by a human:** skiing feel on 36° median slopes, how far the

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Original Frostline CTF map: two polar research stations on mountain
 shelves in a whiteout, each with a relay outpost, a plasma emplacement and a
-vehicle apron, a lit navigation beacon on the central ridge and snow pines,
-over original steep snow terrain. No extracted assets, no external height data.
+vehicle apron, a lit navigation beacon on the central ridge with an ice
+cavern through the ridge beneath it, and snow pines, over original steep snow
+terrain. No extracted assets, no external height data.
 
 Usage (from src/, numpy venv): build-frostline.py [OUTPUT] [--no-bake]
 Default output is the embedded assets/maps/frostline; refuses to overwrite.
@@ -19,6 +20,7 @@ import sys
 import numpy as np
 
 from assets import frostline_beacon
+from assets import frostline_cavern
 from assets import frostline_flora
 from assets import frostline_materials
 from assets import frostline_station
@@ -80,9 +82,12 @@ def terrain_sites(spec):
 
 
 def holes(spec):
-    """Terrain cells cut for the basement generator room and its tunnel:
-    sorted cell indices. Every rect must lie on the 8 m grid; every cell lies
-    under the station, the cable duct or the service shed, so no cut is exposed."""
+    """Terrain cells cut for the basement generator rooms and their tunnels,
+    and for the central ice cavern and its two open trenches: sorted cell
+    indices. Every rect must lie on the 8 m grid. Base cells lie under the
+    station, the cable duct or the service shed; cavern cells are roofed by an
+    exact copy of the terrain (frostline_cavern.lid); trench cells are open
+    to the sky with a floor and granite walls up to the ground."""
     cells = set()
     for base in spec['bases']:
         for name, (x0, x1, z0, z1) in frostline_station.HOLES.items():
@@ -93,6 +98,7 @@ def holes(spec):
             for iz in range(round(wz0/STEP), round(wz1/STEP)):
                 for ix in range(round(wx0/STEP), round(wx1/STEP)):
                     cells.add((ix, iz))
+    cells.update(frostline_cavern.cells())
     return sorted(iz*256+ix for ix, iz in cells)
 
 
@@ -175,11 +181,20 @@ def build(output, bake=True):
                                    for k, v in anchors.items()}))
     beacon_triangles = len(mesh.collision)//9-base_triangles
     grid = terrain_grid(definition)
+    before = len(mesh.collision)//9
+    anchors = frostline_cavern.build(mesh, grid)
+    lid_render, lid_collision = frostline_cavern.lid(grid)
+    cavern_triangles = len(mesh.collision)//9-before+len(lid_collision)//9
+    instances.append(dict(asset=frostline_cavern.ASSET_ID, position=list(anchors['centre']), yaw=0,
+                          anchors={k: list(v) for k, v in anchors.items()}))
     mesh.origin = (0, 0, 0); mesh.yaw = 0
     pines = trees(definition, grid)
     frostline_flora.build(mesh, pines)
     heights = bytearray(struct.pack('<65536H', *[round(float(v)*32) for v in grid.ravel()]))
     weights = frostline_terrain.weights(grid).tobytes()
+    # The cavern roof collides like the ground it replaces. It is appended
+    # after baking (below) so it keeps the terrain shading path.
+    mesh.collision.extend(lid_collision)
     if sys.byteorder != 'little': mesh.vertices.byteswap(); mesh.collision.byteswap()
     shared = kit.base_pack(); old = shared['manifest']
     textures = bytearray(shared['textures'])
@@ -192,6 +207,7 @@ def build(output, bake=True):
     lightmap = None
     if bake:
         vertices, textures, count, lightmap = pack_writer.bake_lightmaps(vertices, textures, count, mesh.lamps, kit)
+    vertices += np.asarray(lid_render, '<f4').tobytes()
     files = {'height.bin': bytes(heights), 'vertices.bin': vertices,
              'collision.bin': mesh.collision.tobytes(), 'weights.rgba': bytes(weights),
              'textures.rgba': bytes(textures), 'ambient.f32': polar_wind(definition['seed'])}
@@ -203,6 +219,7 @@ def build(output, bake=True):
         instances=instances, ambient_emitters=[], sky=dict(FOG), trees=len(pines),
         asset_sha256=pack_writer.source_hash(frostline_station.__file__),
         beacon_asset_sha256=pack_writer.source_hash(frostline_beacon.__file__),
+        cavern_asset_sha256=pack_writer.source_hash(frostline_cavern.__file__),
         flora_source_sha256=pack_writer.source_hash(frostline_flora.__file__),
         structure_kit_sha256=pack_writer.source_hash(structure_kit.__file__),
         terrain_source_sha256=pack_writer.source_hash(frostline_terrain.__file__),
@@ -212,7 +229,7 @@ def build(output, bake=True):
         definition_sha256=pack_writer.source_hash(ROOT/'maps/frostline.json'))
     pack_writer.write_pack(output, files, manifest)
     print(f'Built {definition["name"]}: {len(mesh.collision)//9} solid triangles '
-          f'({base_triangles//2} per base, {beacon_triangles} beacon, {len(pines)} pines), '
+          f'({base_triangles//2} per base, {beacon_triangles} beacon, {cavern_triangles} cavern, {len(pines)} pines), '
           f'{len(mesh.vertices)//36} render triangles'
           + (f', {lightmap["pages"]} lightmap pages' if lightmap else ', unbaked'))
 

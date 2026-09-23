@@ -614,13 +614,62 @@ mod map_tests {
         let gens: Vec<_> = crate::equipment::definitions(id).iter()
             .filter(|d| d.kind == crate::equipment::Kind::Generator).collect();
         assert_eq!(gens.len(), 2);
-        assert_eq!(pack.manifest.holes.len(), 12);
+        // Six basement cells per base, plus the central cavern's 80.
+        assert_eq!(pack.manifest.holes.len(), 12 + 80);
         for d in gens {
             let home = if d.team == 0 { info.ember } else { info.glacier };
             let p = d.pos();
             assert!(pack.hole(p.x, p.z), "generator {} is not over a cut cell", d.id);
             let floor = pack.floor(p - Vec3::Y * 2.4).expect("generator floor").0;
             assert!((floor - (home.y - 7.0)).abs() < 0.01, "generator {} floor {floor}, base {home:?}", d.id);
+        }
+    }
+
+    /// Frostline's ice cavern under the beacon ridge: 48 cut cells roofed by
+    /// an exact copy of the terrain (so the ridge collides as before) and 32
+    /// open trench cells, each with a floor, and a clear body-width lane
+    /// through both mouths at skiing height.
+    #[test]
+    fn frostline_cavern_is_seamless_and_open_mouth_to_mouth() {
+        let id = MapId::SnowblindClone;
+        let pack = crate::map_pack::on(id).unwrap();
+        let cut: Vec<(usize, usize)> = pack.manifest.holes.iter().map(|&h| (h % 256, h / 256))
+            .filter(|&(x, z)| (126..130).contains(&x) && (118..138).contains(&z)).collect();
+        assert_eq!(cut.len(), 80);
+        for &(ix, iz) in &cut {
+            for (fx, fz) in [(0.2, 0.3), (0.5, 0.5), (0.8, 0.7)] {
+                let (x, z) = ((ix as f32 + fx) * 8.0, (iz as f32 + fz) * 8.0);
+                // The beacon's pad, legs and windbreaks stand on the ridge here.
+                if (x - 1024.0).hypot(z - 1024.0) < 15.0 { continue; }
+                let ground = surface_on(id, x, z).0;
+                let top = pack.floor(Vec3::new(x, 400.0, z)).expect("support over a cut cell").0;
+                if (122..134).contains(&iz) {
+                    assert!((top - ground).abs() < 0.02, "roof {top} is not the ridge {ground} at ({x}, {z})");
+                } else {
+                    assert!(top > 210.0 && top < ground + 0.02, "trench floor {top} at ({x}, {z}), ground {ground}");
+                }
+            }
+        }
+        // Mouth to mouth along three lanes (the ice boulders beside them are
+        // cover), one step at a time, at the height
+        // of a skier's body: nothing solid and no terrain in the way.
+        let floor_guess = |z: f32| {
+            let d = (z - 1024.0).abs();
+            if d <= 48.0 { 219.0 - 5.0 * (1.0 + (std::f32::consts::PI * d / 48.0).cos()) / 2.0 } else { 222.5 }
+        };
+        for x in [1021.0_f32, 1024.0, 1027.0] {  // clear of both ice boulders
+            let mut prev: Option<Vec3> = None;
+            for k in 0..=78 {
+                let z = 946.0 + k as f32 * 2.0;
+                let floor = pack.floor(Vec3::new(x, floor_guess(z) + 2.0, z)).expect("cavern floor").0;
+                assert!(floor > 212.0 && floor < 223.0, "floor {floor} at ({x}, {z})");
+                let body = Vec3::new(x, floor + PLAYER_RADIUS + 0.05, z);
+                if let Some(a) = prev {
+                    assert!(pack.body_sweep(a, body).is_none(), "blocked between {a:?} and {body:?}");
+                    assert!(segment_hit(id, a, body, PLAYER_RADIUS).is_none(), "terrain in the lane at {body:?}");
+                }
+                prev = Some(body);
+            }
         }
     }
 

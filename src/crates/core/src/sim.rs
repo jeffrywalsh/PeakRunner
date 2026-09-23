@@ -3169,6 +3169,45 @@ mod spawn_point_tests {
         }
     }
 
+    /// A skier holding ski, with no steering, enters Frostline's ice cavern
+    /// from either trench and coasts out through the far trench: no snag on a
+    /// wall, seam or mouth, no fall through the floor, and the dip keeps
+    /// momentum. Uses the real movement code on the embedded pack.
+    #[test]
+    fn frostline_cavern_skis_through_mouth_to_mouth() {
+        let map = MapId::SnowblindClone;
+        for (z0, dir, speed) in [(950.0_f32, 1.0_f32, 30.0_f32), (1098.0, -1.0, 30.0), (950.0, 1.0, 16.0)] {
+            let mut world = World::new();
+            world.set_map(map);
+            world.start_match(true);
+            world.players.truncate(1);
+            world.player_id = 0;
+            let floor = crate::terrain::support_on(map, Vec3::new(1024.0, 226.0, z0)).0;
+            let p = &mut world.players[0];
+            p.pos = Vec3::new(1024.0, floor + PLAYER_RADIUS, z0);
+            p.vel = Vec3::new(0.0, 0.0, dir * speed);
+            p.yaw = if dir > 0.0 { std::f32::consts::PI } else { 0.0 };
+            p.alive = true; p.health = 100.0; p.on_ground = true; p.skiing = true; p.jetting = false;
+            world.input = Input::default();
+            world.input.jump = true;
+            let (mut min_speed, mut exit_speed) = (f32::MAX, None);
+            for _ in 0..(60 * 12) {
+                world.step_players(STEP);
+                let p = &world.players[0];
+                let d = p.pos.z - 1024.0;
+                assert!(p.pos.y > 210.0, "fell through at {:?}", p.pos);
+                if d.abs() < 48.0 {
+                    assert!((p.pos.x - 1024.0).abs() < 11.4, "drifted into the wall at {:?}", p.pos);
+                    min_speed = min_speed.min(Vec2::new(p.vel.x, p.vel.z).length());
+                }
+                if d * dir > 72.0 { exit_speed = Some(Vec2::new(p.vel.x, p.vel.z).length()); break; }
+            }
+            let exit = exit_speed.unwrap_or_else(|| panic!("skier from z {z0} at {speed} m/s never left the far trench: {:?}", world.players[0].pos));
+            assert!(min_speed > 8.0, "skier from z {z0} slowed to {min_speed} m/s inside");
+            assert!(exit > speed * 0.6, "skier from z {z0} left at {exit} m/s after entering at {speed}");
+        }
+    }
+
     #[test]
     fn server_respawn_picks_varied_points_for_the_right_team() {
         for map in [MapId::BroadsideClone, MapId::Raindance] {

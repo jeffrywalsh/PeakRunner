@@ -14,6 +14,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 from assets import budgets
 from assets import frostline_beacon as beacon
+from assets import frostline_cavern as cavern
 from assets import frostline_flora as flora
 from assets import frostline_materials as materials
 from assets import frostline_station as st
@@ -89,6 +90,8 @@ def whole_map():
         mesh.origin = tuple(spec['beacon']['position']); mesh.yaw = 0
         beacon.build(mesh)
         grid = build.terrain_grid(spec)
+        cavern.build(mesh, grid)
+        mesh.collision.extend(cavern.lid(grid)[1])
         mesh.origin = (0, 0, 0)
         flora.build(mesh, build.trees(spec, grid))
         _WHOLE.update(spec=spec, mesh=mesh, soup=Soup(mesh.collision), grid=grid)
@@ -333,15 +336,17 @@ class FrostlineTests(unittest.TestCase):
     def test_generators_are_underground_in_covered_cut_cells(self):
         spec, mesh, soup, grid = whole_map()
         cells = set(build.holes(spec))
-        self.assertEqual(len(cells), 2*sum((x1-x0)*(z1-z0)/64 for x0, x1, z0, z1 in st.HOLES.values()))
+        cave = set(cavern.holes())
+        self.assertEqual(len(cells), 2*sum((x1-x0)*(z1-z0)/64 for x0, x1, z0, z1 in st.HOLES.values())+len(cave))
         gens = [e for e in mesh.entities if e['kind'] == 'generator']
         self.assertEqual(len(gens), 2)
         for e, b in zip(gens, spec['bases']):
             x, y, z = e['position']
             self.assertIn(int(z//8)*256+int(x//8), cells, e['id'])
             self.assertLess(y, b['position'][1]+st.G, 'generator is below the shelf')
-        # Every cut cell is roofed at or above ground: no exposed hole or lid.
-        for c in cells:
+        # Every base cut cell is roofed at or above ground: no exposed hole or
+        # lid. (The cavern's cells have their own test below.)
+        for c in cells-cave:
             ix, iz = c % 256, c//256
             for fx in (.1, .5, .9):
                 for fz in (.1, .5, .9):
@@ -436,6 +441,101 @@ class FrostlineTests(unittest.TestCase):
                 digests.append({f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in out.iterdir()})
             self.assertEqual(digests[0], digests[1])
             self.assertEqual(len(digests[0]), 7)
+
+class CavernTests(unittest.TestCase):
+    """The ice cavern through the beacon ridge (assets/frostline_cavern.py)."""
+    LANES = (1021.0, 1024.0, 1027.0)      # clear of both ice boulders
+
+    def test_roof_copies_the_ridge_and_every_cut_cell_has_support(self):
+        spec, mesh, soup, grid = whole_map()
+        q = cavern.quantize(grid)
+        for c in cavern.holes():
+            ix, iz = c % 256, c//256
+            for fx in (.02, .5, .98):
+                for fz in (.02, .5, .98):
+                    x, z = (ix+fx)*8, (iz+fz)*8
+                    if math.hypot(x-cavern.CX, z-cavern.CX) < 15: continue   # beacon pad and legs
+                    ground = cavern.surface(q, x, z)
+                    top = ground+80-soup.first((x, ground+80, z), (0, -1, 0))
+                    if cavern.roofed(ix, iz):
+                        self.assertAlmostEqual(top, ground, delta=.02, msg=('roof is not the ridge', x, z))
+                    else:
+                        self.assertTrue(210 < top < ground+.02, ('trench floor', x, z, top, ground))
+
+    def test_roof_renders_as_terrain(self):
+        spec, _, _, grid = whole_map()
+        render, collision = cavern.lid(grid)
+        v = np.array(render).reshape(-1, 12)
+        roofed = [c for c in cavern.cells() if cavern.roofed(*c)]
+        self.assertEqual(len(v), 6*len(roofed)); self.assertEqual(len(collision), 3*len(v))
+        self.assertTrue(np.all(v[:, 11] == -2) and np.all(v[:, 10] == 0), 'terrain shading path')
+        self.assertTrue(np.allclose(v[:, 6], v[:, 0]/8) and np.allclose(v[:, 7], v[:, 2]/8))
+        self.assertTrue(np.allclose(v[:, 8], (v[:, 0]/8+.5)/256) and np.allclose(v[:, 9], (v[:, 2]/8+.5)/256))
+        self.assertTrue(np.allclose(np.linalg.norm(v[:, 3:6], axis=1), 1))
+        self.assertTrue(np.all(v[:, 0] % 8 == 0) and np.all(v[:, 2] % 8 == 0))
+        q = cavern.quantize(grid)
+        self.assertTrue(np.array_equal(v[:, 1], q[(v[:, 2]/8).astype(int), (v[:, 0]/8).astype(int)]))
+
+    def test_lanes_are_walkable_from_trench_end_to_trench_end(self):
+        """Body-band sweep along three lanes over the whole passage. Outside
+        the trench ends the approach is Frostline's usual 35-40 degree snow,
+        skied or jetted like everywhere else, so the walk starts at the ends."""
+        from assets import route_checks
+        pack = route_checks.Pack(Path(__file__).resolve().parent.parent/'assets/maps/frostline')
+        for x in self.LANES:
+            pts = []
+            for z in np.arange(944.0, 1104.1, 2.0):
+                ys = route_checks.floors(pack, x, z)
+                self.assertTrue(ys, (x, z))
+                expect = cavern.floor_at(z-cavern.CX)
+                pts.append((x, min(ys, key=lambda y: abs(y-expect)), z))
+            self.assertLess(max(abs(b[1]-a[1]) for a, b in zip(pts, pts[1:])), .75, 'no step taller than a walk')
+            self.assertTrue(route_checks.path_clear(pack, pts), x)
+
+    def test_mouths_are_open_across_their_width(self):
+        """Through each portal, the whole opening (wall to wall, floor to
+        vault) is clear from the trench into the cavern; and at 3.5 m, above
+        the boulders, the cavern is clear end to end across its width."""
+        _, _, soup, _ = whole_map()
+        xs = cavern._vault_xs(); ys = [cavern.vault(x) for x in xs]   # the built polygon
+        for sign in (-1, 1):
+            portal = cavern.CX+sign*cavern.PORTAL_D
+            for dx in np.arange(-cavern.HALF_W+.6, cavern.HALF_W-.59, 1.0):
+                for h in np.arange(.5, np.interp(dx, xs, ys)-.4, 1.0):
+                    o = (cavern.CX+dx, cavern.FLOOR_MOUTH+h, portal+sign*2.0)   # the trench floor is flat here
+                    self.assertEqual(soup.first(o, (0, 0, -sign), 4.0), np.inf, (sign, dx, h))
+        for x in np.arange(cavern.CX-cavern.HALF_W+1, cavern.CX+cavern.HALF_W-.9, 1.0):
+            y = cavern.FLOOR_MOUTH+3.5
+            self.assertEqual(soup.first((x, y, 950.0), (0, 0, 1), 1098.0-950.0), np.inf, x)
+
+    def test_no_turret_or_sensor_can_see_inside_and_no_one_spawns_there(self):
+        spec, mesh, soup, _ = whole_map()
+        targets = np.array([(x, cavern.floor_at(z-cavern.CX)+LIFT+.8, z)
+                            for x in np.arange(cavern.CX-11, cavern.CX+11.1, 2.0)
+                            for z in np.arange(cavern.CX-47, cavern.CX+47.1, 2.0)])
+        for e in mesh.entities:
+            if e['kind'] not in ('turret', 'sensor'): continue
+            p = np.array(e['position']); d = targets-p; dist = np.linalg.norm(d, axis=1)
+            near = dist < 260
+            if not near.any(): continue
+            starts = p+d[near]/dist[near, None]*(e['radius']+.6)
+            self.assertFalse((~soup.blocked_many(starts, targets[near])).any(), e['id'])
+        import json
+        manifest = json.loads((Path(__file__).resolve().parent.parent/'assets/maps/frostline/map.json').read_text())
+        for team in manifest['spawn_points']:
+            for x, y, z, _ in team:
+                self.assertFalse(1000 <= x <= 1048 and 936 <= z <= 1112, (x, z))
+
+    def test_geometry_has_no_degenerate_triangles_and_fits_its_budget(self):
+        spec, _, _, grid = whole_map()
+        m = kit.Mesh(); m.lamps = []; cavern.build(m, grid)
+        t = np.array(m.vertices, np.float64).reshape(-1, 3, 12)[:, :, :3]
+        area = np.linalg.norm(np.cross(t[:, 1]-t[:, 0], t[:, 2]-t[:, 0]), axis=1)/2
+        self.assertGreater(area.min(), 1e-4)
+        solid = len(m.collision)//9+len(cavern.lid(grid)[1])//9
+        self.assertLess(solid, 600, solid)
+        self.assertGreaterEqual(len(m.lamps), 16)
+
 
 class RouteCounts(unittest.TestCase):
     """Walking routes on the committed pack (assets/route_checks.py): the
