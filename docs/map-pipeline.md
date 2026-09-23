@@ -160,7 +160,11 @@ Also run the other maps' suites and confirm their builds are unchanged.
 Mirror the Tower Complex and Cairnhold commits:
 
 - Build into `src/assets/maps/<id>/`. Two builds must be byte-identical.
-- `crates/core/src/map_pack.rs`: embed through the shared helper.
+- `crates/core/src/map_pack.rs`: add an `embedded_map!` line, and add the id
+  to `MAPS` in `crates/core/build.rs`. The build script zlib-compresses the
+  six payloads into `OUT_DIR`; `map.json` stays raw, and the manifest hashes
+  (and so the fingerprint) remain over the uncompressed bytes. Commit only the
+  raw pack; never commit compressed copies.
 - `crates/core/src/terrain.rs`: always listed; `MapInfo` with the real name
   and base positions. A new slot needs a new `MapId` variant and key.
 - Update tests in `map_catalog.rs`, `rotation.rs` and `server/src/lib.rs`.

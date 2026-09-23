@@ -60,70 +60,58 @@ pub struct MapPack {
     pub heights: Vec<u8>,
 }
 
-/// Original Tower Complex, built by `scripts/build-tower-complex.py`. It holds
-/// the `broadside-clone` rotation slot so existing server configs keep working.
-fn tower_complex_asset(name: &str) -> Result<&'static [u8], String> {
-    Ok(match name {
-        "map.json" => include_bytes!("../../../assets/maps/tower-complex/map.json"),
-        "vertices.bin" => include_bytes!("../../../assets/maps/tower-complex/vertices.bin"),
-        "collision.bin" => include_bytes!("../../../assets/maps/tower-complex/collision.bin"),
-        "height.bin" => include_bytes!("../../../assets/maps/tower-complex/height.bin"),
-        "weights.rgba" => include_bytes!("../../../assets/maps/tower-complex/weights.rgba"),
-        "textures.rgba" => include_bytes!("../../../assets/maps/tower-complex/textures.rgba"),
-        "ambient.f32" => include_bytes!("../../../assets/maps/tower-complex/ambient.f32"),
-        _ => return Err("Unknown Tower Complex asset".into()),
-    })
+/// Embedded payloads are zlib-compressed at build time by `crates/core/build.rs`;
+/// `map.json` stays raw. `from_assets` checks every inflated payload against the
+/// manifest's SHA-256 of the uncompressed bytes, so fingerprints and
+/// compatibility are unchanged. Later reopens rely on zlib's Adler-32: the
+/// embedded bytes are immutable and inflate deterministically.
+fn inflate(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(bytes, 128_000_000)
+        .map_err(|e| format!("Corrupt embedded map asset: {:?}", e.status))
 }
 
-/// Original Cairnhold, built by `scripts/build-cairnhold.py`. It holds the
-/// `stonehenge-clone` rotation slot so existing server configs keep working.
-fn cairnhold_asset(name: &str) -> Result<&'static [u8], String> {
-    Ok(match name {
-        "map.json" => include_bytes!("../../../assets/maps/cairnhold/map.json"),
-        "vertices.bin" => include_bytes!("../../../assets/maps/cairnhold/vertices.bin"),
-        "collision.bin" => include_bytes!("../../../assets/maps/cairnhold/collision.bin"),
-        "height.bin" => include_bytes!("../../../assets/maps/cairnhold/height.bin"),
-        "weights.rgba" => include_bytes!("../../../assets/maps/cairnhold/weights.rgba"),
-        "textures.rgba" => include_bytes!("../../../assets/maps/cairnhold/textures.rgba"),
-        "ambient.f32" => include_bytes!("../../../assets/maps/cairnhold/ambient.f32"),
-        _ => return Err("Unknown Cairnhold asset".into()),
-    })
+macro_rules! embedded_map {
+    ($(#[$doc:meta])* $func:ident, $dir:literal, $label:literal) => {
+        $(#[$doc])*
+        fn $func(name: &str) -> Result<Vec<u8>, String> {
+            macro_rules! packed {($file:literal) => {
+                inflate(include_bytes!(concat!(env!("OUT_DIR"), "/maps/", $dir, "/", $file, ".zlib")))
+            }}
+            match name {
+                "map.json" => Ok(include_bytes!(concat!("../../../assets/maps/", $dir, "/map.json")).to_vec()),
+                "vertices.bin" => packed!("vertices.bin"),
+                "collision.bin" => packed!("collision.bin"),
+                "height.bin" => packed!("height.bin"),
+                "weights.rgba" => packed!("weights.rgba"),
+                "textures.rgba" => packed!("textures.rgba"),
+                "ambient.f32" => packed!("ambient.f32"),
+                _ => Err(concat!("Unknown ", $label, " asset").into()),
+            }
+        }
+    };
 }
 
-/// Original Frostline, built by `scripts/build-frostline.py`. It holds the
-/// `snowblind-clone` rotation slot so existing server configs keep working.
-fn frostline_asset(name: &str) -> Result<&'static [u8], String> {
-    Ok(match name {
-        "map.json" => include_bytes!("../../../assets/maps/frostline/map.json"),
-        "vertices.bin" => include_bytes!("../../../assets/maps/frostline/vertices.bin"),
-        "collision.bin" => include_bytes!("../../../assets/maps/frostline/collision.bin"),
-        "height.bin" => include_bytes!("../../../assets/maps/frostline/height.bin"),
-        "weights.rgba" => include_bytes!("../../../assets/maps/frostline/weights.rgba"),
-        "textures.rgba" => include_bytes!("../../../assets/maps/frostline/textures.rgba"),
-        "ambient.f32" => include_bytes!("../../../assets/maps/frostline/ambient.f32"),
-        _ => return Err("Unknown Frostline asset".into()),
-    })
-}
+embedded_map!(
+    /// Original Tower Complex, built by `scripts/build-tower-complex.py`. It holds
+    /// the `broadside-clone` rotation slot so existing server configs keep working.
+    tower_complex_asset, "tower-complex", "Tower Complex");
+embedded_map!(
+    /// Original Cairnhold, built by `scripts/build-cairnhold.py`. It holds the
+    /// `stonehenge-clone` rotation slot so existing server configs keep working.
+    cairnhold_asset, "cairnhold", "Cairnhold");
+embedded_map!(
+    /// Original Frostline, built by `scripts/build-frostline.py`. It holds the
+    /// `snowblind-clone` rotation slot so existing server configs keep working.
+    frostline_asset, "frostline", "Frostline");
+embedded_map!(
+    /// Original Dustreach, built by `scripts/build-dustreach.py`. It holds the
+    /// `desert-of-death-clone` rotation slot so existing server configs keep working.
+    dustreach_asset, "dustreach", "Dustreach");
 
-/// Original Dustreach, built by `scripts/build-dustreach.py`. It holds the
-/// `desert-of-death-clone` rotation slot so existing server configs keep working.
-fn dustreach_asset(name: &str) -> Result<&'static [u8], String> {
-    Ok(match name {
-        "map.json" => include_bytes!("../../../assets/maps/dustreach/map.json"),
-        "vertices.bin" => include_bytes!("../../../assets/maps/dustreach/vertices.bin"),
-        "collision.bin" => include_bytes!("../../../assets/maps/dustreach/collision.bin"),
-        "height.bin" => include_bytes!("../../../assets/maps/dustreach/height.bin"),
-        "weights.rgba" => include_bytes!("../../../assets/maps/dustreach/weights.rgba"),
-        "textures.rgba" => include_bytes!("../../../assets/maps/dustreach/textures.rgba"),
-        "ambient.f32" => include_bytes!("../../../assets/maps/dustreach/ambient.f32"),
-        _ => return Err("Unknown Dustreach asset".into()),
-    })
-}
-
-type Embedded = fn(&str) -> Result<&'static [u8], String>;
+type Embedded = fn(&str) -> Result<Vec<u8>, String>;
 
 fn embedded_pack(assets: Embedded, label: &str) -> MapPack {
-    let mut pack = MapPack::from_assets(Path::new(""), &|n,_|assets(n).map(|b|b.to_vec()))
+    let mut pack = MapPack::from_assets(Path::new(""), &|n,_|assets(n))
         .unwrap_or_else(|e| panic!("Built-in {label} pack failed validation: {e}"));
     pack.embedded = assets; pack
 }
@@ -146,7 +134,7 @@ pub fn active() -> Option<&'static MapPack> {
                 }
             }
         }
-        Some(MapPack::from_assets(Path::new(""), &|name,_|builtin_asset(name).map(|b|b.to_vec()))
+        Some(MapPack::from_assets(Path::new(""), &|name,_|builtin_asset(name))
             .expect("Built-in original map failed validation"))
     }).as_ref()
 }
@@ -321,7 +309,7 @@ impl MapPack {
         // Renderer/audio reopen only listed fixed assets. Recheck the digest so
         // editing a pack after startup cannot split visible and physical worlds.
         if name.contains(['/', '\\']) || !self.manifest.files.contains_key(name) {return Err("Unknown map asset".into());}
-        if self.root.as_os_str().is_empty() {return (self.embedded)(name).map(|b|b.to_vec());}
+        if self.root.as_os_str().is_empty() {return (self.embedded)(name);}
         let path=self.root.join(name);
         if name == "ambient.f32" && self.manifest.files[name] == format!("{:x}",Sha256::digest([])) {
             match path.try_exists() {
@@ -377,23 +365,14 @@ impl MapPack {
 }
 
 #[cfg(feature="external-map")]
-fn builtin_asset(_name:&str)->Result<&'static [u8],String> {
+fn builtin_asset(_name:&str)->Result<Vec<u8>,String> {
     Err("This launcher-managed build requires its external map pack. Start it through PeakRunner Launcher.".into())
 }
 
 #[cfg(not(feature="external-map"))]
-fn builtin_asset(name:&str)->Result<&'static [u8],String> {
-    Ok(match name {
-        "map.json"=>include_bytes!("../../../assets/maps/raindance/map.json"),
-        "vertices.bin"=>include_bytes!("../../../assets/maps/raindance/vertices.bin"),
-        "collision.bin"=>include_bytes!("../../../assets/maps/raindance/collision.bin"),
-        "height.bin"=>include_bytes!("../../../assets/maps/raindance/height.bin"),
-        "weights.rgba"=>include_bytes!("../../../assets/maps/raindance/weights.rgba"),
-        "textures.rgba"=>include_bytes!("../../../assets/maps/raindance/textures.rgba"),
-        "ambient.f32"=>include_bytes!("../../../assets/maps/raindance/ambient.f32"),
-        _=>return Err("Unknown built-in map asset".into()),
-    })
-}
+embedded_map!(
+    /// Original Raindance, built by `scripts/build-raindance.py`.
+    builtin_asset, "raindance", "built-in map");
 
 fn cell(x:f32)->i32 {(x/32.0).floor() as i32}
 
@@ -444,6 +423,45 @@ fn sweep_triangle(s:Vec3,e:Vec3,r:f32,tri:[Vec3;3])->Option<(f32,Vec3)> {
 
 #[cfg(test)]
 mod tests {
+    /// Release-mode load timing probe: `cargo test --release -p peakrunner-core
+    /// --lib embedded_pack_load_timing -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "timing probe"]
+    fn embedded_pack_load_timing() {
+        use super::*;
+        use crate::terrain::MapId;
+        let t = std::time::Instant::now();
+        let rain = active().unwrap();
+        println!("raindance load {:.1} ms", t.elapsed().as_secs_f64() * 1e3);
+        for (map, label) in [(MapId::BroadsideClone, "tower-complex"), (MapId::StonehengeClone, "cairnhold"),
+            (MapId::SnowblindClone, "frostline"), (MapId::DesertOfDeathClone, "dustreach")] {
+            let t = std::time::Instant::now();
+            let pack = on(map).unwrap();
+            let load = t.elapsed();
+            let t = std::time::Instant::now();
+            let textures = pack.asset("textures.rgba").unwrap();
+            println!("{label} load {:.1} ms, textures reopen {:.1} ms ({} bytes)",
+                load.as_secs_f64() * 1e3, t.elapsed().as_secs_f64() * 1e3, textures.len());
+        }
+        let t = std::time::Instant::now();
+        rain.asset("textures.rgba").unwrap();
+        println!("raindance textures reopen {:.1} ms", t.elapsed().as_secs_f64() * 1e3);
+    }
+
+    #[test]
+    fn embedded_payloads_inflate_to_their_manifest_hashes() {
+        use super::*;
+        use crate::terrain::MapId;
+        assert!(inflate(b"not a deflate stream").is_err());
+        for map in [MapId::Raindance, MapId::BroadsideClone, MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone] {
+            let pack = on(map).unwrap();
+            for name in pack.manifest.files.keys() {
+                let bytes = pack.asset(name).unwrap();
+                assert_eq!(format!("{:x}", Sha256::digest(&bytes)), pack.manifest.files[name], "{map:?} {name}");
+            }
+        }
+    }
+
     #[test]
     fn fog_colour_parses_validates_and_defaults() {
         use super::*;
@@ -470,7 +488,7 @@ mod tests {
             std::fs::write(root.join(name), builtin_asset(name).unwrap()).unwrap();
         }
         assert!(MapPack::load(&root).is_err(), "missing nonempty audio must fail");
-        let mut manifest: serde_json::Value = serde_json::from_slice(builtin_asset("map.json").unwrap()).unwrap();
+        let mut manifest: serde_json::Value = serde_json::from_slice(&builtin_asset("map.json").unwrap()).unwrap();
         manifest["files"]["ambient.f32"] = format!("{:x}",Sha256::digest([])).into();
         std::fs::write(root.join("map.json"),serde_json::to_vec(&manifest).unwrap()).unwrap();
         let absent = MapPack::load(&root).unwrap();

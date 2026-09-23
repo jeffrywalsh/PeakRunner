@@ -552,6 +552,12 @@ cargo check --target wasm32-unknown-unknown -p peakrunner --lib
 cargo build --locked --release -p peakrunner --bin peakrunner
 ```
 
+Embedded map packs are zlib-compressed at build time by `crates/core/build.rs`
+(release binary about 29 MiB instead of 93) and inflated per map on first
+use; manifest hashes and fingerprints stay over the raw bytes, so compression
+never changes compatibility. Load-timing probe:
+`cargo test --release -p peakrunner-core --lib embedded_pack_load_timing -- --ignored --nocapture`.
+
 Socket tests need local TCP/UDP permission. The ignored eight-client load test is:
 `cargo test -p peakrunner-server --lib eight_clients_sustain_movement_and_all_weapons -- --ignored`.
 GPU capture tests are also explicitly ignored by default; run relevant captures

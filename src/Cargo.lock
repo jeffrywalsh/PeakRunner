@@ -2685,6 +2685,7 @@ name = "peakrunner-core"
 version = "0.1.0"
 dependencies = [
  "glam",
+ "miniz_oxide 0.9.1",
  "serde",
  "serde_json",
  "sha2",
