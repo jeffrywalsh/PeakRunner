@@ -91,9 +91,8 @@ loop and byte-identical rebuilds.
 
 ## Known gaps
 
-- The renderer's fog is a fixed grey for every map pack, so distant dunes
-  fade to grey rather than desert haze. That is a renderer choice, not changed
-  here.
-- Kit placeholder turret, sensor, inventory and generator models.
+- Distant dunes now fade into a warm haze: `sky.fogColor` 0.80 0.69 0.52.
+- Kit sensor, inventory and generator models are shared; turrets now use the
+  kit's mount plus the client's runtime head.
 - No real glow: lit surfaces are bright textures.
 - Nobody has walked, skied or played it yet.

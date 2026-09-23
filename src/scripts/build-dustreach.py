@@ -191,7 +191,7 @@ def build(output, bake=True):
     manifest.update(version=1, id=definition['id'], name=definition['name'], flags=flags, spawns=spawns,
         exact_spawns=True, spawn_points=spawn_points, holes=[], entities=mesh.entities,
         instances=instances, ambient_emitters=[[gx, gy+20, gz, .25, 400, 2400]],
-        sky={'visibleDistance': '2600', 'fogDistance': '1500'},
+        sky={'visibleDistance': '2600', 'fogDistance': '1500', 'fogColor': '0.80 0.69 0.52'},
         asset_sha256=pack_writer.source_hash(dustreach_citadel.__file__),
         gate_asset_sha256=pack_writer.source_hash(dustreach_gate.__file__),
         structure_kit_sha256=pack_writer.source_hash(structure_kit.__file__),

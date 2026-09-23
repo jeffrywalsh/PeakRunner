@@ -399,6 +399,14 @@ class DustreachTests(unittest.TestCase):
             self.assertEqual(digests[0], digests[1])
             self.assertEqual(len(digests[0]), 7)
 
+class SpawnForwardClearance(unittest.TestCase):
+    """Every committed spawn faces open floor: a clear body-width view for
+    6 m and the same floor for a half-second walk (docs/map-pipeline.md)."""
+    def test_committed_spawns_face_open_floor(self):
+        from assets import spawn_checks
+        pack = Path(__file__).resolve().parent.parent/'assets/maps/dustreach'
+        self.assertEqual(spawn_checks.problems(pack), [])
+
 
 if __name__ == '__main__':
     unittest.main()

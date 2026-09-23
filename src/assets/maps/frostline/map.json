@@ -94,14 +94,14 @@
       [
         923.4,
         254.2,
-        700.6,
-        1.5707963267948966
+        699.6,
+        1.9634954084936207
       ],
       [
         917.4,
         254.2,
         694.2,
-        3.141592653589793
+        4.71238898038469
       ],
       [
         924.8,
@@ -144,14 +144,14 @@
       [
         1124.6,
         254.2,
-        1347.4,
-        4.71238898038469
+        1348.4,
+        5.105088062083414
       ],
       [
         1130.6,
         254.2,
         1353.8,
-        0.0
+        1.5707963267948966
       ],
       [
         1123.2,
@@ -400,7 +400,7 @@
   ],
   "instances": [
     {
-      "asset": "frostline-station-v1",
+      "asset": "frostline-station-v2",
       "team": 0,
       "position": [
         1024,
@@ -486,7 +486,7 @@
       }
     },
     {
-      "asset": "frostline-station-v1",
+      "asset": "frostline-station-v2",
       "team": 1,
       "position": [
         1024,
@@ -617,23 +617,24 @@
   "ambient_emitters": [],
   "sky": {
     "visibleDistance": "700",
-    "fogDistance": "220"
+    "fogDistance": "220",
+    "fogColor": "0.84 0.87 0.90"
   },
   "trees": 112,
-  "asset_sha256": "c4887287fae20aad5341c45feafa41451d2d62cb21131ef1c89af6c590e6ce45",
+  "asset_sha256": "b0b6fc7d45baf03737c1abc1e5747c32fd8c236461beecc65270cd0d5f5eca5d",
   "beacon_asset_sha256": "f7ba9c7d254d498c48b95ee5a343a67a3f059f399235b31478f4096a1a532bdb",
   "flora_source_sha256": "da7ef02fa1d6faeb5ea080f449a071a5c028ecd584b10c2c8bd8d76207b07a24",
   "structure_kit_sha256": "0636249d6eb133db27977b895a48d7d50ce7b8882ec8ba8fd0a63908b5f04630",
   "terrain_source_sha256": "91de260a2a775c8db3e4e531a36d4bb6565800c3b0ad209372995fb0f80819a2",
   "material_source_sha256": "ca1f77aa4db5b1f372ad9441c69067c5e126fea39746c1fe12aafae7a2cc7562",
-  "provenance": "PeakRunner original Frostline geometry, original procedural terrain, flora and material kit; no extracted assets or external height data",
+  "provenance": "PeakRunner original Frostline geometry, original procedural terrain, flora, material kit and synthesized wind; no extracted assets or external height data",
   "definition_sha256": "a8aeda4054e273f30a278be8e3ce57b1a0d183019ea8f67fb00475f3f1373b23",
   "files": {
     "height.bin": "4cbca8345f8c6356fb5219220ce22066cede3a40a8115a7b5b994864a0c65be0",
-    "vertices.bin": "8394a3ac0d2688c73bdf7717ba60fbcb92416c86f111d5e9ad5c1a5b8aed2f68",
-    "collision.bin": "97d50d3b92de6c112dbab24aaee2d0361899082f1b43a2e1ca26b244447aade0",
+    "vertices.bin": "5ae8c65d872b6df07d6b4d452d486edf11da5ceffddd287f902ea944d83f6bd6",
+    "collision.bin": "71c2323028bb9f5f006841ffd01c02b7471c8fd653ff59e59a77e70c7d07fe58",
     "weights.rgba": "f997b670a8eb06e1762f579e3785186664c00a12026ec6b207f734941d7d6829",
-    "textures.rgba": "900cc3ec52d37e48f93ac0190dc8f9cf156f68ea151741624ff7c3545aff26a2",
-    "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e"
+    "textures.rgba": "3687a51be11f4a3546c64ade78219b12f03b6d6a70b911c068af3e1a28c22cb3",
+    "ambient.f32": "249173b29122b2fdc3b5605dd94bc708a7c210eec2c6a0e4895e5a8f55630cd8"
   }
 }

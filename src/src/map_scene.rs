@@ -100,7 +100,7 @@ impl MapGpu {
         let far=sky.get("visibleDistance").and_then(|s|s.parse().ok()).unwrap_or(450.0);
         let near=sky.get("fogDistance").and_then(|s|s.parse().ok()).unwrap_or(200.0);
         data.extend([frame.eye.x,frame.eye.y,frame.eye.z,far]);data.extend([-0.57735,0.57735,-0.57735,0.0]);
-        data.extend([0.62,0.62,0.62,near]);data.extend(pack.manifest.terrain_layers.map(|n|n as f32));
+        let [fr,fg,fb]=pack.fog_color();data.extend([fr,fg,fb,near]);data.extend(pack.manifest.terrain_layers.map(|n|n as f32));
         for i in 0..8 {data.push(*pack.manifest.sky_layers.get(i).unwrap_or(&0) as f32);}
         queue.write_buffer(&self.uniform,0,bytemuck::cast_slice(&data));
     }

@@ -468,7 +468,7 @@ def build(mesh, team, circuit):
         'spawn_points': [(-4.2,L1+SPAWN_LIFT,8.5,0), (4.2,L1+SPAWN_LIFT,8.5,0),
                          (-3.5,L2+SPAWN_LIFT,-7.5,-math.pi/2), (4.2,L2+SPAWN_LIFT,-7.5,math.pi/2),
                          (-4,L3+SPAWN_LIFT,6,0), (4,L3+SPAWN_LIFT,7,0),
-                         (-11,L1+SPAWN_LIFT,34,0), (5,L1+SPAWN_LIFT,34,0)],
+                         (-11,L1+SPAWN_LIFT,34,-math.pi/2), (5,L1+SPAWN_LIFT,34,-math.pi/2)],
         'entrances': [(0,.2,-TOWER_HALF),(-8,.2,TOWER_HALF),(8,.2,TOWER_HALF),(-9,.2,POD_Z),(9,.2,POD_Z)],
         'generator': (-8,L1,rear_mid-2),
         'ship_platform': (8,L1,rear_mid),

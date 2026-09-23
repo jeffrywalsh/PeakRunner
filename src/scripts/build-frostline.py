@@ -10,6 +10,8 @@ Default output is the embedded assets/maps/frostline; refuses to overwrite.
 import importlib.util
 import json
 import math
+import random
+from array import array
 from pathlib import Path
 import struct
 import sys
@@ -29,7 +31,7 @@ loader = importlib.util.spec_from_file_location('kit', ROOT/'scripts/build-origi
 kit = importlib.util.module_from_spec(loader)
 loader.loader.exec_module(kit)
 STEP = frostline_terrain.STEP
-FOG = {'visibleDistance': '700', 'fogDistance': '220'}
+FOG = {'visibleDistance': '700', 'fogDistance': '220', 'fogColor': '0.84 0.87 0.90'}
 
 
 def spec():
@@ -114,6 +116,25 @@ def paint_sky(textures, count, layers, seed):
     return textures
 
 
+def polar_wind(seed):
+    """Original synthesized polar wind: low roar with sharp gusts and a thin
+    whistle band. A four-second loop; filters are warmed over one identical
+    period so the loop point is seamless. Not a recording."""
+    rng = random.Random(seed+733); count = 44100*4
+    white = [rng.uniform(-1, 1) for _ in range(count)]
+    out = array('f'); low = band = band_lp = 0.0
+    for i in range(count*2):
+        n = white[i % count]
+        low = .997*low+.003*n
+        band_lp = .6*band_lp+.4*n; band = .92*band+.08*(n-band_lp)
+        if i >= count:
+            t = math.tau*(i-count)/count
+            gust = .45+.25*math.sin(t)+.2*max(0.0, math.sin(2*t+.7))**3+.1*math.sin(5*t+2.1)
+            out.append((low*.6+band*.18*gust)*gust)
+    if sys.byteorder != 'little': out.byteswap()
+    return out.tobytes()
+
+
 def build(output, bake=True):
     if output.exists(): raise ValueError('Refusing to overwrite existing pack')
     definition = spec()
@@ -156,7 +177,7 @@ def build(output, bake=True):
         vertices, textures, count, lightmap = pack_writer.bake_lightmaps(vertices, textures, count, mesh.lamps, kit)
     files = {'height.bin': bytes(heights), 'vertices.bin': vertices,
              'collision.bin': mesh.collision.tobytes(), 'weights.rgba': bytes(weights),
-             'textures.rgba': bytes(textures), 'ambient.f32': shared['ambient']}
+             'textures.rgba': bytes(textures), 'ambient.f32': polar_wind(definition['seed'])}
     manifest = {k: old[k] for k in ['terrain_layers', 'sky_layers', 'water_layer', 'water']}
     manifest['texture_count'] = count
     if lightmap: manifest['lightmap'] = lightmap
@@ -169,7 +190,7 @@ def build(output, bake=True):
         structure_kit_sha256=pack_writer.source_hash(structure_kit.__file__),
         terrain_source_sha256=pack_writer.source_hash(frostline_terrain.__file__),
         material_source_sha256=pack_writer.source_hash(frostline_materials.__file__),
-        provenance='PeakRunner original Frostline geometry, original procedural terrain, flora and material kit; '
+        provenance='PeakRunner original Frostline geometry, original procedural terrain, flora, material kit and synthesized wind; '
                    'no extracted assets or external height data',
         definition_sha256=pack_writer.source_hash(ROOT/'maps/frostline.json'))
     pack_writer.write_pack(output, files, manifest)

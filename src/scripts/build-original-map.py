@@ -129,9 +129,14 @@ class Mesh:
             self.column((x,y+7.2,z),.3,.7,accent,6,solid=False)
             self.entity(kind,(x,y+5.8,z),team,circuit,2.8)
         elif kind=='turret':
-            self.column((x,y,z),2,1.2,'trim'); self.column((x,y+1.2,z),1.1,1.7,'panel')
-            self.box((x,y+2.7,z),(3,1.2,2.1),'panel')
-            # Barrels are runtime geometry so they track the server's aim.
+            # Static mount: base ring, buttressed pedestal and bearing collar.
+            # The head (housing, cradle, barrels) is runtime geometry so it
+            # tracks the server's aim.
+            self.column((x,y,z),2,1.2,'trim'); self.column((x,y+1.2,z),1.1,1.1,'panel')
+            for dx,dz in [(1.25,0),(-1.25,0),(0,1.25),(0,-1.25)]:
+                self.box((x+dx,y+1.6,z+dz),(.3 if dx else .9,.8,.9 if dx else .3),'trim')
+            self.column((x,y+2.3,z),1.35,.3,'trim',12)
+            self.column((x,y+2.33,z),1.42,.12,accent,12,solid=False)
             self.entity(kind,(x,y+2.8,z),team,circuit,2.2,weapon)
         elif kind=='repair':
             self.column((x,y,z),2.8,.25,'trim',12)

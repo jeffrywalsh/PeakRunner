@@ -562,7 +562,7 @@ def build(mesh, team, circuit):
         # (x, y, z, local yaw): yaw 0 faces the base front (-Z).
         'spawn_points': [(-11, lift, -1, 0), (11, lift, -1, 0), (-3, lift, 1.5, 0), (3, lift, 1.5, 0),
                          (-3, HUT_FLOOR+lift, HZ0+12, 0),
-                         (cx, deck+lift, cz+3.4, math.pi),
+                         (cx, deck+lift, cz+3.9, -math.pi/4),  # diagonal across the deck, not down the attack ramp
                          (px-5, PAD_TOP+lift, pz+4, 0), (px+5, PAD_TOP+lift, pz+4, 0)],
         'entrances': [(0, .2, GATE_Z), (mid, .2, TZ0), (mid, HUT_FLOOR+.2, HZ0), ((xa+xb)/2, HUT_RING+.2, zg)],
         'generator': generator,

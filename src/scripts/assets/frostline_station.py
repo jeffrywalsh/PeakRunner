@@ -26,7 +26,7 @@ import math
 
 from assets.structure_kit import Builder
 
-ASSET_ID = 'frostline-station-v1'
+ASSET_ID = 'frostline-station-v2'
 
 G = -3.0                              # shelf ground under the station
 SX, SZ0, SZ1, WALL = 14.0, -14.0, 14.0, .6
@@ -38,6 +38,8 @@ REAR_DOOR = (-10.0, -6.5)
 # Airlock porch in front of the door and the baffle behind it.
 PORCH_X, PORCH_Z, PORCH_TOP = 2.6, -18.0, 4.4
 BAFFLE_Z, BAFFLE_X = (-10.6, -10.0), 7.0
+# Rear airlock: baffle inside the back door; walk round its west end or east side.
+REAR_BAFFLE_Z, REAR_BAFFLE_X = (IZ1-2.0, IZ1-1.4), (-11.9, -4.6)
 PARTITION_Z, PART_DOOR, PART_DOOR_TOP = (6.0, 6.6), (6.5, 10.0), 4.0
 # West ramp: surface y = L2 at RAMP_TOP_Z down to L1 at RAMP_FOOT_Z.
 RAMP_X = (-IX, -10.4)
@@ -76,7 +78,7 @@ SPAWN_LIFT = 1.2
 # (x, floor, z, yaw); yaw 0 faces -Z, -pi/2 faces +X, pi/2 faces -X, pi faces +Z.
 STATION_SPAWNS = ((-5.0, L1, -8.2, -math.pi/2), (3.0, L1, -6.5, math.pi), (-1.0, L1, -1.0, -math.pi/2),
                   (-4.0, L2, -6.0, -math.pi/2), (7.0, L2, -9.0, math.pi/2))
-OUTPOST_SPAWNS = ((-3.4, -4.6, -math.pi/2), (2.6, 1.8, 0.0), (-4.8, 5.3, -math.pi/2))
+OUTPOST_SPAWNS = ((-3.4, -3.6, -3*math.pi/8), (2.6, 1.8, math.pi/2), (-4.8, 5.3, -math.pi/2))
 
 HULL, DECKING, GRATE, METAL, GLOW, WOOD, SNOWPINE = 'concrete', 'panel', 'grate', 'trim', 'light', 'bark', 'leaf'
 
@@ -205,6 +207,7 @@ def build(mesh, team, circuit):
     rx0, rx1 = REAR_DOOR; rxc = (rx0+rx1)/2
     mesh.ramp(rxc, rx1-rx0, SZ1, REAR_STAIR_FOOT_Z, L1, G, GRATE)
     for x in (rx0, rx1): closed_side(x, SZ1, REAR_STAIR_FOOT_Z, G-.06, rear_stair_surface)
+    wall(*REAR_BAFFLE_X, *REAR_BAFFLE_Z, L1, L1_CEIL, HULL)
     mesh.box((rxc, DOOR_TOP+.25, SZ1+.35), (rx1-rx0+.6, .3, .7), accent, False)
     mesh.box((rxc, DOOR_TOP+.45, SZ1+.4), (1.2, .1, .6), GLOW, False)
     b.lamp((rxc, DOOR_TOP-.2, SZ1+1.5), .5)

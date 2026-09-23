@@ -82,7 +82,7 @@ pub fn build_frame(world: &World, aspect: f32, dt: f32) -> DrawFrame {
     let vp = proj * view;
     let inv_vp = vp.inverse();
     let sun = Vec3::new(-0.35, 0.78, -0.42).normalize();
-    let fog = if peakrunner_core::map_pack::on(world.map).is_some() {Vec3::splat(0.62)} else {Vec3::new(0.55, 0.46, 0.38)};
+    let fog = if let Some(pack) = peakrunner_core::map_pack::on(world.map) {Vec3::from_array(pack.fog_color())} else {Vec3::new(0.55, 0.46, 0.38)};
 
     let mut lit = Vec::new();
     let mut emit = Vec::new();
@@ -119,31 +119,53 @@ pub fn build_frame(world: &World, aspect: f32, dt: f32) -> DrawFrame {
         } else {
             Vec3::new(0.24, 0.78, 0.88)
         };
+        let metal = Vec3::new(0.15, 0.16, 0.18);
         lit.push(LitDraw {
             mesh: MeshId::Cube,
-            model: Mat4::from_translation(f.pos + Vec3::Y * 1.7)
-                * Mat4::from_scale(Vec3::new(0.12, 3.4, 0.12)),
-            color: Vec3::new(0.15, 0.16, 0.18),
-            emit: 0.0,
-            mode: 0.0,
+            model: Mat4::from_translation(f.pos + Vec3::Y * 1.75)
+                * Mat4::from_scale(Vec3::new(0.12, 3.5, 0.12)),
+            color: metal, emit: 0.0, mode: 0.0,
         });
+        // Finial and a collar where the cloth's hoist meets the pole.
+        lit.push(LitDraw {
+            mesh: MeshId::Sphere,
+            model: Mat4::from_translation(f.pos + Vec3::Y * 3.58) * Mat4::from_scale(Vec3::splat(0.17)),
+            color: Vec3::new(0.78, 0.62, 0.30), emit: 0.15, mode: 0.0,
+        });
+        lit.push(LitDraw {
+            mesh: MeshId::Cube,
+            model: Mat4::from_translation(f.pos + Vec3::Y * 3.32) * Mat4::from_scale(Vec3::new(0.2, 0.1, 0.2)),
+            color: metal, emit: 0.0, mode: 0.0,
+        });
+        // The cloth keeps facing the viewer so it reads from range, and waves
+        // in strips whose ripple grows toward the free edge.
         let mut to = eye - f.pos;
         to.y = 0.0;
         let to = to.normalize_or_zero();
         let right = to.cross(Vec3::Y).normalize_or_zero();
-        let banner = Mat4::from_cols(
-            (right * 1.4).extend(0.0),
-            (Vec3::Y * 1.1).extend(0.0),
-            (to * 0.08).extend(0.0),
-            (f.pos + Vec3::Y * 2.7 + right * 0.7).extend(1.0),
-        );
-        lit.push(LitDraw {
-            mesh: MeshId::Cube,
-            model: banner,
-            color,
-            emit: 0.35,
-            mode: 0.0,
-        });
+        const STRIPS: usize = 6;
+        let (width, height) = (1.5, 1.1);
+        let strip = width / STRIPS as f32;
+        for i in 0..STRIPS {
+            let u = (i as f32 + 0.5) / STRIPS as f32;
+            let phase = world.time * 4.2 - u * 5.0 + f.team.idx() as f32;
+            let sway = u * 0.22 * phase.sin();
+            let droop = u * u * 0.12;
+            let shade = 0.86 + 0.14 * (phase + 1.2).cos();
+            let center = f.pos + Vec3::Y * (2.75 - droop) + right * (0.06 + u * width) + to * sway;
+            lit.push(LitDraw {
+                mesh: MeshId::Cube,
+                model: Mat4::from_cols(
+                    (right * strip * 1.04).extend(0.0),
+                    (Vec3::Y * height).extend(0.0),
+                    (to * 0.06).extend(0.0),
+                    center.extend(1.0),
+                ),
+                color: color * shade,
+                emit: 0.35,
+                mode: 0.0,
+            });
+        }
     }
 
     for (i, p) in world.players.iter().enumerate() {
@@ -319,19 +341,7 @@ pub fn build_frame(world: &World, aspect: f32, dt: f32) -> DrawFrame {
             model:Mat4::from_translation(d.pos()+Vec3::Y*lamp_height)*Mat4::from_scale(Vec3::new(0.24,0.12,0.24)),
             color,emit:if s.powered {1.0} else {0.1},mode:0.0});
         if d.kind==peakrunner_core::equipment::Kind::Turret {
-            let rotation=glam::Quat::from_rotation_arc(Vec3::NEG_Z,s.aim.normalize_or_zero());
-            let plasma=d.weapon==peakrunner_core::equipment::TurretWeapon::Plasma;
-            for x in if plasma {&[0.][..]} else {&[-0.65,0.65][..]} {
-                lit.push(LitDraw {mesh:MeshId::Cube,
-                    model:Mat4::from_translation(d.pos())*Mat4::from_quat(rotation)
-                        *Mat4::from_translation(Vec3::new(*x,0.0,-1.8))*Mat4::from_scale(if plasma {Vec3::new(1.,1.,2.8)} else {Vec3::new(0.35,0.35,3.4)}),
-                    color:Vec3::new(0.16,0.21,0.24),emit:0.0,mode:0.0});
-            }
-            if plasma && s.powered {
-                emit.push(EmitDraw {mesh:MeshId::Sphere,
-                    model:Mat4::from_translation(d.pos()+s.aim*3.2)*Mat4::from_scale(Vec3::splat(0.38)),
-                    color:[0.35,1.,0.12,0.6]});
-            }
+            push_turret_head(&mut lit,&mut emit,d,s);
         }
     }
     let viewmodel = viewmodel_draws(world);
@@ -747,4 +757,40 @@ pub fn normal_columns(model: Mat4) -> [[f32; 4]; 3] {
         [c[3], c[4], c[5], 0.0],
         [c[6], c[7], c[8], 0.0],
     ]
+}
+
+/// Runtime turret head: a housing that yaws with the aim, a cradle that also
+/// pitches, and barrels by weapon type. The static mount is baked into the map.
+fn push_turret_head(lit:&mut Vec<LitDraw>,emit:&mut Vec<EmitDraw>,d:&peakrunner_core::equipment::Definition,s:&peakrunner_core::equipment::State) {
+    let aim=if s.aim.length_squared()>1e-6 {s.aim.normalize()} else {Vec3::NEG_Z};
+    let flat=Vec3::new(aim.x,0.,aim.z).normalize_or(Vec3::NEG_Z);
+    let yaw=glam::Quat::from_rotation_arc(Vec3::NEG_Z,flat);
+    let full=glam::Quat::from_rotation_arc(Vec3::NEG_Z,aim);
+    let base=Mat4::from_translation(d.pos());
+    let dark=Vec3::new(0.16,0.19,0.22);let steel=Vec3::new(0.30,0.33,0.36);
+    let accent=if d.team==0 {Vec3::new(0.78,0.26,0.18)} else {Vec3::new(0.22,0.66,0.78)};
+    let part=|lit:&mut Vec<LitDraw>,q:glam::Quat,mesh,at:Vec3,size:Vec3,color:Vec3,glow:f32| lit.push(LitDraw {
+        mesh,model:base*Mat4::from_quat(q)*Mat4::from_translation(at)*Mat4::from_scale(size),color,emit:glow,mode:0.});
+    // Yaw housing with team stripes.
+    part(lit,yaw,MeshId::Bevel,Vec3::new(0.,-0.25,0.2),Vec3::new(2.3,0.9,2.3),steel,0.);
+    for x in [-1.16,1.16] {part(lit,yaw,MeshId::Cube,Vec3::new(x,-0.25,0.2),Vec3::new(0.04,0.22,1.9),accent,0.25);}
+    // Pitch cradle cheeks and receiver.
+    for x in [-0.95,0.95] {part(lit,full,MeshId::Bevel,Vec3::new(x,0.25,0.),Vec3::new(0.32,1.0,1.5),dark,0.);}
+    part(lit,full,MeshId::Bevel,Vec3::new(0.,0.25,-0.1),Vec3::new(1.5,0.8,1.7),steel,0.);
+    if d.weapon==peakrunner_core::equipment::TurretWeapon::Plasma {
+        part(lit,full,MeshId::Cube,Vec3::new(0.,0.25,-1.9),Vec3::new(0.62,0.62,2.4),dark,0.);
+        for z in [-1.2,-2.0,-2.8] {
+            part(lit,full,MeshId::Cube,Vec3::new(0.,0.25,z),Vec3::new(0.9,0.9,0.14),Vec3::new(0.35,1.0,0.3),if s.powered {0.9} else {0.05});
+        }
+        if s.powered {
+            emit.push(EmitDraw {mesh:MeshId::Sphere,
+                model:Mat4::from_translation(d.pos()+aim*3.2)*Mat4::from_scale(Vec3::splat(0.38)),
+                color:[0.35,1.,0.12,0.6]});
+        }
+    } else {
+        for x in [-0.42,0.42] {
+            part(lit,full,MeshId::Cube,Vec3::new(x,0.25,-2.0),Vec3::new(0.26,0.26,2.8),dark,0.);
+            part(lit,full,MeshId::Cube,Vec3::new(x,0.25,-3.35),Vec3::new(0.4,0.4,0.36),steel,0.);
+        }
+    }
 }

@@ -23,8 +23,10 @@ The old checkout and legacy browser prototype remain at
   with canonical docs when changing release guidance.
 - Older commands assume the native workspace: execute from `src/`. Historical
   absolute PeakRunner/peakrunner paths and app locations are no longer current.
-- Git history is on `main` only. Local `main` and `origin/main` match.
-  There are no other branches, stashes, or worktrees. See `docs/workspace-layout.md`
+- Branches: `main` (pushed at `8b87136`, the five original maps),
+  `map/reference-layouts` (fully merged into `main`), and
+  `cleanup/clipping-textures` (current map cleanup work, not yet pushed).
+  No stashes or extra worktrees. See `docs/workspace-layout.md`
   for the directory move; ignore any older note there about a stash or review worktree.
 - Linux migration validation passed on dellcon (2026-09-21): release client
   build plus isolated Xvfb/Mesa local-match rendering smoke, visually checked.
@@ -301,9 +303,9 @@ Find a Rift preferences are in the published `.20260921.1` client. See
 ## Historical build notes
 
 These notes record how the maps and the checkout were built. Current
-publication, rotation, and git state are in the map rotation section above. `main`
-is the only branch, locally and on `origin`. There is no `map/skybreak-fortress`
-branch, no recovery stash, and no review worktree. The live game is
+publication, rotation, and git state are in the map rotation section above and
+the branch list at the top. There is no `map/skybreak-fortress` branch, no
+recovery stash, and no review worktree. The live game is
 `0.1.0-private.20260921.1`, launcher `0.1.0-r1`, feed `2026092102`. Sentences
 below that call the clones offline-only, say nothing is deployed, or name
 `.20260919.4` as the live download describe the state before that publication.
@@ -487,8 +489,8 @@ were later removed from source; notes below that use them are history only.
   Offline choices are Raindance, Skybreak Bastions, and the installed private
   clones. Valley remains an internal test fixture only. `.20260919.4` clients
   cannot join the published `maps2` server.
-- `main` is the only local and remote branch. Recreate a roadmap branch from
-  current `main` when that work starts. Roadmap scope remains in `docs/roadmap.md`.
+- Start roadmap work on a new branch from current `main` (see the branch list
+  at the top). Roadmap scope remains in `docs/roadmap.md`.
 - Preferences ship in `.20260921.1`. See `docs/client-preferences.md`.
   Use isolated `PEAKRUNNER_CONFIG_DIR` for QA; never save match passwords.
 

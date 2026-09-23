@@ -2630,9 +2630,9 @@
   "files": {
     "height.bin": "7305d9f6ff06e086d7a831130da4116c42522d3e7606f28ebdf5d682bbf16eeb",
     "weights.rgba": "f8e2504e4779325a8afe4f46e269c02dbee2eaf61bbb06bbfbeb3d3eab8da19d",
-    "vertices.bin": "3ee984bd3c82177ee304e1425a611a9fbb9e445b3a1ec47d2ab455d5cef85b03",
-    "collision.bin": "9b6cbfe641580e578f7a13c810df50478381dacd9c4af25f873acab291105417",
-    "textures.rgba": "a563b3d800024240e31c2b0842e1ad42e7c6e3bf98f21d2cc4fbc0d39ad556dd",
+    "vertices.bin": "ac9952f694862c72d0389f00b15a499bdd2f05f5128c9ef2050cd8d3961949ec",
+    "collision.bin": "f4d3a4afd7cf8fffbb548f26cab84f41665a01d55e2e351fd8073fa9022339a3",
+    "textures.rgba": "f47faf7f5aa36099db2296de2cc25ea30206e93db38e2f71049342d89de004d2",
     "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e"
   }
 }

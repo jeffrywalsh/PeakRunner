@@ -64,6 +64,11 @@ Design checklist (each item has bitten us once):
   centre **1.2 m above a solid floor** with headroom, facing open space. Lower
   spawns start the support ray inside the floor slab and the player slides
   frictionless.
+- **Spawn forward clearance:** from each spawn the body's width must see 6 m
+  of clear space ahead, and a half-second walk forward must stay on the same
+  floor (no deck edge or ramp top). `scripts/assets/spawn_checks.py` checks the
+  built pack's whole world (other structures and terrain included); every
+  map's suite runs it, and the Rust spawn test walks it.
 - **Turret sightlines:** no turret, sensor or battery may see standable floor
   inside rooms. Aligned doors are the usual cause: put a baffle wall just
   inside each door so it opens sideways. Turrets use
@@ -84,6 +89,9 @@ Design checklist (each item has bitten us once):
 - **Lighting:** bake lightmaps (AO, sun shadows, lamp strips) through
   `pack_writer.bake_lightmaps`. Never write build time or other non-deterministic
   values into `map.json`: it changes the fingerprint on every build.
+- **Fog colour:** optional manifest `sky.fogColor` (`"r g b"`, 0–1) tints
+  distance fog and the sky horizon. Omit it for the default grey (0.62). Pick
+  it to match the map's sky (warm haze for desert, near-white for snow).
 - **Pads:** optional `landing_pad` with named `deploy_slots` anchors for future
   player-placed turrets and vehicles.
 

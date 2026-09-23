@@ -101,13 +101,13 @@
         1035.0,
         241.2,
         786.0,
-        3.141592653589793
+        1.5707963267948966
       ],
       [
         1019.0,
         241.2,
         786.0,
-        3.141592653589793
+        1.5707963267948966
       ]
     ],
     [
@@ -151,13 +151,13 @@
         1013.0,
         241.2,
         1262.0,
-        0.0
+        4.71238898038469
       ],
       [
         1029.0,
         241.2,
         1262.0,
-        0.0
+        4.71238898038469
       ]
     ]
   ],
@@ -621,7 +621,7 @@
     "visibleDistance": "2500",
     "fogDistance": "1500"
   },
-  "asset_sha256": "f484e3a2cd97d26b7fbff854281ba09d64d1da7225749eadd5e382b6bbeb49d0",
+  "asset_sha256": "288058a5f3df7221d60875f668e5ef09d8814322a8383241a04d8a294ad36cf4",
   "pad_asset_sha256": "e08760880694f1e3903e43d2ed1761e8537bf477e8212b3cffddca00786a85d8",
   "terrain_source_sha256": "b0eb73f41448b92fc1b37552b7c5e300eb4892e17d819966405cb5fdf3e7e72b",
   "material_source_sha256": "d86aa4cb8e7facef1838d50786a3ae0486303984f7428e3381169d18ee6d4293",
@@ -629,10 +629,10 @@
   "definition_sha256": "2c57b9bb44f141cadfec2f0f31aaff50ecd384f111a84699434cfac7bc8a7193",
   "files": {
     "height.bin": "c7cbbeee0459c9f4338a9336f6c11abdc472dd98f224672d1056edfdbdc429a6",
-    "vertices.bin": "ab94b7b270f50652923887cf5d1170829f255d61bc4cd5ed6b91f5b3fc764723",
-    "collision.bin": "684696223c1fd0be8ef6a0e62ef2d2f2d8864cfdcdb3fb809896d3864f52065c",
+    "vertices.bin": "815413dd556b5850041c7c8b62d3e8a384e49aa3f690e7731bf45f9ca2ce6edb",
+    "collision.bin": "a40dce3af7bf8c85cfad5699321eb255e92995d2fe054ecbeb46de2097a45911",
     "weights.rgba": "2c0e11be87e32040a6133893c6ba22f07ea57ea0618175cf51ca7f32dfe14c77",
-    "textures.rgba": "e4c47dcdc64f46f9ffffe84754f835a9e909b2ec885ff7e295cdc939b84e10be",
+    "textures.rgba": "f884e529e98b6d0aa46cba4828f168f63305054f7c57c08b487c3852851453eb",
     "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e"
   }
 }

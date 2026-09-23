@@ -433,4 +433,13 @@ class TowerComplexTests(unittest.TestCase):
                     self.assertLess(build.terrain_height(x+dx,z+dz,grid),y-landing_pad.KEEL-8,(p['team'],dx,dz))
             self.assertLessEqual(y-build.terrain_height(x,z,grid),80,'reachable by jetting from the ground')
 
+class SpawnForwardClearance(unittest.TestCase):
+    """Every committed spawn faces open floor: a clear body-width view for
+    6 m and the same floor for a half-second walk (docs/map-pipeline.md)."""
+    def test_committed_spawns_face_open_floor(self):
+        from assets import spawn_checks
+        pack = Path(__file__).resolve().parent.parent/'assets/maps/tower-complex'
+        self.assertEqual(spawn_checks.problems(pack), [])
+
+
 if __name__=='__main__':unittest.main()

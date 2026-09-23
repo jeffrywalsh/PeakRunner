@@ -94,8 +94,8 @@
       [
         928.0,
         203.7,
-        904.6,
-        0.0
+        904.1,
+        2.356194490192345
       ],
       [
         1117.0,
@@ -144,8 +144,8 @@
       [
         1120.0,
         203.7,
-        1143.4,
-        3.141592653589793
+        1143.9,
+        5.497787143782138
       ],
       [
         931.0,
@@ -710,7 +710,7 @@
     "visibleDistance": "2500",
     "fogDistance": "1500"
   },
-  "asset_sha256": "8b35099759898e275eaeee39bdb1a2c9735a70fcf1562a618a21ce6bf931c067",
+  "asset_sha256": "0cdf413f38dc8350a1afce20c2335948a47890ca09c08077c70ead373abfd664",
   "ring_asset_sha256": "185b25abc6b4c54c9ae5f166d3bd66c5e6fd2791778f65aecc86b27a49b78c3d",
   "structure_kit_sha256": "0636249d6eb133db27977b895a48d7d50ce7b8882ec8ba8fd0a63908b5f04630",
   "terrain_source_sha256": "3dc2fac10f82a9a6b88e9e4bf4ba8640cfb74e400227d795d05822265f14b690",
@@ -719,10 +719,10 @@
   "definition_sha256": "dbd0e88673740af42b9815ad9eb5cb5e86fb801e174cdc6ea274f595265dbac4",
   "files": {
     "height.bin": "4cb4d00ea622bb4bd3a3ae0453039c115714101ae9a6104dcf11d92678a0e3a0",
-    "vertices.bin": "6c3bf387267e45f0c9931f7c15eb35bbfe71deb42a5a42ae2cc6fbd693d6423e",
-    "collision.bin": "057ea727749b03050296b4ee438bd3e695c8ba609fab324a2f536caaadf91204",
+    "vertices.bin": "886a88bd3e88dde93397507d2d0a86dd727a1277e4f4ba3dc91db84eafd20a48",
+    "collision.bin": "ed18086299674db7c2c6709e7fedb178a33a695365128ebb286e7caa73cbca5f",
     "weights.rgba": "3cf0f7d602da5c1b915e49ccbbad4e500b5d8909d7406ba1596db1259444d58d",
-    "textures.rgba": "73601bb45b024349e145cc3dbdfb94870f2f991a0ec12ae0a8efdb3b0072eb4e",
+    "textures.rgba": "47dc3c7e77271162715bf9227b594ea4d7a8a6a5e984642e33b393bb8ef0ab0e",
     "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e"
   }
 }

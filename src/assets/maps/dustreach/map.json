@@ -727,7 +727,8 @@
   ],
   "sky": {
     "visibleDistance": "2600",
-    "fogDistance": "1500"
+    "fogDistance": "1500",
+    "fogColor": "0.80 0.69 0.52"
   },
   "asset_sha256": "1138f4068321067301b5cae0a2942c05fa1737155e533d556780a2fa7f670f49",
   "gate_asset_sha256": "463844e0c681ff0a7a7a2a9b69757aab937db8a846413c8e03cadccec9339e2d",
@@ -738,10 +739,10 @@
   "definition_sha256": "3c8dbe0b1b75922fbf6a1a4a1ab87eaca781f9cd9a3f3f2a4c37975db5623583",
   "files": {
     "height.bin": "640d7e9ac7c0b2b7ecf2e64b631e0d93a6f44ed2fc29a4bac4a4e80a9fc95a55",
-    "vertices.bin": "65a4789ab4504e30d451d879f3814c9c34dadaec688d11f72765b3caf4027202",
-    "collision.bin": "480542f1de54aa166c21f38f5a8f7ba279cfa63a1ebcccfb741dfed9a00076ce",
+    "vertices.bin": "5c501ab57a3f7c2a2a925cc8d6defdffb6cdd262c4ad1fd9174dc78902938065",
+    "collision.bin": "2da561854be5fe17a3b23e21493e593698ef0126cc6f3d8447b1a24787ba55f0",
     "weights.rgba": "36d0686ffa7cede185dd35170c29a13bd0b83fd7e1a948771eb2647857930be5",
-    "textures.rgba": "8efe9c285ab53b0ebfd9653f5c78b0e086cc2db74f79f985b462f0cc6ab6bf8b",
+    "textures.rgba": "d7ad5c8d6a79397276da570e4b1657b5c80358f00ca11864d38acdd6860c8a9e",
     "ambient.f32": "a3938b139d99dbdde7156268f817497624177809ab733a0f0ccc8ccce3782462"
   }
 }

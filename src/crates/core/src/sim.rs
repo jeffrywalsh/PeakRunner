@@ -3126,12 +3126,11 @@ mod spawn_point_tests {
                 for _ in 0..30 { world.step_players(STEP); }
                 world.input.move_z = 0.0;
                 let released = world.players[0].pos;
-                // Brakes are only meaningful on the spawn's own floor; walking
-                // off a deck edge onto hillside is terrain, not a slick floor.
-                // Likewise a walk that bumps a wall can leave the body briefly
-                // airborne; air coasting isn't the floor-friction regression.
-                if (crate::terrain::support_on(map, released).0 - floor).abs() > 0.3
-                    || (released.y - floor - PLAYER_RADIUS).abs() > 0.05 { continue; }
+                // Spawns face open floor, so the half-second walk stays on the
+                // spawn's own floor and must brake like flat ground.
+                assert!((crate::terrain::support_on(map, released).0 - floor).abs() < 0.3
+                    && (released.y - floor - PLAYER_RADIUS).abs() < 0.05,
+                    "{map:?} walk from {start:?} left the spawn floor (faces an edge or wall)");
                 for _ in 0..90 { world.step_players(STEP); }
                 let p = &world.players[0];
                 let coast = Vec2::new(p.pos.x - released.x, p.pos.z - released.z).length();

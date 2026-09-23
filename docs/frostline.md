@@ -114,14 +114,20 @@ takes about 20 s with the bake, and two builds are byte-identical.
   `research/screenshots/frostline-v3-*`. v1 and v2 show the fixes: the camo
   rock texture, the emplacement sunk in a pit, and the plain outpost.
 
+## Cleanup pass
+
+- A baffle wall stands 1.4 m inside the rear door (walk round its west end or
+  east side), so the back door is an airlock like the front.
+- Ambient audio is Frostline's own synthesized polar wind (`polar_wind` in
+  `build-frostline.py`), not Raindance's loop.
+- `sky.fogColor` is a pale whiteout (0.84 0.87 0.90).
+- Two outpost spawns were re-aimed or moved to face open floor
+  (`scripts/assets/spawn_checks.py`).
+
 ## Known gaps
 
 - One relay-outpost spawn faces its baffle about 4.5 m ahead; walking straight
   out bumps the wall. Worth re-aiming in the cleanup pass.
 - **Not playtested by a human:** skiing feel on 36° median slopes, how far the
   outpost is from the station, and how readable the fog is are all unverified.
-- Turret heads and the flag are the shared kit and engine models.
 - No real glow or bloom; the lit surfaces are bright textures.
-- The ambient audio is Raindance's shared loop, not wind.
-- The rear door has no porch: no turret can see it today, but a future
-  deployable placed behind the station could.

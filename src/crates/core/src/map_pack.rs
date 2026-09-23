@@ -174,7 +174,21 @@ pub fn on(map: crate::terrain::MapId) -> Option<&'static MapPack> {
     }
 }
 
+/// Distance-fog colour used by every map before per-map colours existed.
+pub const DEFAULT_FOG: [f32; 3] = [0.62, 0.62, 0.62];
+
+fn parse_fog(value: &str) -> Option<[f32; 3]> {
+    let v: Vec<f32> = value.split_whitespace().map(|s| s.parse().ok()).collect::<Option<_>>()?;
+    let c: [f32; 3] = v.try_into().ok()?;
+    c.iter().all(|x| x.is_finite() && (0.0..=1.0).contains(x)).then_some(c)
+}
+
 impl MapPack {
+    /// Optional manifest `sky.fogColor` ("r g b", 0..1); absent means [`DEFAULT_FOG`].
+    pub fn fog_color(&self) -> [f32; 3] {
+        self.manifest.sky.get("fogColor").and_then(|v| parse_fog(v)).unwrap_or(DEFAULT_FOG)
+    }
+
     pub fn load(root: &Path) -> Result<Self, String> {
         let read = |name: &str, max: u64| -> Result<Vec<u8>, String> {
             let path = root.join(name);
@@ -219,6 +233,9 @@ impl MapPack {
         };
         if sky_distance("visibleDistance")? <= sky_distance("fogDistance")? {
             return Err("Fog must start before visibility ends".into());
+        }
+        if manifest.sky.get("fogColor").is_some_and(|v| parse_fog(v).is_none()) {
+            return Err("Invalid fog colour".into());
         }
         if manifest.flags.iter().chain(manifest.spawns.iter()).flatten().any(|v| !v.is_finite() || v.abs()>10000.0) {
             return Err("Invalid map positions".into());
@@ -425,6 +442,21 @@ fn sweep_triangle(s:Vec3,e:Vec3,r:f32,tri:[Vec3;3])->Option<(f32,Vec3)> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fog_colour_parses_validates_and_defaults() {
+        use super::*;
+        assert_eq!(parse_fog("0.8 0.69 0.52"), Some([0.8, 0.69, 0.52]));
+        for bad in ["0.8 0.69", "0.8 0.69 0.52 1", "1.2 0 0", "x 0 0", "NaN 0 0"] {
+            assert_eq!(parse_fog(bad), None, "{bad}");
+        }
+        use crate::terrain::MapId;
+        // Maps without fogColor keep the historical grey.
+        assert_eq!(on(MapId::Raindance).unwrap().fog_color(), DEFAULT_FOG);
+        assert_eq!(on(MapId::BroadsideClone).unwrap().fog_color(), DEFAULT_FOG);
+        assert_eq!(on(MapId::DesertOfDeathClone).unwrap().fog_color(), [0.80, 0.69, 0.52]);
+        assert_eq!(on(MapId::SnowblindClone).unwrap().fog_color(), [0.84, 0.87, 0.90]);
+    }
+
     #[cfg(all(not(target_arch = "wasm32"), not(feature = "external-map")))]
     #[test]
     fn omitted_ambience_requires_the_empty_content_hash() {
