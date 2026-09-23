@@ -4,7 +4,6 @@ PeakRunner's original material kit. Modeled on build-skybreak.py; this
 replaces the concept the Broadside Clone reference layout is being retired
 in favor of, so it stays fully original (no Torque/DIF-derived geometry).
 """
-import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -13,9 +12,9 @@ import struct
 import sys
 from assets import tower_complex
 from assets import tower_complex_materials
-from assets import lightmap_bake
 from assets import tower_complex_terrain
 from assets import landing_pad
+from assets import pack_writer
 
 ROOT = Path(__file__).resolve().parent.parent
 loader = importlib.util.spec_from_file_location('kit', ROOT/'scripts/build-original-map.py')
@@ -30,16 +29,7 @@ def terrain_grid(spec):
 
 def terrain_height(x, z, grid):
     """Bilinear sample of the grid, matching the engine's heightfield lookup."""
-    fx, fz = min(max(x/8, 0), 255), min(max(z/8, 0), 255)
-    x0, z0 = int(fx), int(fz); x1, z1 = min(x0+1, 255), min(z0+1, 255)
-    tx, tz = fx-x0, fz-z0
-    q = lambda ix, iz: round(float(grid[iz, ix])*32)/32
-    a = q(x0,z0)+(q(x1,z0)-q(x0,z0))*tx; b = q(x0,z1)+(q(x1,z1)-q(x0,z1))*tx
-    return a+(b-a)*tz
-
-# The renderer's fixed map sun (src/map_scene.rs uniform), so baked shadows on
-# the structures agree with the terrain's live lighting.
-MAP_SUN = (-0.57735, 0.57735, -0.57735)
+    return pack_writer.sample_height(grid, x, z)
 
 
 def build(output, bake=True):
@@ -70,46 +60,16 @@ def build(output, bake=True):
     if sys.byteorder != 'little': mesh.vertices.byteswap(); mesh.collision.byteswap()
     shared = ROOT/'assets/maps/raindance'
     textures = bytearray((shared/'textures.rgba').read_bytes())
-    # textures.rgba is level-major (every layer at 256, then every layer at
-    # 128, ...). Replace the whole mip chain, not just level 0, or distant
-    # surfaces sample the shared Raindance texture instead.
     count = json.loads((shared/'map.json').read_text())['texture_count']
-    for material in ['concrete', 'panel', 'grate', 'trim', 'ember', 'glacier', 'light', 'bark']:
-        layer = kit.MATERIALS.index(material)
-        img = tower_complex_materials.texture(material, spec['seed']+layer, kit.noise, kit.value_noise)
-        side, offset = 256, 0
-        while True:
-            size = side*side*4
-            textures[offset+layer*size:offset+(layer+1)*size] = img
-            offset += count*size
-            if side == 1: break
-            img = kit.downsample(img, side); side //= 2
+    pack_writer.paint_materials(textures, count, ['concrete', 'panel', 'grate', 'trim', 'ember', 'glacier', 'light', 'bark'],
+                                tower_complex_materials.texture, spec['seed'], kit)
     vertices = mesh.vertices.tobytes()
     lightmap = None
     if bake:
         import time
-        import numpy as np
         started = time.time()
-        baked, pages = lightmap_bake.bake(np.frombuffer(vertices, '<f4'), mesh.lamps, MAP_SUN,
-                                          kit.MATERIALS.index('light'), count)
-        vertices = baked.astype('<f4').tobytes()
-        # Append the pages as new layers, keeping the level-major mip layout.
-        mips = [[page] for page in pages]
-        for chain in mips:
-            side = 256
-            while side > 1: chain.append(kit.downsample(chain[-1], side)); side //= 2
-        merged, side, offset = bytearray(), 256, 0
-        for level in range(9):
-            size = side*side*4
-            merged += textures[offset:offset+count*size]
-            for chain in mips: merged += chain[level]
-            offset += count*size; side //= 2
-        textures = merged
-        lightmap = dict(pages=len(pages), first_layer=count, texel_m=.5, sun=list(MAP_SUN),
-                        lamps=len(mesh.lamps),
-                        baker_sha256=hashlib.sha256(Path(lightmap_bake.__file__).read_bytes()).hexdigest())
+        vertices, textures, count, lightmap = pack_writer.bake_lightmaps(vertices, textures, count, mesh.lamps, kit)
         bake_seconds = round(time.time()-started, 1)
-        count += len(pages)
     files = {'height.bin':bytes(heights), 'vertices.bin':vertices,
              'collision.bin':mesh.collision.tobytes(),
              'weights.rgba':bytes(weights),
@@ -122,16 +82,13 @@ def build(output, bake=True):
     manifest.update(version=1, id=spec['id'], name=spec['name'], flags=flags, spawns=spawns,
         exact_spawns=True, spawn_points=spawn_points, holes=[], entities=mesh.entities, instances=instances, ambient_emitters=[],
         sky={'visibleDistance':'2500','fogDistance':'1500'},
-        asset_sha256=hashlib.sha256(Path(tower_complex.__file__).read_bytes()).hexdigest(),
-        pad_asset_sha256=hashlib.sha256(Path(landing_pad.__file__).read_bytes()).hexdigest(),
-        terrain_source_sha256=hashlib.sha256(Path(tower_complex_terrain.__file__).read_bytes()).hexdigest(),
-        material_source_sha256=hashlib.sha256(Path(tower_complex_materials.__file__).read_bytes()).hexdigest(),
+        asset_sha256=pack_writer.source_hash(tower_complex.__file__),
+        pad_asset_sha256=pack_writer.source_hash(landing_pad.__file__),
+        terrain_source_sha256=pack_writer.source_hash(tower_complex_terrain.__file__),
+        material_source_sha256=pack_writer.source_hash(tower_complex_materials.__file__),
         provenance='PeakRunner original tower-complex geometry, original procedural terrain and original material kit; no extracted assets or external height data',
-        definition_sha256=hashlib.sha256((ROOT/'maps/tower-complex.json').read_bytes()).hexdigest(),
-        files={name:hashlib.sha256(data).hexdigest() for name,data in files.items()})
-    output.mkdir(parents=True)
-    for name,data in files.items(): (output/name).write_bytes(data)
-    (output/'map.json').write_text(json.dumps(manifest,indent=2)+'\n')
+        definition_sha256=pack_writer.source_hash(ROOT/'maps/tower-complex.json'))
+    pack_writer.write_pack(output, files, manifest)
     print(f'Built {spec["name"]}: {len(mesh.collision)//9} solid triangles'
           + (f', {lightmap["pages"]} lightmap pages in {bake_seconds} s' if lightmap else ', unbaked'))
 

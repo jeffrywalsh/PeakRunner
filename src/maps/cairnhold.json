@@ -1,0 +1,32 @@
+{
+  "id": "cairnhold",
+  "name": "Cairnhold",
+  "seed": 60417,
+  "bases": [
+    {
+      "team": 0,
+      "position": [
+        1024,
+        191,
+        844
+      ],
+      "yaw": 180
+    },
+    {
+      "team": 1,
+      "position": [
+        1024,
+        191,
+        1204
+      ],
+      "yaw": 0
+    }
+  ],
+  "ring": {
+    "position": [
+      1024,
+      240,
+      1024
+    ]
+  }
+}
