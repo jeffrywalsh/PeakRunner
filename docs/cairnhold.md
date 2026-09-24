@@ -151,3 +151,11 @@ Collision: 2,336 triangles per base (budget then 3,000; now 4,500, see `map-pipe
   house. The tunnel is 112 m long, so it is a defenders' and infiltrators'
   route, not a fast one; whether the stair + tunnel pair is too easy to hold
   needs a playtest. Bots don't use either.
+
+## Open doorways (2026-09-24)
+
+Supersedes the front-vestibule and exit-house dog-leg rows above. The bunker's
+front door opens straight into the hall behind its recessed portal, and the
+exit house's door opens straight in. Turrets and the battery face the field
+with a 200 degree field of fire beyond 15 m, so neither door gives a turret a
+line into the rooms. The route and sightline tests use the new rule.

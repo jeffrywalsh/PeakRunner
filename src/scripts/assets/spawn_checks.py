@@ -78,3 +78,66 @@ def problems(pack):
                                f'floor changes {below-floor:+.1f} m after {0.5*i:.1f} m')
                     break
     return out
+
+
+# Doorways and windows are open, so an indoor spawn must not sit in a
+# straight line through an opening from far out in the field, where someone
+# could camp it. Only spawns in rooms count: a roof within ROOF_ABOVE and
+# walls within WALLED in at least 6 of 8 directions. Outdoor spawns and ones
+# under open colonnades are visible by design.
+FAR = (40.0, 70.0, 100.0)
+AZIMUTHS = 48
+ROOF_ABOVE = 12.0
+OUTSIDE = 35.0     # viewers nearer than this to the team's own flag are inside its base
+WALLED = 15.0
+
+
+def _in_room(w, x, y, z):
+    if w.ray((x, y, z), (0, 1, 0), ROOF_ABOVE) == math.inf:
+        return False
+    hits = sum(w.ray((x, y+.8, z), (math.cos(a), 0, math.sin(a)), WALLED) < WALLED
+               for a in np.arange(8)*math.tau/8)
+    return hits >= 6
+
+
+def _terrain_clear(w, a, b, step=2.0):
+    n = max(2, int(np.linalg.norm(b-a)/step))
+    for t in np.linspace(0, 1, n)[1:-1]:
+        p = a+(b-a)*t
+        if p[1] < w.terrain(p[0], p[2]):
+            return False
+    return True
+
+
+def exposed(pack):
+    """Indoor spawns visible (spawn chest in clear line) from a standing or
+    jetting viewer 40-100 m away in any direction, outside the team's own
+    base (more than OUTSIDE from its flag)."""
+    w = World(pack)
+    out = []
+    for team, points in enumerate(w.manifest.get('spawn_points', [])):
+        fx, _, fz = w.manifest['flags'][team]
+        for x, y, z, _ in points:
+            if not _in_room(w, x, y, z):
+                continue
+            chest = np.array([x, y+0.8, z])
+            for dist in FAR:
+                for k in range(AZIMUTHS):
+                    a = k*math.tau/AZIMUTHS
+                    vx, vz = x+dist*math.cos(a), z+dist*math.sin(a)
+                    if math.hypot(vx-fx, vz-fz) < OUTSIDE:
+                        continue
+                    for lift in (1.7, 10.0):
+                        v = np.array([vx, w.terrain(vx, vz)+lift, vz])
+                        d = chest-v; n = float(np.linalg.norm(d))
+                        if w.ray(v, d/n, n-0.05) == math.inf and _terrain_clear(w, v, chest):
+                            out.append(f'team {team} spawn ({x:.1f},{y:.1f},{z:.1f}) seen from '
+                                       f'({vx:.0f},{v[1]:.0f},{vz:.0f}), {dist:.0f} m away')
+                            break
+                    else:
+                        continue
+                    break
+                else:
+                    continue
+                break
+    return out

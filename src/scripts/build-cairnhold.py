@@ -21,6 +21,7 @@ from assets import cairnhold_materials
 from assets import cairnhold_ring
 from assets import cairnhold_terrain
 from assets import pack_writer
+from assets import turret_arcs
 from assets import structure_kit
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -161,7 +162,7 @@ def build(output, bake=True):
     manifest['texture_count'] = count
     if lightmap: manifest['lightmap'] = lightmap
     manifest.update(version=1, id=definition['id'], name=definition['name'], flags=flags, spawns=spawns,
-        exact_spawns=True, spawn_points=spawn_points, holes=holes, entities=mesh.entities,
+        exact_spawns=True, spawn_points=spawn_points, holes=holes, entities=turret_arcs.assign(mesh.entities, flags),
         instances=instances, ambient_emitters=[],
         sky={'visibleDistance': '2500', 'fogDistance': '1500'},
         asset_sha256=pack_writer.source_hash(cairnhold_base.__file__),

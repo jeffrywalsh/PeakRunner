@@ -24,11 +24,11 @@ under (the build blends the terrain to them and pins the cut's edge), except
 at the exit house, which stands on the battery bench. No spawn is in the hall,
 the vault or the tunnel: the spawns moved to the inventory and back rooms.
 
-Sightlines: the bunker front door opens into a vestibule closed by a baffle
-behind a recessed portal, so no turret, battery or sniper outside has a
-straight line into the hall. The exit house's door opens into a vestibule
-closed on its tunnel side. The tower is closed except for the roof hatch over
-its upper ramp.
+Sightlines: the bunker front door (behind its recessed portal) and the exit
+house's door are open straight in, so attackers can shoot and fly through.
+Turrets and the battery face the field with a limited field of fire
+(turret_arcs.py) instead of being walled off. The tower is closed except for
+the roof hatch over its upper ramp.
 
 Interior dressing is render-only and stays within the 0.52 m player radius
 of a solid surface. If the caller's mesh has a `lamps` list, light fixtures
@@ -45,8 +45,6 @@ BX, BZ0, BZ1 = 16, -20, 20
 WALL = .8
 CEIL, ROOF = 6, 7
 DOOR, DOOR_TOP = (-2.5, 2.5), 4.5
-BAFFLE_Z = (-16.0, -15.6)
-BAFFLE_X = 10.5          # covers the battery's steepest line through the front door
 PART_A, PART_A_DOORS = (4.0, 4.4), [(-11, -7), (7, 11)]
 PART_B, PART_B_DOOR = (12.0, 12.4), (-2, 2)
 BACK_DOOR = (2, 6)
@@ -122,9 +120,6 @@ T_SOUTH = (80.0, 88.0, -36.0, 4.0)
 T_EXIT = (80.0, 88.0, -44.0, -36.0)
 EXIT_GROUND = 8.0                          # the battery bench
 EXIT_DOOR = (-43.0, -39.6)                 # z span of the door in the exit house's east wall
-# Dog-leg vestibule: a baffle 1.8 m inside the door, joined to the east wall at
-# its north end, so the way in is round its south end.
-EXIT_BAFFLE = (85.0, 85.4, -41.8, -38.2)   # baffle x0, x1, z0 (south end, open), z1 (joined)
 # Floor and lid (roof top, flush with the ground where the ground is higher)
 # heights at the cell boundaries; linear between them.
 T_EAST_FLOOR = ((16.0, VAULT_FLOOR), (17.0, VAULT_FLOOR), (41.0, 3.0), (88.0, 3.0))
@@ -308,8 +303,7 @@ def build(mesh, team, circuit):
     wall(*BACK_DOOR, iz1, BZ1, DOOR_TOP, CEIL, HULL)
     wall(*BACK_DOOR, iz1, BZ1, -4, 0, HULL)
 
-    # Vestibule baffle and the two interior partitions.
-    wall(-BAFFLE_X, BAFFLE_X, *BAFFLE_Z, 0, CEIL, HULL)
+    # The two interior partitions.
     def partition(z0, z1, doors):
         u = -ix
         for d0, d1 in doors+[(ix, ix)]:
@@ -321,8 +315,6 @@ def build(mesh, team, circuit):
 
     # Interior dressing: liners, baseboards, cornices, team stripe.
     b.dress('z', iz0, 1, _runs_without(-ix, ix, [DOOR]), 0, CEIL)
-    b.dress('z', BAFFLE_Z[0], -1, [(-BAFFLE_X, BAFFLE_X)], 0, CEIL, pilasters=False)
-    b.dress('z', BAFFLE_Z[1], 1, [(-BAFFLE_X, BAFFLE_X)], 0, CEIL)
     for s in (-1, 1):
         b.dress('x', s*ix, -s, [(iz0, PART_A[0]), (PART_A[1], PART_B[0]), (PART_B[1], iz1)], 0, CEIL)
     b.dress('z', PART_A[0], -1, _runs_without(-ix, ix, PART_A_DOORS), 0, CEIL)
@@ -331,19 +323,17 @@ def build(mesh, team, circuit):
     b.dress('z', PART_B[1], 1, _runs_without(-ix, ix, [PART_B_DOOR]), 0, CEIL)
     b.dress('z', iz1, -1, _runs_without(-ix, ix, [BACK_DOOR]), 0, CEIL)
     # Bronze door frames on every interior opening.
-    for z, doors in [(BAFFLE_Z[1], []), (PART_A[0], PART_A_DOORS), (PART_B[0], [PART_B_DOOR]),
+    for z, doors in [(PART_A[0], PART_A_DOORS), (PART_B[0], [PART_B_DOOR]),
                      (iz1, [BACK_DOOR]), (iz0, [DOOR])]:
         for d0, d1 in doors:
             for into in (1, -1):
                 b.face_box('z', z, into, d0-.3, d0, 0, DOOR_TOP, .12, METAL)
                 b.face_box('z', z, into, d1, d1+.3, 0, DOOR_TOP, .12, METAL)
                 b.face_box('z', z, into, d0-.3, d1+.3, DOOR_TOP, DOOR_TOP+.3, .12, METAL)
-    for u in (-BAFFLE_X, BAFFLE_X):   # bronze edges on the baffle ends
-        wall(u-.08, u+.08, BAFFLE_Z[0]-.05, BAFFLE_Z[1]+.05, 0, DOOR_TOP, BRONZE, False)
 
-    # Ceiling lights: vestibule, hall, inventory room, generator room.
-    b.ceiling_strip('x', (iz0+BAFFLE_Z[0])/2, -ix+1, ix-1, CEIL, .5)
-    for x in (-6, 6): b.ceiling_strip('z', x, BAFFLE_Z[1]+1, PART_A[0]-1, CEIL, .7)
+    # Ceiling lights: entry, hall, inventory room, generator room.
+    b.ceiling_strip('x', iz0+2.0, -ix+1, ix-1, CEIL, .5)
+    for x in (-6, 6): b.ceiling_strip('z', x, iz0+4.0, PART_A[0]-1, CEIL, .7)
     b.ceiling_strip('x', (PART_A[1]+PART_B[0])/2, -ix+2, ix-2, CEIL, .7)
     b.ceiling_strip('x', (PART_B[1]+iz1)/2, -ix+2, ix-2, CEIL, .7)
 
@@ -449,8 +439,9 @@ def build(mesh, team, circuit):
         for x0_, x1_ in ((qx0, qx0+w), (qx1-w, qx1)):
             blk(x0_, x1_, a, c_ if x0_ == qx0 else min(c_, ez0), lambda x, z: sf(x, z)-1, lambda x, z: sl(x, z)-.5, HULL)
         blk(qx0, qx1, a, c_, lambda x, z: sl(x, z)-.5, sl, HULL)                                 # lid
-    # Exit house at the battery's ramp foot: roofed, door in its east wall
-    # behind a vestibule wall, so no turret sees down the tunnel.
+    # Exit house at the battery's ramp foot: roofed, door in its east wall,
+    # open straight in; the battery faces the field and cannot fire back
+    # into it.
     g, roof = EXIT_GROUND, EXIT_ROOF
     ox0, ox1, oz0, oz1 = T_EXIT
     slab(ox0+w, ox1-w, oz0+w, oz1, g, DECK)
@@ -458,9 +449,6 @@ def build(mesh, team, circuit):
     wall(ox0, ox1, oz0, oz0+w, g-1, roof-1, HULL)
     wall(ox0, ox0+w, oz0+w, oz1, g-1, roof-1, HULL)
     for z0, z1 in _runs_without(oz0+w, oz1, [EXIT_DOOR]): wall(ox1-w, ox1, z0, z1, g-1, roof-1, HULL)
-    fx0, fx1, fz0, fz1 = EXIT_BAFFLE
-    wall(fx0, fx1, fz0, fz1, g, g+TUN_H, HULL)
-    wall(fx1, ox1-w, fz1-.4, fz1, g, g+TUN_H, HULL)
     # Dressing: liners, lamp strips and sconces the whole way.
     for x in range(20, 88, 8):
         y = east_floor(x)

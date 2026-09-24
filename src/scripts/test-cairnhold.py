@@ -17,6 +17,8 @@ from assets import cairnhold_base as base
 from assets import cairnhold_materials
 from assets import cairnhold_ring
 from assets import cairnhold_terrain
+from assets import sightline_checks
+from assets import turret_arcs
 
 HERE = Path(__file__).parent
 def _load(name, file):
@@ -265,11 +267,12 @@ class CairnholdTests(unittest.TestCase):
         tops = [t for _, _, t in base.TIERS]+[base.ROOF]
         self.assertEqual(tops, sorted(tops, reverse=True))
         self.assertGreaterEqual(base.TIERS[0][2], 2*base.ROOF, 'gatehouse rises well above the old roof line')
-        # The portal is open from the apron through the door to the baffle.
+        # The portal is open from the apron through the door and across the
+        # hall: nothing stands behind the door before the first partition.
         for y in (.3, 1.2, 2.2, 3.8):
             for x in (-1.8, 0, 1.8):
                 t = self.soup.first((x, y, -30), (0, 0, 1))
-                self.assertAlmostEqual(t, base.BAFFLE_Z[0]+30, delta=.05, msg=(x, y))
+                self.assertGreater(t, base.BZ0+base.WALL+30+8, msg=(x, y))
         # Recess: the jambs stand 2 m proud of the front wall either side of the door.
         self.assertAlmostEqual(self.soup.first((4.8, 2, -30), (0, 0, 1)), base.GATE_Z+30, delta=.01)
         self.assertAlmostEqual(self.soup.first((3.2, 2, -30), (0, 0, 1)), base.BZ0+30, delta=.01)
@@ -400,43 +403,35 @@ class CairnholdTests(unittest.TestCase):
                     t = self.soup.first((x, 60, z), (0, -1, 0))
                     self.assertAlmostEqual(60-t, base.ring_height(name, x, z), delta=.02, msg=(name, x, z))
 
-    def test_exit_vestibule_hides_the_tunnel(self):
-        """The battery's barrel sees nothing past the exit house's vestibule,
-        and nobody on the bench outside sees up the tunnel. The door,
-        vestibule and tunnel still connect for a walking body."""
+    def test_exit_house_door_is_open_and_the_battery_faces_away(self):
+        """The exit house's door is open straight in: a body band walks from
+        the bench through the door and into the tunnel. The battery, whose
+        barrel used to look down it, faces the field and never engages a
+        player inside the house or the tunnel."""
         ox0, ox1, oz0, oz1 = base.T_EXIT
         g = base.EXIT_GROUND
-        fx0, fx1, fz0, fz1 = base.EXIT_BAFFLE
-        house = [(x, g+1.5, z) for x in np.arange(ox0+1.4, fx0-.5, 1.0) for z in np.arange(oz0+1.4, oz1, 1.0)]
-        tunnel = [(x, base.south_floor(z)+1.5, z) for x in (81.6, 84.0, 86.4) for z in np.arange(-35.5, -10, 2.0)]
-        bx, bz = base.BATTERY
-        barrel = [(bx+dx, base.BATTERY_GROUND+base.BATTERY_H+2.6, bz+dz) for dx in (-2.8, 0, 2.8) for dz in (-2.8, 0, 2.8)]
-        bench = []
-        for ang in np.linspace(-.5*np.pi, .5*np.pi, 13):                  # the bench east of the door
-            for dist in (4.0, 10.0, 25.0):
-                for h in (1.7, 4.0, 9.0):
-                    bench.append((ox1+dist*math.cos(ang), g+h, sum(base.EXIT_DOOR)/2+dist*math.sin(ang)))
-        for viewers, targets in ((barrel, house+tunnel), (bench, tunnel)):
-            starts = np.array([v for v in viewers for _ in targets], float)
-            ends = np.array([t for _ in viewers for t in targets], float)
-            blocked = self.soup.blocked_many(starts, ends)
-            self.assertTrue(blocked.all(), [tuple(starts[i])+tuple(ends[i]) for i in np.flatnonzero(~blocked)[:3]])
         door_z = sum(base.EXIT_DOOR)/2
-        route = [(ox1+3, door_z), ((fx1+ox1-.8)/2, door_z), ((fx1+ox1-.8)/2, (fz0+oz0+.8)/2),
-                 (fx0-1.6, (fz0+oz0+.8)/2), (fx0-1.6, oz1+1.0)]
+        route = [(ox1+3, door_z), (ox0+2.0, door_z), (ox0+2.0, oz1+1.0)]
         for (x0, z0), (x1, z1) in zip(route, route[1:]):
-            for off in (-.5, 0, .5):     # a body's width, not just a line
+            for off in (-.5, 0, .5):
                 dx, dz = x1-x0, z1-z0; n = math.hypot(dx, dz); px, pz = -dz/n*off, dx/n*off
                 a, c = np.array((x0+px, g+1.2, z0+pz)), np.array((x1+px, g+1.2, z1+pz))
-                d = c-a
-                self.assertEqual(self.soup.first(a, d/n, n), np.inf, ((x0, z0), (x1, z1), off))
+                self.assertEqual(self.soup.first(a, (c-a)/n, n), np.inf, ((x0, z0), (x1, z1), off))
+        spec, mesh, soup, _, _ = self.whole_map()
+        battery = [e for e in mesh.entities if e['kind'] == 'turret' and e['weapon'] == 'plasma']
+        self.assertEqual(len(battery), 2)
+        for e, b in zip(sorted(battery, key=lambda e: e['team']), sorted(spec['bases'], key=lambda b: b['team'])):
+            m = kit.Mesh(); m.origin = tuple(b['position']); m.yaw = math.radians(b['yaw'])
+            inside = [m.point((x, g+LIFT+.8, z)) for x in np.arange(ox0+1.4, ox1-1, 1.0) for z in np.arange(oz0+1.4, oz1, 1.0)]
+            inside += [m.point((x, base.south_floor(z)+LIFT+.8, z)) for x in (81.6, 84.0, 86.4) for z in np.arange(-35.5, -10, 2.0)]
+            self.assertFalse(sightline_checks.visible(soup, e, np.array(inside)).any(), e['id'])
 
     def test_no_spawn_camps_the_generator(self):
         """No spawn in the hall, the vault or the tunnel; all at least 15 m in
         a straight line (further on foot) from the stair head."""
         hx, _, hz = self.anchors['stair_head']
         for x, y, z, _ in self.anchors['spawn_points']:
-            self.assertFalse(-base.BX < x < base.BX and base.BAFFLE_Z[1] < z < base.PART_A[0] and y < 2, (x, z, 'in the hall'))
+            self.assertFalse(-base.BX < x < base.BX and base.BZ0 < z < base.PART_A[0] and y < 2, (x, z, 'in the hall'))
             self.assertGreater(y, 0, (x, z, 'below the hall floor'))
             self.assertGreaterEqual(math.hypot(x-hx, z-hz), 15.0, (x, z))
 
@@ -492,9 +487,12 @@ class CairnholdTests(unittest.TestCase):
     def whole_map(cls):
         if not hasattr(cls, '_map'):
             spec = build.spec(); mesh = kit.Mesh()
+            flags = [None, None]
             for b in spec['bases']:
                 mesh.origin = tuple(b['position']); mesh.yaw = math.radians(b['yaw'])
-                base.build(mesh, b['team'], f"base-{b['team']}")
+                anchors = base.build(mesh, b['team'], f"base-{b['team']}")
+                flags[b['team']] = mesh.point(anchors['flag'])
+            turret_arcs.assign(mesh.entities, flags)
             mesh.origin = tuple(spec['ring']['position']); mesh.yaw = 0
             cairnhold_ring.build(mesh)
             grid, holes = build.terrain_grid(spec)
@@ -502,15 +500,16 @@ class CairnholdTests(unittest.TestCase):
         return cls._map
 
     def test_turrets_cannot_see_into_rooms(self):
-        """No turret or the plasma battery has a clear line from its barrel to
-        a player's chest anywhere inside a bunker room, the trench or the hut.
-        Allowed: the 3.6 m vestibule behind each front door (outside the
-        baffle) and the ramp directly under the stand's open roof hatch."""
+        """No turret or the plasma battery engages a player (field of fire,
+        range, clear line from its barrel to the chest) anywhere inside a
+        bunker room, the trench, the hut, the vault or the sally port, beyond
+        the doorway depth (sightline_checks.DOOR_DEPTH) of the open front and
+        exit-house doors. Allowed: the ramp directly under the stand's open
+        roof hatch."""
         spec, mesh, soup, _, _ = self.whole_map()
         tx0, tx1, tz0, tz1 = base.TW
         vx0, _, vz0, vz1 = base.VAULT
-        ex = base.EXIT_BAFFLE
-        rooms = [(-15, 15, base.BAFFLE_Z[1]+.6, 19, lambda x, z: 0.0),
+        rooms = [(-15, 15, base.BZ0+base.WALL+.6, 19, lambda x, z: 0.0),
                  (base.TX0+1.6, base.TX1-1.6, base.TZ0+.6, base.TZ1-.6, lambda x, z: base.trench_floor(z)),
                  (base.HX0+1.4, base.HX1-1.4, base.HZ0+1.4, base.HZ1-1.4, lambda x, z: base.HUT_FLOOR),
                  (tx0+1.4, tx1-1.4, tz0+1.4, tz1-1.4, lambda x, z: base.HUT_ROOF),
@@ -520,11 +519,15 @@ class CairnholdTests(unittest.TestCase):
                  (base.STAIR[0]+.6, base.VAULT[1]-.6, base.STAIR[3]+.4, vz1-.6, lambda x, z: base.VAULT_FLOOR),  # walkway
                  (16.6, 86.6, 5.4, 10.6, lambda x, z: base.east_floor(x)),                     # sally port, east
                  (81.4, 86.6, -38.4, 4.0, lambda x, z: base.south_floor(z)),                   # sally port, south
-                 (81.4, ex[0]-.6, -42.6, -36.2, lambda x, z: base.EXIT_GROUND)]                # exit house, off the vestibule
+                 (81.4, 86.6, -42.6, -36.2, lambda x, z: base.EXIT_GROUND)]                    # exit house
         r0, r1, zl, zh = base.RAMP; h0, h1, hz0, hz1 = base.HATCH
-        targets = []
+        targets, openings = [], []
+        ox1 = base.T_EXIT[1]-.8
         for b in spec['bases']:
             m = kit.Mesh(); m.origin = tuple(b['position']); m.yaw = math.radians(b['yaw'])
+            pt = lambda x, z: tuple(m.point((x, 0, z))[i] for i in (0, 2))
+            openings += [(pt(base.DOOR[0], base.BZ0+base.WALL), pt(base.DOOR[1], base.BZ0+base.WALL)),
+                         (pt(ox1, base.EXIT_DOOR[0]), pt(ox1, base.EXIT_DOOR[1]))]
             for x0, x1, z0, z1, floor in rooms:
                 for x in np.arange(x0, x1+.01, 1.0):
                     for z in np.arange(z0, z1+.01, 1.0):
@@ -535,14 +538,10 @@ class CairnholdTests(unittest.TestCase):
         targets = np.array(targets)
         turrets = [e for e in mesh.entities if e['kind'] == 'turret']
         self.assertEqual(len(turrets), 6)
-        seen = 0
+        allowed = sightline_checks.near_openings(targets, openings)
         for e in turrets:
-            p = np.array(e['position']); d = targets-p; dist = np.linalg.norm(d, axis=1)
-            near = dist < 150
-            starts = p+d[near]/dist[near, None]*(e['radius']+.6)
-            clear = ~soup.blocked_many(starts, targets[near])
-            seen += int(clear.sum())
-            self.assertEqual(int(clear.sum()), 0, (e['id'], targets[near][clear][:5]))
+            seen = sightline_checks.visible(soup, e, targets) & ~allowed
+            self.assertEqual(int(seen.sum()), 0, (e['id'], targets[seen][:5]))
         self.assertGreater(len(targets), 900)
 
     def test_terrain_is_symmetric_rugged_and_matches_targets(self):
@@ -659,6 +658,11 @@ class SpawnForwardClearance(unittest.TestCase):
         from assets import spawn_checks
         pack = Path(__file__).resolve().parent.parent/'assets/maps/cairnhold'
         self.assertEqual(spawn_checks.problems(pack), [])
+
+    def test_no_indoor_spawn_shows_through_an_opening_from_the_field(self):
+        from assets import spawn_checks
+        pack = Path(__file__).resolve().parent.parent/'assets/maps/cairnhold'
+        self.assertEqual(spawn_checks.exposed(pack), [])
 
 
 if __name__ == '__main__':

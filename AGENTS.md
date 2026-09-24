@@ -501,7 +501,10 @@ were later removed from source; notes below that use them are history only.
 
 - Multiplayer map rotation and modes are SERVER-selected. Client-local map data
   supports fast rendering and prediction, not authority over map/mode choice.
-  Only implemented modes can be configured (CTF today). Future server-delivered
+  Only implemented modes can be configured: CTF, and Capture & Hold
+  (`capture_and_hold`, source only; rotation entries need a map with ≥2 control
+  points and none ship yet, so it is not in the default rotation; see
+  `docs/capture-and-hold.md`). Future server-delivered
   enthusiast maps/mods are a separate later milestone: no automatic downloads or
   arbitrary server-provided code execution in the current multi-map foundation.
 - The server owns identity, teams, movement validity, damage, scores and outcomes.

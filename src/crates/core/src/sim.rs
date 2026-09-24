@@ -44,6 +44,12 @@ const ENERGY_REGEN: f32 = 12.0;
 const MIN_JET_ENERGY: f32 = 3.0;
 /// Classic `dryVelocity`. The disc is a linear round, not a mortar.
 const DISC_SPEED: f32 = 95.0;
+/// Bots notice enemies inside this range, and only with a clear line of sight.
+const BOT_SIGHT_RANGE: f32 = 95.0;
+/// Most sight rays one bot casts per think (nearest enemies first).
+const BOT_SIGHT_RAYS: usize = 3;
+/// Seconds a bot keeps heading for an enemy's last-seen spot after losing sight.
+const BOT_MEMORY: f32 = 2.5;
 /// Classic `velInheritFactor`. Without this the disc runs away and you cannot disc jump.
 const DISC_INHERIT: f32 = 0.75;
 pub const DISC_RELOAD: f32 = 1.05;
@@ -176,6 +182,14 @@ pub struct Player {
     bot_role: BotRole,
     bot_goal: Vec3,
     bot_think: f32,
+    /// Enemy this bot can see, chosen at its last think. Server-only state.
+    #[serde(skip)]
+    bot_target: Option<usize>,
+    /// Where it last saw an enemy, and for how long it keeps hunting there.
+    #[serde(skip)]
+    bot_seen: Vec3,
+    #[serde(skip)]
+    bot_memory: f32,
     coyote: f32,
 }
 
@@ -242,6 +256,12 @@ pub struct World {
     pub map: MapId,
     pub net_camera_offset: Vec3,
     pub blast_serial: u64,
+    /// Game mode rules in force (CTF or Capture & Hold).
+    pub mode: crate::map_catalog::SupportedMode,
+    /// Control points, with state. Sent whole in snapshots.
+    pub points: Vec<crate::control::Point>,
+    control_defs: Vec<crate::control::Definition>,
+    cnh_acc: [f32; 2],
     network_inputs: Vec<Input>,
     predicting: bool,
     rng: u32,
@@ -345,6 +365,10 @@ impl World {
             map: MapId::Valley,
             net_camera_offset: Vec3::ZERO,
             blast_serial: 0,
+            mode: crate::map_catalog::SupportedMode::Ctf,
+            points: Vec::new(),
+            control_defs: Vec::new(),
+            cnh_acc: [0.0; 2],
             network_inputs: Vec::new(),
             predicting: false,
             feed: Vec::new(),
@@ -364,10 +388,35 @@ impl World {
         self.map = id;
         self.equipment=crate::equipment::fresh(id);
         self.pillars = crate::terrain::pillars_on(id);
+        self.control_defs = crate::map_pack::on(id).map(|p| p.manifest.control_points.clone()).unwrap_or_default();
+        self.reset_points();
         if self.players.is_empty() {
             self.place_flags();
         }
     }
+
+    /// Fresh, neutral points for the current map and mode. CTF only runs the
+    /// points marked `ctf_active`; Capture & Hold runs them all.
+    pub fn reset_points(&mut self) {
+        let cnh = self.mode == crate::map_catalog::SupportedMode::CaptureAndHold;
+        self.points = self.control_defs.iter()
+            .map(|d| crate::control::Point::from_def(d, cnh || d.ctf_active)).collect();
+        self.cnh_acc = [0.0; 2];
+    }
+
+    pub fn set_mode(&mut self, mode: crate::map_catalog::SupportedMode) {
+        self.mode = mode;
+        self.reset_points();
+    }
+
+    /// Replace the map's control points (tests and QA fixtures only use this;
+    /// real maps declare them in the manifest).
+    pub fn set_control_points(&mut self, defs: Vec<crate::control::Definition>) {
+        self.control_defs = defs;
+        self.reset_points();
+    }
+
+    pub fn control_point_count(&self) -> usize { self.control_defs.len() }
 
     fn ground(&self, x: f32, z: f32) -> f32 {
         crate::terrain::height_on(self.map, x, z)
@@ -424,7 +473,9 @@ impl World {
         self.state = MatchState::Playing;
         self.acc = 0.0;
         self.trauma = 0.0;
-        self.message = "DEPLOYED — TAKE THEIR FLAG".into();
+        self.message = if self.mode == crate::map_catalog::SupportedMode::CaptureAndHold {
+            "DEPLOYED — HOLD THE POINTS".into() } else { "DEPLOYED — TAKE THEIR FLAG".into() };
+        self.reset_points();
         self.message_t = 3.2;
         self.events = "start".into();
 
@@ -454,6 +505,7 @@ impl World {
         self.acc = 0.0;
         self.trauma = 0.0;
         self.message = "IN THE RIFT".into();
+        self.reset_points();
         self.message_t = 2.4;
         self.events = "start".into();
         let yaw = if ember { std::f32::consts::PI } else { 0.0 };
@@ -614,8 +666,34 @@ impl World {
         self.step_discs(dt);
         self.step_kits(dt);
         self.step_equipment(dt);
-        self.step_flags(dt);
+        if self.mode == crate::map_catalog::SupportedMode::Ctf { self.step_flags(dt); }
+        self.step_points(dt);
+        if self.state == MatchState::Ended { return; }
         self.step_explosions(dt);
+    }
+
+    /// Control points: capture progress and ownership, and in Capture & Hold
+    /// the score. Clients announce ownership changes by diffing snapshots, so
+    /// replayed snapshots never re-announce.
+    fn step_points(&mut self, dt: f32) {
+        if self.predicting || self.points.iter().all(|p| !p.active) { return; }
+        let players: Vec<(u8, Vec3)> = self.players.iter().filter(|p| p.alive)
+            .map(|p| (p.team.idx() as u8, p.pos)).collect();
+        for e in crate::control::step(&mut self.points, &players, dt) {
+            match e {
+                crate::control::Event::Captured { .. } => self.push_event("point"),
+                crate::control::Event::ContestedStart { .. } => self.push_event("contest"),
+            }
+        }
+        if self.mode != crate::map_catalog::SupportedMode::CaptureAndHold { return; }
+        let gained = crate::control::score(&self.points, &mut self.cnh_acc, dt);
+        for t in 0..2 { self.score[t] += gained[t]; }
+        if let Some(t) = (0..2).find(|&t| self.score[t] >= crate::control::CNH_TARGET) {
+            self.score[t] = crate::control::CNH_TARGET;
+            self.state = MatchState::Ended;
+            self.msg(if t == 0 { "EMBER HOLDS THE FIELD" } else { "GLACIER HOLDS THE FIELD" }, 4.0);
+            self.push_event("end");
+        }
     }
 
     /// Server-side repair kits: a use intent starts a heal when the player is
@@ -671,7 +749,7 @@ impl World {
             let Some(profile)=equipment::profile(d.kind,d.weapon) else {continue};
             let (map,pillars)=(self.map,&self.pillars);
             let clear=|a:Vec3,b:Vec3|obstacle_hit(map,pillars,a,b,0.).is_none();
-            let candidates=self.players.iter().enumerate().filter(|(_,p)|p.alive)
+            let candidates=self.players.iter().enumerate().filter(|(_,p)|p.alive && d.in_arc(p.pos))
                 .map(|(index,p)|equipment::Candidate {index,team:p.team.idx() as u8,pos:p.pos,vel:p.vel});
             let Some(hit)=equipment::acquire_target(d.pos(),d.radius,d.team,&profile,
                 sensed.contains(&d.team),candidates,clear) else {continue};
@@ -718,6 +796,7 @@ impl World {
                 continue;
             }
             self.players[i].bot_think -= dt;
+            self.players[i].bot_memory = (self.players[i].bot_memory - dt).max(0.0);
             if self.players[i].bot_think > 0.0 {
                 continue;
             }
@@ -735,7 +814,18 @@ impl World {
             let own_carrier = self.flags[team.idx()].carrier;
 
             let mut goal = enemy_flag_pos;
-            if carrying.is_some() {
+            let cnh_goal = if self.mode == crate::map_catalog::SupportedMode::CaptureAndHold {
+                // Minimal Capture & Hold play: defenders guard the nearest held
+                // point, everyone else heads for the nearest point not yet theirs.
+                let mine = |p: &crate::control::Point| p.owner == Some(team.idx() as u8);
+                let pick = |want_mine: bool| self.points.iter().filter(|p| p.active && mine(p) == want_mine)
+                    .min_by(|a, b| a.pos.distance(pos).total_cmp(&b.pos.distance(pos))).map(|p| p.pos);
+                if role == BotRole::Defense { pick(true).or_else(|| pick(false)) } else { pick(false).or_else(|| pick(true)) }
+                    .map(|g| g + Vec3::new(jx * 0.5, 1.2, jz * 0.5))
+            } else { None };
+            if let Some(g) = cnh_goal {
+                goal = g;
+            } else if carrying.is_some() {
                 goal = own_home;
             } else if own_carrier.is_some() && role != BotRole::Offense {
                 if let Some(c) = own_carrier {
@@ -751,46 +841,64 @@ impl World {
                 }
             }
 
-            // Hunt nearby enemies.
-            if role == BotRole::Hunter || carrying.is_none() {
-                let mut best = 80.0;
-                for (j, other) in self.players.iter().enumerate() {
-                    if j == i || !other.alive || other.team == team {
-                        continue;
+            // Sight uses the turrets' line-of-sight rule (eye to chest against
+            // terrain, map collision and pillars), testing only the nearest
+            // few enemies so each think casts at most BOT_SIGHT_RAYS rays.
+            let eye = pos + Vec3::Y * EYE;
+            let mut near: Vec<(f32, usize)> = self.players.iter().enumerate()
+                .filter(|(j, o)| *j != i && o.alive && o.team != team)
+                .map(|(j, o)| (pos.distance(o.pos), j))
+                .filter(|(d, _)| *d < BOT_SIGHT_RANGE)
+                .collect();
+            near.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let map = self.map;
+            let seen = near.iter().take(BOT_SIGHT_RAYS).find(|(_, j)| {
+                let chest = self.players[*j].pos + Vec3::Y * crate::equipment::CHEST_HEIGHT;
+                obstacle_hit(map, &self.pillars, eye, chest, 0.0).is_none()
+            }).copied();
+
+            // Hunt what it can see; once sight breaks, head for where the enemy
+            // was last seen for a moment instead of tracking it through walls.
+            let hunts = (role == BotRole::Hunter || carrying.is_none()) && role != BotRole::Defense;
+            match seen {
+                Some((d, j)) => {
+                    self.players[i].bot_target = Some(j);
+                    self.players[i].bot_seen = self.players[j].pos;
+                    self.players[i].bot_memory = BOT_MEMORY;
+                    if hunts && d < 48.0 {
+                        goal = self.players[j].pos;
                     }
-                    let d = pos.distance(other.pos);
-                    if d < best {
-                        best = d;
-                        if d < 48.0 && role != BotRole::Defense {
-                            goal = other.pos;
-                        }
+                }
+                None => {
+                    self.players[i].bot_target = None;
+                    let last = self.players[i].bot_seen;
+                    if hunts && self.players[i].bot_memory > 0.0 && pos.distance(last) < 48.0 {
+                        goal = last;
                     }
                 }
             }
 
             self.players[i].bot_goal = goal;
 
-            // Aim at nearest enemy with lead.
-            let mut aim_at: Option<Vec3> = None;
-            let mut aim_d = 95.0;
-            for (j, other) in self.players.iter().enumerate() {
-                if j == i || !other.alive || other.team == team {
-                    continue;
-                }
-                let d = pos.distance(other.pos);
-                if d < aim_d {
-                    aim_d = d;
+            // Aim at the visible target with lead, or face its last-seen spot.
+            let aim = match seen {
+                Some((d, j)) => {
+                    let o = &self.players[j];
                     let lead = d / DISC_SPEED;
-                    aim_at = Some(other.pos + Vec3::Y * 1.1 + other.vel * lead * 0.85);
+                    Some((o.pos + Vec3::Y * 1.1 + o.vel * lead * 0.85, Some(d)))
                 }
-            }
-            if let Some(at) = aim_at {
+                None if self.players[i].bot_memory > 0.0 => Some((self.players[i].bot_seen + Vec3::Y * 1.1, None)),
+                None => None,
+            };
+            if let Some((at, dist)) = aim {
                 let dir = (at - (pos + Vec3::Y * 1.4)).normalize_or_zero();
                 if dir.length_squared() > 0.1 {
                     self.players[i].yaw = (-dir.x).atan2(-dir.z);
                     self.players[i].pitch = dir.y.asin().clamp(-0.7, 0.7);
                 }
-                self.players[i].weapon = if aim_d < 28.0 { 1 } else { 0 };
+                if let Some(d) = dist {
+                    self.players[i].weapon = if d < 28.0 { 1 } else { 0 };
+                }
             }
         }
     }
@@ -813,6 +921,7 @@ impl World {
             }
 
             let is_local = i == self.player_id && !self.players[i].is_bot;
+            let drain = crate::control::drain_at(&self.points, self.players[i].team.idx() as u8, self.players[i].pos);
             let (wish_x, wish_z, jump_held, jump_edge, fire, jet) = if let Some(input) = self.network_inputs.get(i) {
                 let edge = input.jump && !self.players[i].jump_prev;
                 self.players[i].jump_prev = input.jump;
@@ -929,6 +1038,8 @@ impl World {
                 } else {
                     p.energy = (p.energy + ENERGY_REGEN * dt).min(ENERGY_MAX);
                 }
+                // A held control point's drain field saps its enemies' energy.
+                p.energy = (p.energy - drain * dt).max(0.0);
 
                 if p.on_ground && !p.skiing {
                     // Approach the desired walking speed; releasing ski brakes
@@ -1027,16 +1138,16 @@ impl World {
         let wish = if hlen > 1.0 { horiz / hlen } else { horiz };
         let mx = wish.dot(right).clamp(-1.0, 1.0);
         let mz = wish.dot(fwd).clamp(-1.0, 1.0);
+        // Fire only at the enemy it can see, and re-check sight at the trigger:
+        // cover can close between thinks, and bots never shoot at walls.
         let mut fire = false;
-        for (j, o) in self.players.iter().enumerate() {
-            if j == i || !o.alive || o.team == team {
-                continue;
-            }
+        if let Some(o) = p.bot_target.and_then(|j| self.players.get(j)) {
             let d = pos.distance(o.pos);
             let dir = look_dir(yaw, pitch);
             let to_e = ((o.pos + Vec3::Y) - (pos + Vec3::Y * 1.4)).normalize_or_zero();
-            if d < 78.0 && dir.dot(to_e) > 0.86 {
-                fire = true;
+            if o.alive && o.team != team && d < 78.0 && dir.dot(to_e) > 0.86 {
+                let chest = o.pos + Vec3::Y * crate::equipment::CHEST_HEIGHT;
+                fire = obstacle_hit(self.map, &self.pillars, pos + Vec3::Y * EYE, chest, 0.0).is_none();
             }
         }
         let energy = p.energy;
@@ -3019,7 +3130,9 @@ mod equipment_tests {
         let mut w=world();let defs=equipment::definitions(w.map);
         let Some(i)=defs.iter().rposition(|d|d.kind==Kind::Turret && d.team==0) else {return;};
         w.players[0].team=Team::Glacier;
-        w.players[0].pos=defs[i].pos()+Vec3::new(45.,-0.8,0.);
+        // In front of the turret, inside its field of fire.
+        let f=defs[i].facing.map_or(Vec3::X,|f|Vec3::new(f[0],0.,f[1]).normalize());
+        w.players[0].pos=defs[i].pos()+f*45.-Vec3::Y*0.8;
         w.step_equipment(STEP);
         assert!(w.discs.iter().any(|d|d.owner==MAX_PLAYERS && d.team==Team::Ember));
         w.discs.clear();
@@ -3172,6 +3285,9 @@ fn make_player(team: Team, bot: bool, pos: Vec3, yaw: f32, role: BotRole) -> Pla
         bot_role: role,
         bot_goal: pos,
         bot_think: 0.0,
+        bot_target: None,
+        bot_seen: pos,
+        bot_memory: 0.0,
         coyote: 0.0,
     }
 }
@@ -3584,6 +3700,29 @@ mod line_of_sight_tests {
     }
     fn fired_by(w:&World,turret:usize)->bool {w.discs.iter().any(|d|d.owner==MAX_PLAYERS && d.spin==turret as f32)}
 
+    /// Doorways and windows are open: a turret may see this far past an
+    /// opening's inner face, and no further into a room.
+    const DOOR_DEPTH:f32=3.;
+    /// Whether turret `d` would engage an enemy standing at `pos`: field of
+    /// fire, sensor-boosted range and a clear barrel-to-chest line, exactly as
+    /// `step_equipment` decides it.
+    fn engages(map:MapId,d:&equipment::Definition,pos:Vec3)->bool {
+        let Some(profile)=equipment::profile(d.kind,d.weapon) else {return false};
+        if !d.in_arc(pos) {return false;}
+        let enemy=equipment::Candidate {index:0,team:1-d.team,pos,vel:Vec3::ZERO};
+        equipment::acquire_target(d.pos(),d.radius,d.team,&profile,true,[enemy],
+            |a,b|obstacle_hit(map,&[],a,b,0.).is_none()).is_some()
+    }
+    /// Whether `p` lies within DOOR_DEPTH (horizontally) of any opening's
+    /// inner face, given as world-space (x, z) segments.
+    fn in_doorway(p:Vec3,openings:&[(Vec2,Vec2)])->bool {
+        let q=Vec2::new(p.x,p.z);
+        openings.iter().any(|&(a,b)| {
+            let ab=b-a;let t=((q-a).dot(ab)/ab.length_squared().max(1e-9)).clamp(0.,1.);
+            q.distance(a+ab*t)<DOOR_DEPTH
+        })
+    }
+
     /// Every Ember turret, against a Glacier player at each Ember spawn it
     /// cannot see: no track, no shot; a bolt aimed straight at the hidden
     /// player dies in the wall and does no damage.
@@ -3614,11 +3753,11 @@ mod line_of_sight_tests {
         assert!(hidden>=4,"too few hidden spawn cases ({hidden}) to mean anything");
     }
 
-    /// Pod turrets must not see into the rooms they guard. Standable points in
-    /// the tower (all levels), the rear tunnels and both rear rooms are sampled
-    /// on a 1 m grid; none may have a clear line from a pod turret. Tolerance:
-    /// the 2 m entry vestibule between the tower's front wall and its baffles
-    /// (local z < -9.2 on Level 1), which is outside the rooms by design.
+    /// Pod turrets must not engage anyone inside the rooms they guard.
+    /// Standable points in the tower (all levels), the rear tunnels and both
+    /// rear rooms are sampled on a 1 m grid; no turret may engage one more
+    /// than DOOR_DEPTH past an open front opening, tunnel mouth or Level 3
+    /// window.
     #[test]
     fn pod_turrets_cannot_see_into_tower_rooms() {
         let map=MapId::BroadsideClone;
@@ -3629,6 +3768,15 @@ mod line_of_sight_tests {
         let to_world=|team:u8,lx:f32,y:f32,lz:f32| if team==0 {
             Vec3::new(info.ember.x-lx,info.ember.y+y,info.ember.z-lz)
         } else {Vec3::new(info.glacier.x+lx,info.glacier.y+y,info.glacier.z+lz)};
+        let flat=|team:u8,lx:f32,lz:f32| {let p=to_world(team,lx,0.,lz);Vec2::new(p.x,p.z)};
+        // Inner faces of the open openings (local x0, z0, x1, z1): Level 1 front
+        // door and bridge doors, the rear tunnel mouths, Level 3 windows.
+        let inner=11.2;
+        let local:[(f32,f32,f32,f32);9]=[(-11.,-inner,-7.,-inner),(-2.,-inner,2.,-inner),(7.,-inner,11.,-inner),
+            (-10.,inner,-6.,inner),(6.,inner,10.,inner),
+            (-9.,-inner,9.,-inner),(-9.,inner,9.,inner),(-inner,-9.,-inner,9.),(inner,-9.,inner,9.)];
+        let openings:Vec<(Vec2,Vec2)>=[0u8,1].iter().flat_map(|&t|local.iter().map(move |&(x0,z0,x1,z1)|(t,x0,z0,x1,z1)))
+            .map(|(t,x0,z0,x1,z1)|(flat(t,x0,z0),flat(t,x1,z1))).collect();
         // (x0,x1,z0,z1,floor levels to probe from)
         let rooms:[(f32,f32,f32,f32,&[f32]);7]=[
             (-11.5,11.5,-11.5,11.5,&[0.,7.,14.]),   // tower L1-L3
@@ -3638,36 +3786,31 @@ mod line_of_sight_tests {
             (8.6,13.3,-2.,2.,&[-8.])];   // keel hatch passage
         let (mut sampled,mut seen)=(0,Vec::new());
         for (i,d) in defs.iter().enumerate().filter(|(_,d)|d.kind==Kind::Turret) {
-            let c=d.pos();
             for (r,&(x0,x1,z0,z1,levels)) in rooms.iter().enumerate() {
                 let mut lx=x0; while lx<=x1 { let mut lz=z0; while lz<=z1 {
                     for &level in levels {
                         let probe=to_world(d.team,lx,level+5.5,lz);
                         let Some((fy,_))=pack.floor(probe) else {continue};
                         if fy<probe.y-6.9 {continue;}
-                        if levels.len()==3 && level==0. && lz< -9.2 {continue;}   // vestibule
                         let pos=Vec3::new(probe.x,fy+1.2,probe.z);
                         if pack.body_sweep(pos,pos+Vec3::Y*0.01).is_some() {continue;}
-                        let target=pos+Vec3::Y*0.8;let delta=target-c;
-                        if delta.length()>150. {continue;}
                         sampled+=1;
-                        let start=c+delta.normalize_or_zero()*(d.radius+0.6);
-                        if obstacle_hit(map,&[],start,target,0.).is_none() {seen.push((r,i,lx,fy-info.ember.y,lz));}
+                        if !in_doorway(pos,&openings) && engages(map,d,pos) {seen.push((r,i,lx,fy-info.ember.y,lz));}
                     }
                 lz+=1.;} lx+=1.;}
             }
         }
         assert!(sampled>2000,"too few interior samples ({sampled})");
         let by_room:Vec<usize>=(0..7).map(|r|seen.iter().filter(|s|s.0==r).count()).collect();
-        assert!(seen.is_empty(),"{} interior points visible to pod turrets (tower, left tunnel, right tunnel, armory, ship, keel room, hatch passage: {by_room:?}), e.g. {:?}",seen.len(),&seen[..seen.len().min(12)]);
+        assert!(seen.is_empty(),"{} interior points engaged by pod turrets (tower, left tunnel, right tunnel, armory, ship, keel room, hatch passage: {by_room:?}), e.g. {:?}",seen.len(),&seen[..seen.len().min(12)]);
     }
 
-    /// Cairnhold's sentry, roof and battery turrets, through the shared
-    /// `equipment::acquire_target` rule at sensor-boosted range, must not
-    /// acquire a player standing anywhere inside the bunker, the trench, the
-    /// guard hut or the flag tower's interior floors. Tolerance: the 3.6 m
-    /// entry vestibule between each bunker's front wall and its baffle
-    /// (local z < -15), and the columns under the tower's open roof hatches.
+    /// Cairnhold's sentry, roof and battery turrets, through the server's
+    /// rule (field of fire, sensor-boosted range, line of sight), must not
+    /// engage a player standing anywhere inside the bunker, the trench, the
+    /// guard hut, the flag tower's interior floors, the vault or the sally
+    /// port, beyond DOOR_DEPTH of the open front and exit-house doors.
+    /// Tolerance: the columns under the tower's open roof hatches.
     #[test]
     fn cairnhold_turrets_cannot_see_into_base_rooms() {
         let map=MapId::StonehengeClone;
@@ -3684,7 +3827,7 @@ mod line_of_sight_tests {
         let south=|_x:f32,z:f32| 3.+5.*((-20.-z)/16.).clamp(0.,1.);
         // (x0,x1,z0,z1,floor(x,z),skip hatch columns)
         let rooms:[(f32,f32,f32,f32,&dyn Fn(f32,f32)->f32,bool);11]=[
-            (-15.,15.,-15.,19.,&level(0.),false),       // bunker: hall, inventory and back rooms
+            (-15.,15.,-18.6,19.,&level(0.),false),      // bunker: hall, inventory and back rooms
             (1.6,6.4,20.6,75.4,&trench,false),            // covered trench
             (-6.6,14.6,77.4,98.6,&level(22.),true),       // guard hut
             (3.4,14.6,77.4,94.6,&level(29.),true),        // tower floor over the hut
@@ -3694,10 +3837,12 @@ mod line_of_sight_tests {
             (11.8,14.6,2.2,11.4,&level(-6.),false),       // walkway to the tunnel door
             (16.6,86.6,5.4,10.6,&east,false),             // sally port, east leg
             (81.4,86.6,-35.4,4.,&south,false),            // sally port, south leg
-            (81.4,84.4,-42.6,-36.2,&level(8.),false)];    // exit house past its vestibule
+            (81.4,86.6,-42.6,-36.2,&level(8.),false)];    // exit house
+        let flat=|team:u8,lx:f32,lz:f32| {let p=to_world(team,lx,0.,lz);Vec2::new(p.x,p.z)};
+        let openings:Vec<(Vec2,Vec2)>=[0u8,1].iter().flat_map(|&t|[(flat(t,-2.5,-19.2),flat(t,2.5,-19.2)),
+            (flat(t,87.2,-43.),flat(t,87.2,-39.6))]).collect();
         let (mut sampled,mut seen)=(0,Vec::new());
         for d in defs.iter().filter(|d|matches!(d.kind,Kind::Turret)) {
-            let profile=equipment::profile(d.kind,d.weapon).unwrap();
             {   let team=d.team;   // attackers inside the turret's own base
                 for (r,&(x0,x1,z0,z1,floor,hatch)) in rooms.iter().enumerate() {
                     let mut lx=x0; while lx<=x1 { let mut lz=z0; while lz<=z1 {
@@ -3708,12 +3853,8 @@ mod line_of_sight_tests {
                                 let pos=Vec3::new(probe.x,fy+1.2,probe.z);
                                 if (fy-(info.ember.y+y)).abs()<1.5 && pack.body_sweep(pos,pos+Vec3::Y*0.01).is_none() {
                                     sampled+=1;
-                                    let enemy=equipment::Candidate {index:0,team:1-d.team,pos,vel:Vec3::ZERO};
-                                    {
-                                        if let Some(a)=equipment::acquire_target(d.pos(),d.radius,d.team,&profile,true,[enemy],
-                                            |a,b|obstacle_hit(map,&[],a,b,0.).is_none()) {
-                                            seen.push((d.id.clone(),r,lx,y,lz,a.aim_point));
-                                        }
+                                    if !in_doorway(pos,&openings) && engages(map,d,pos) {
+                                        seen.push((d.id.clone(),r,lx,y,lz,pos));
                                     }
                                 }
                             }
@@ -3740,14 +3881,16 @@ mod line_of_sight_tests {
         let to_world=|team:u8,lx:f32,y:f32,lz:f32| if team==0 {
             Vec3::new(1160.-lx,112.+y,480.-lz)} else {Vec3::new(800.+lx,112.+y,1400.+lz)};
         // (x0, x1, z0, z1, floor above the base origin): hall, basement, passage,
-        // and the bishop tower's flag chamber (axis at local z 20, inner radius
-        // 5.2, kept to 4.7 for a body) beyond its L baffle. Allowed: the two
-        // vestibules between each door and the baffle (x > 3.2 or z < 16.8).
+        // and the whole of the bishop tower's flag chamber (axis at local z 20,
+        // inner radius 5.2, kept to 4.7 for a body). Its front (-Z) and side
+        // (+X) doors are open; DOOR_DEPTH past their inner faces is allowed.
         let rooms:&[(f32,f32,f32,f32,f32)]=&[(-29.,29.,-25.,25.,-10.),(-10.5,10.5,-5.5,23.5,-18.),(-4.5,-1.5,25.3,31.3,-18.),
-            (-4.8,2.8,17.2,24.8,17.6)];
+            (-4.8,4.8,15.2,24.8,17.6)];
+        let flat=|team:u8,lx:f32,lz:f32| {let p=to_world(team,lx,0.,lz);Vec2::new(p.x,p.z)};
+        let openings:Vec<(Vec2,Vec2)>=[0u8,1].iter().flat_map(|&t|[(flat(t,-0.8,14.8),flat(t,0.8,14.8)),
+            (flat(t,5.2,19.2),flat(t,5.2,20.8))]).collect();
         let (mut sampled,mut chamber,mut seen)=(0,0,Vec::new());
         for d in defs.iter().filter(|d|matches!(d.kind,Kind::Turret)) {
-            let profile=equipment::profile(d.kind,d.weapon).unwrap();
             for team in [0u8,1] { for &(x0,x1,z0,z1,level) in rooms {
                 let mut lx=x0; while lx<=x1 { let mut lz=z0; while lz<=z1 {
                     if level>17. && Vec2::new(lx,lz-20.).length()>4.7 {lz+=1.5;continue;}
@@ -3756,10 +3899,8 @@ mod line_of_sight_tests {
                         let pos=Vec3::new(probe.x,fy+1.2,probe.z);
                         if (fy-(112.+level)).abs()<0.05 && pack.body_sweep(pos,pos+Vec3::Y*0.01).is_none() {
                             sampled+=1; if level>17. {chamber+=1;}
-                            let enemy=equipment::Candidate {index:0,team:1-d.team,pos,vel:Vec3::ZERO};
-                            if let Some(a)=equipment::acquire_target(d.pos(),d.radius,d.team,&profile,true,[enemy],
-                                |a,b|obstacle_hit(map,&[],a,b,0.).is_none()) {
-                                seen.push((d.id.clone(),team,lx,lz,a.aim_point));
+                            if !in_doorway(pos,&openings) && engages(map,d,pos) {
+                                seen.push((d.id.clone(),team,lx,lz,pos));
                             }
                         }
                     }
@@ -3773,21 +3914,22 @@ mod line_of_sight_tests {
 
     /// Same rule for Frostline and Dustreach, over the rooms their Python
     /// suites check (local base coordinates; team 0 is yawed 180 degrees).
-    /// Allowed: the airlock/entry vestibules between each door and its
-    /// baffle, which lie outside these boxes.
+    /// Doors and windows are open; DOOR_DEPTH past their inner faces is
+    /// allowed. Baffled vestibules (the storehouse, the outpost, the
+    /// basement's tunnel door) lie outside these boxes.
     #[test]
     fn frostline_and_dustreach_turrets_cannot_see_into_base_rooms() {
         // (x0, x1, z0, z1, floor above the base origin)
         let frost:&[(f32,f32,f32,f32,f32)]=&[
-            (-9.8,9.8,-9.4,5.4,0.),        // station hall, between the two ramps
-            (-12.8,10.,7.2,12.8,0.),       // rear hall, west of the east door's baffle
+            (-9.8,9.8,-12.8,5.4,0.),       // station hall, between the two ramps
+            (-12.8,12.8,7.2,12.8,0.),      // rear hall
             (-12.8,12.8,-12.8,12.8,7.5),   // command deck (flag level)
             (-6.8,4.2,-6.8,6.8,-7.),       // basement generator room, west of its baffle
             (4.8,6.8,1.,6.8,-7.),          // basement, north of the baffle
             (8.6,15.4,-6.6,-1.4,-7.),      // tunnel to the service shed
             (98.1,109.9,-77.9,-69.,20.)];  // relay outpost behind its baffle
         let dust:&[(f32,f32,f32,f32,f32)]=&[
-            (-12.6,12.6,-11.8,-0.6,5.),    // keep spawn hall
+            (-12.6,12.6,-14.6,2.6,5.),     // keep hall
             (-12.6,12.6,-15.6,5.6,-2.),    // cistern (generator room) under the keep
             (-14.6,-9.4,7.6,21.6,-2.),     // service tunnel, north leg
             (-23.4,-16.6,16.4,21.6,-2.),   // service tunnel, west leg
@@ -3822,15 +3964,19 @@ mod line_of_sight_tests {
                 }
             }
             assert!(targets.len()>min,"{map:?}: too few interior samples ({})",targets.len());
+            // Inner faces of the open doors and windows, local (x0, z0, x1, z1).
+            let local:&[(f32,f32,f32,f32)]=if map==MapId::SnowblindClone {&[
+                (-2.2,-13.4,2.2,-13.4),(-10.,13.4,-6.5,13.4),(13.4,7.,13.4,10.5),
+                (-11.,-13.4,-4.,-13.4),(4.,-13.4,11.,-13.4),(-11.,13.4,-4.,13.4),(4.,13.4,11.,13.4),
+                (-13.4,-10.,-13.4,-3.),(-13.4,3.,-13.4,10.),(13.4,-10.,13.4,-3.),(13.4,3.,13.4,10.)]
+            } else {&[(-2.5,-15.2,2.5,-15.2),(-2.5,3.2,2.5,3.2),(-30.5,30.5,-26.5,30.5)]};
+            let flat=|team:u8,lx:f32,lz:f32| {let p=to_world(team,lx,0.,lz);Vec2::new(p.x,p.z)};
+            let openings:Vec<(Vec2,Vec2)>=[0u8,1].iter().flat_map(|&t|local.iter().map(move |&(x0,z0,x1,z1)|(t,x0,z0,x1,z1)))
+                .map(|(t,x0,z0,x1,z1)|(flat(t,x0,z0),flat(t,x1,z1))).collect();
             let mut seen=Vec::new();
             for d in equipment::definitions(map).iter().filter(|d|d.kind==Kind::Turret) {
-                let profile=equipment::profile(d.kind,d.weapon).unwrap();
                 for &pos in &targets {
-                    let enemy=equipment::Candidate {index:0,team:1-d.team,pos,vel:Vec3::ZERO};
-                    if let Some(a)=equipment::acquire_target(d.pos(),d.radius,d.team,&profile,true,[enemy],
-                        |a,b|obstacle_hit(map,&[],a,b,0.).is_none()) {
-                        seen.push((d.id.clone(),a.aim_point));
-                    }
+                    if !in_doorway(pos,&openings) && engages(map,d,pos) {seen.push((d.id.clone(),pos));}
                 }
             }
             assert!(seen.is_empty(),"{map:?}: {} interior points visible to turrets, e.g. {:?}",seen.len(),&seen[..seen.len().min(8)]);
@@ -3909,11 +4055,11 @@ mod line_of_sight_tests {
         }
     }
 
-    /// The entry baffles must not block the routes they sit on: each front
-    /// opening leads through the vestibule and a baffle gap into the room, and
-    /// the moved L1->L2 ramp foot is reachable from there.
+    /// The front openings are open straight in: a body walks from outside
+    /// each opening across Level 1 with nothing in the way, and from the left
+    /// bridge door on to the L1->L2 ramp foot.
     #[test]
-    fn tower_entries_route_around_the_baffles() {
+    fn tower_entries_walk_straight_in() {
         let map=MapId::BroadsideClone;
         let pack=crate::map_pack::on(map).unwrap();
         let info=crate::terrain::info(map);
@@ -3923,15 +4069,10 @@ mod line_of_sight_tests {
                 let (fy,_)=pack.floor(p).expect("floor under route point");
                 Vec3::new(p.x,fy+1.2,p.z)
             };
-            // door -> vestibule -> gap -> room; for the left door, on to the ramp.
             let routes:[&[(f32,f32)];3]=[
-                &[(-9.,-14.),(-9.,-10.6),(-5.1,-10.6),(-5.1,-7.8),(-9.,-7.8),(-9.,-2.)],
-                &[(0.,-11.2),(0.,-10.6),(5.1,-10.6),(5.1,-7.5),(3.,-6.)],
-                &[(9.,-14.),(9.,-10.6),(5.1,-10.6),(5.1,-7.5),(8.,-6.)]];
-            for lx in [-9.,0.,9.] {   // straight on from each opening hits a baffle
-                let (a,b)=(at(lx,-10.6),at(lx,-7.8));
-                assert!(pack.body_sweep(a+Vec3::Y*0.3,b+Vec3::Y*0.3).is_some(),"no baffle behind the opening at local x {lx}");
-            }
+                &[(-9.,-14.),(-9.,-6.),(-9.,-2.)],
+                &[(0.,-11.2),(0.,-6.)],
+                &[(9.,-14.),(9.,-6.)]];
             for route in routes {
                 for w in route.windows(2) {
                     let (a,b)=(at(w[0].0,w[0].1),at(w[1].0,w[1].1));
@@ -4335,5 +4476,273 @@ mod shield_and_kit_tests {
         let me=client.player_id;client.players[me].kits=1;client.players[me].health=40.;
         client.predict_command(Command{seq:999,kit:true,..Default::default()});
         assert_eq!((client.players[me].kits,client.players[me].health),(1,40.));
+    }
+}
+
+#[cfg(test)]
+mod bot_line_of_sight {
+    use super::*;
+
+    const MAPS: [MapId; 5] = [MapId::Raindance, MapId::BroadsideClone, MapId::StonehengeClone,
+        MapId::SnowblindClone, MapId::DesertOfDeathClone];
+
+    fn visible_enemy(w: &World, i: usize) -> bool {
+        let p = &w.players[i];
+        let eye = p.pos + Vec3::Y * EYE;
+        w.players.iter().any(|o| o.alive && o.team != p.team && o.pos.distance(p.pos) < 95.0
+            && obstacle_hit(w.map, &w.pillars, eye, o.pos + Vec3::Y * crate::equipment::CHEST_HEIGHT, 0.).is_none())
+    }
+
+    /// Bot-only match on `map`: (bot shots, shots fired with no enemy in sight, kills).
+    fn soak(map: MapId, seconds: f32) -> (u32, u32, u32) {
+        let mut w = World::new();
+        w.set_map(map);
+        w.start_match(true);
+        w.players[0].is_bot = true;
+        let (mut shots, mut blind) = (0, 0);
+        for _ in 0..(seconds / STEP) as u32 {
+            let before: Vec<u32> = w.players.iter().map(|p| p.shots).collect();
+            let seen: Vec<bool> = (0..w.players.len()).map(|i| visible_enemy(&w, i)).collect();
+            w.tick(STEP);
+            for i in 0..w.players.len() {
+                let fired = w.players[i].shots.saturating_sub(before[i]);
+                shots += fired;
+                if !seen[i] { blind += fired; }
+            }
+        }
+        (shots, blind, w.players.iter().map(|p| p.frags).sum())
+    }
+
+    /// A match with just one Ember bot at `a` and one Glacier player at `b`.
+    fn duel(map: MapId, a: Vec3, b: Vec3, b_is_bot: bool) -> World {
+        let mut w = World::new();
+        w.set_map(map);
+        w.start_match(true);
+        let face = (-(b - a).x).atan2(-(b - a).z);
+        w.players = vec![make_player(Team::Ember, true, a, face, BotRole::Hunter),
+            make_player(Team::Glacier, b_is_bot, b, face + std::f32::consts::PI, BotRole::Hunter)];
+        w.player_id = 1;
+        w
+    }
+
+    fn stand(map: MapId, x: f32, z: f32) -> Vec3 {
+        Vec3::new(x, crate::terrain::height_on(map, x, z) + 1.2, z)
+    }
+
+    fn clear(map: MapId, from: Vec3, to: Vec3) -> bool {
+        obstacle_hit(map, &crate::terrain::pillars_on(map), from + Vec3::Y * EYE, to + Vec3::Y * crate::equipment::CHEST_HEIGHT, 0.).is_none()
+    }
+
+    /// A spawn point inside a room, plus a standable spot outside within 60 m
+    /// that the room's walls hide from it.
+    fn hidden_pair(map: MapId) -> (Vec3, Vec3) {
+        let pack = crate::map_pack::on(map).expect("embedded map");
+        for (spawn, _) in crate::terrain::spawn_points_on(map, true) {
+            for r in [25.0f32, 35.0, 45.0, 55.0] {
+                for k in 0..24 {
+                    let t = k as f32 / 24.0 * std::f32::consts::TAU;
+                    let (x, z) = (spawn.x + r * t.cos(), spawn.z + r * t.sin());
+                    let Some((fy, _)) = pack.floor(Vec3::new(x, spawn.y + 30.0, z)) else { continue };
+                    let p = Vec3::new(x, fy + 1.2, z);
+                    if pack.body_sweep(p, p + Vec3::Y * 0.01).is_none() && !clear(map, spawn, p) && !clear(map, p, spawn) {
+                        return (spawn, p);
+                    }
+                }
+            }
+        }
+        panic!("{map:?}: no hidden position found near a spawn");
+    }
+
+    #[test]
+    fn bots_engage_an_enemy_in_the_open() {
+        let map = MapId::Raindance;
+        let (a, b) = (600..1500).step_by(40).flat_map(|x| (600..1500).step_by(40).map(move |z| (x as f32, z as f32)))
+            .map(|(x, z)| (stand(map, x, z), stand(map, x, z + 40.0)))
+            .find(|(a, b)| clear(map, *a, *b) && clear(map, *b, *a))
+            .expect("two open spots 40 m apart");
+        let mut w = duel(map, a, b, false);
+        for _ in 0..(3.0 / STEP) as u32 { w.players[1].pos = b; w.players[1].vel = Vec3::ZERO; w.tick(STEP); }
+        assert_eq!(w.players[0].bot_target, Some(1));
+        assert!(w.players[0].shots > 0, "a bot with a clear line of sight fires");
+    }
+
+    #[test]
+    fn bots_do_not_track_or_fire_through_walls() {
+        for map in [MapId::Raindance, MapId::BroadsideClone, MapId::StonehengeClone, MapId::DesertOfDeathClone] {
+            let (a, b) = hidden_pair(map);
+            let mut w = duel(map, a, b, false);
+            for _ in 0..(3.0 / STEP) as u32 {
+                w.players[0].pos = a; w.players[0].vel = Vec3::ZERO;
+                w.players[1].pos = b; w.players[1].vel = Vec3::ZERO;
+                w.tick(STEP);
+                assert_eq!(w.players[0].bot_target, None, "{map:?}: bot targeted an enemy behind a wall");
+            }
+            assert_eq!(w.players[0].shots, 0, "{map:?}: bot fired at an enemy behind a wall");
+        }
+    }
+
+    #[test]
+    fn losing_sight_drops_the_target_and_heads_for_the_last_seen_spot() {
+        let map = MapId::DesertOfDeathClone;
+        let (hidden_from, hidden) = hidden_pair(map);
+        // Find a spot that does see `hidden_from`, then move the enemy behind the wall.
+        let pack = crate::map_pack::on(map).unwrap();
+        let open = (0..48).find_map(|k| {
+            let t = k as f32 / 48.0 * std::f32::consts::TAU;
+            let (x, z) = (hidden_from.x + 20.0 * t.cos(), hidden_from.z + 20.0 * t.sin());
+            let (fy, _) = pack.floor(Vec3::new(x, hidden_from.y + 10.0, z))?;
+            let p = Vec3::new(x, fy + 1.2, z);
+            (pack.body_sweep(p, p + Vec3::Y * 0.01).is_none() && clear(map, hidden_from, p)).then_some(p)
+        }).expect("a visible spot near the spawn");
+        let mut w = duel(map, hidden_from, open, false);
+        for _ in 0..30 { w.players[0].pos = hidden_from; w.players[1].pos = open; w.tick(STEP); }
+        assert_eq!(w.players[0].bot_target, Some(1));
+        let shots = w.players[0].shots;
+        w.players[1].pos = hidden;
+        for _ in 0..30 { w.players[0].pos = hidden_from; w.players[0].vel = Vec3::ZERO; w.players[1].pos = hidden; w.tick(STEP); }
+        assert_eq!(w.players[0].bot_target, None, "target is dropped once sight breaks");
+        assert!(w.players[0].bot_memory > 0.0, "the last-seen spot is remembered briefly");
+        assert!(w.players[0].bot_seen.distance(open) < 0.5);
+        assert_eq!(w.players[0].shots, shots, "no shots at the wall after sight breaks");
+    }
+
+    #[test]
+    #[ignore = "bot soak; run with --release -- --ignored --nocapture"]
+    fn bot_soak_report() {
+        for map in MAPS {
+            for secs in [60., 180.] { let (shots, blind, kills) = soak(map, secs);
+            println!("{map:?} {secs}s: shots {shots}, fired with no enemy in sight {blind}, kills {kills}"); }
+        }
+    }
+}
+
+#[cfg(test)]
+mod capture_and_hold_tests {
+    use super::*;
+    use crate::control::{Definition, Drain};
+    use crate::map_catalog::SupportedMode;
+
+    fn defs(map: MapId) -> Vec<Definition> {
+        let at = |x: f32, z: f32| [x, crate::terrain::height_on(map, x, z), z];
+        vec![Definition { id: "west".into(), name: "West".into(), pos: at(900.0, 1000.0), radius: 12.0, ctf_active: false, drain: None },
+             Definition { id: "beacon".into(), name: "Beacon".into(), pos: at(1024.0, 1024.0), radius: 12.0, ctf_active: true,
+                drain: Some(Drain { radius: 60.0, rate: crate::control::DEFAULT_DRAIN_RATE }) }]
+    }
+
+    fn playing(mode: SupportedMode) -> (Match, usize, usize) {
+        let mut m = Match::new(MapId::Raindance);
+        m.world.set_mode(mode);
+        m.world.set_control_points(defs(MapId::Raindance));
+        let a = m.join(1, "Alpha").unwrap();
+        let b = m.join(2, "Bravo").unwrap();
+        for _ in 0..240 { m.step(&[]); if m.phase == Phase::Playing { break; } }
+        assert_eq!(m.phase, Phase::Playing);
+        (m, a, b)
+    }
+
+    fn hold(m: &mut Match, slot: usize, at: Vec3, seconds: f32) {
+        for _ in 0..(seconds / STEP) as usize {
+            let p = &mut m.world.players[slot];
+            p.pos = at + Vec3::Y * 1.2; p.vel = Vec3::ZERO; p.alive = true;
+            m.step(&[]);
+        }
+    }
+
+    #[test]
+    fn capture_and_hold_captures_scores_and_wins() {
+        let (mut m, a, b) = playing(SupportedMode::CaptureAndHold);
+        m.world.players[b].pos = Vec3::new(100.0, 500.0, 100.0);
+        assert!(m.world.points.iter().all(|p| p.active), "all points run in Capture & Hold");
+        let west = m.world.points[0].pos;
+        hold(&mut m, a, west, 9.8);
+        assert_eq!(m.world.points[0].owner, None);
+        hold(&mut m, a, west, 0.4);
+        let team = m.world.players[a].team.idx() as u8;
+        assert_eq!(m.world.points[0].owner, Some(team));
+        let before = m.world.score[team as usize];
+        hold(&mut m, a, west, 5.0);
+        let gained = m.world.score[team as usize] - before;
+        assert!((4..=6).contains(&gained), "one held point scores 1/s, got {gained}");
+        m.world.score[team as usize] = crate::control::CNH_TARGET - 1;
+        hold(&mut m, a, west, 1.1);
+        assert_eq!(m.world.state, MatchState::Ended);
+        assert_eq!(m.world.score[team as usize], crate::control::CNH_TARGET);
+        assert!(m.world.flags.iter().all(|f| f.carrier.is_none()), "flags stay inactive");
+    }
+
+    #[test]
+    fn ctf_only_runs_points_marked_ctf_active_and_warmup_never_captures() {
+        let (mut m, a, _) = playing(SupportedMode::Ctf);
+        assert_eq!(m.world.points.iter().map(|p| p.active).collect::<Vec<_>>(), vec![false, true]);
+        let (west, beacon) = (m.world.points[0].pos, m.world.points[1].pos);
+        hold(&mut m, a, west, 11.0);
+        assert_eq!(m.world.points[0].owner, None, "inactive in CTF");
+        hold(&mut m, a, beacon, 10.2);
+        assert!(m.world.points[1].owner.is_some());
+        assert_eq!(m.world.score, [0, 0], "CTF points never score");
+        let mut w = Match::new(MapId::Raindance);
+        w.world.set_control_points(defs(MapId::Raindance));
+        let solo = w.join(1, "Solo").unwrap();
+        let beacon = w.world.points[1].pos;
+        hold(&mut w, solo, beacon, 11.0);
+        assert_eq!(w.phase, Phase::Waiting);
+        assert_eq!(w.world.points[1].owner, None, "warmup never captures");
+    }
+
+    /// Seconds of continuous jetting from a full tank, and energy regained in
+    /// the next four seconds on the ground, with or without an enemy drain field.
+    fn jet_budget(drained: bool) -> (f32, f32) {
+        let mut w = World::new();
+        w.set_map(MapId::Raindance);
+        w.start_match(true);
+        w.players.truncate(1);
+        w.set_control_points(defs(MapId::Raindance));
+        let beacon = w.points[1].pos;
+        w.points[1].owner = Some(if drained { 1 } else { 0 });
+        let high = beacon + Vec3::new(20.0, 300.0, 0.0);
+        w.players[0].pos = high; w.players[0].vel = Vec3::ZERO; w.players[0].energy = ENERGY_MAX;
+        w.input.jet = true;
+        let mut airtime = 0.0;
+        for _ in 0..600 {
+            w.players[0].pos.y = high.y; w.players[0].vel.y = 0.0;
+            w.step_players(STEP);
+            if !w.players[0].jetting { break; }
+            airtime += STEP;
+        }
+        w.input.jet = false;
+        let start = w.players[0].energy;
+        for _ in 0..240 { w.players[0].pos.y = high.y; w.players[0].vel.y = 0.0; w.step_players(STEP); }
+        (airtime, w.players[0].energy - start)
+    }
+
+    #[test]
+    fn drain_field_allows_hops_but_not_sustained_flight() {
+        let (free, free_regen) = jet_budget(false);
+        let (drained, drained_regen) = jet_budget(true);
+        assert!((free - 3.8).abs() < 0.1, "normal tank: {free} s");
+        assert!((drained - 2.3).abs() < 0.1, "drained tank: {drained} s");
+        assert!((free_regen - 48.0).abs() < 1.0 && (drained_regen - 8.0).abs() < 1.0,
+            "regen over 4 s: {free_regen} normal, {drained_regen} drained");
+    }
+
+    #[test]
+    fn rotation_keeps_mode_and_restart_resets_points() {
+        let (mut m, a, _) = playing(SupportedMode::CaptureAndHold);
+        let west = m.world.points[0].pos;
+        hold(&mut m, a, west, 10.2);
+        assert!(m.world.points[0].owner.is_some());
+        m.rotate_to(MapId::Raindance);
+        assert_eq!(m.world.mode, SupportedMode::CaptureAndHold);
+        m.rotate_to_mode(MapId::Raindance, SupportedMode::Ctf);
+        assert_eq!(m.world.mode, SupportedMode::Ctf);
+        assert!(m.world.points.is_empty(), "shipped maps declare no control points yet");
+    }
+
+    #[test]
+    fn shipped_packs_are_unchanged_and_declare_no_points() {
+        for map in [MapId::Raindance, MapId::BroadsideClone, MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone] {
+            let pack = crate::map_pack::on(map).expect("embedded");
+            assert!(pack.manifest.control_points.is_empty(), "{map:?}");
+        }
     }
 }

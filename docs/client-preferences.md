@@ -19,7 +19,11 @@ blank or invalid. Hover the automatic-save hint to see the exact file path.
 Malformed/oversized files fall back to defaults with a visible warning and are
 not rewritten just by loading them. Save failures remain nonfatal and visible.
 
-Only schema, name, directory and direct address are serialized. Match passwords,
+An anti-aliasing checkbox (4× MSAA, on by default) is saved as `antialiasing`.
+It applies immediately; GPUs without 4× support render at 1× regardless. Files
+written before this setting existed load with it on.
+
+Only schema, name, directory, direct address and `antialiasing` are serialized. Match passwords,
 sessions and chat are never saved. Addresses with URL credentials, query strings,
 fragments or control characters are not persisted. Native transport and server
 validation remain authoritative. Files are replaced using a same-directory

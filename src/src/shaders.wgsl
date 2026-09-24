@@ -75,6 +75,15 @@ fn terrain_noise(p: vec2<f32>) -> f32 {
         mix(terrain_hash(cell + vec2<f32>(0.0, 1.0)), terrain_hash(cell + vec2<f32>(1.0)), u.x), u.y);
 }
 
+// Same highlight shoulder as map.wgsl's `tone`: identity below 0.8, rolling
+// off toward 1 instead of clipping, so entities and the map grade alike.
+fn tone_shoulder(c: vec3<f32>) -> vec3<f32> {
+    let x = max(c, vec3<f32>(0.0));
+    let t = 0.8;
+    let rolled = vec3<f32>(t) + (1.0 - t) * (vec3<f32>(1.0) - exp(-(x - vec3<f32>(t)) / (1.0 - t)));
+    return select(x, rolled, x > vec3<f32>(t));
+}
+
 fn safe_normalize(v: vec3<f32>) -> vec3<f32> {
     let l2 = dot(v, v);
     if (l2 < 1e-8) {
@@ -146,6 +155,7 @@ fn fs_world(in: LitOut) -> @location(0) vec4<f32> {
         let specular = pow(max(dot(n, half_dir), 0.0), 36.0);
         col += vec3<f32>(0.2, 0.22, 0.23) * specular;
     }
+    col = tone_shoulder(col);
     let dist = length(world.cam - in.world_pos);
     let density = select(0.0072, world.pad0, world.pad0 > 0.0);
     let fog = clamp(1.0 - exp(-dist * density), 0.0, 0.92);

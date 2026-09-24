@@ -58,6 +58,9 @@ struct Hud {
     map_size: f32,
     #[serde(default)]
     kits: u8,
+    /// Objective caption under the score, from the world's mode.
+    #[serde(skip)]
+    goal: &'static str,
     #[serde(default)]
     kit_heal: f32,
 }
@@ -77,6 +80,8 @@ pub struct PeakRunnerApp {
     effects: crate::effects::Effects,
     announcer: crate::flag_announce::Announcer,
     generator_watch: crate::generator_announce::GeneratorWatch,
+    point_watch: crate::control_hud::PointWatch,
+    game_mode: peakrunner_core::map_catalog::SupportedMode,
     chat_team: bool,
     chat_open: bool,
     chat_text: String,
@@ -116,7 +121,7 @@ impl PeakRunnerApp {
             peakrunner_core::feed::Entry::Frag { killer: "Nova".into(), victim: "Ridge".into(), weapon: "Grenade launcher".into() },
             peakrunner_core::feed::Entry::Chat { sender: "Echo".into(), text: "On my way. Cover the flag!".into() },
         ];
-        Self { overlay: Default::default(), effects: Default::default(), announcer: Default::default(), generator_watch: Default::default(), chat_team:false, world, audio: Audio::silent(), mode: Mode::Play, ember: true, map: MapId::Valley,
+        Self { overlay: Default::default(), effects: Default::default(), announcer: Default::default(), generator_watch: Default::default(), point_watch: Default::default(), game_mode: Default::default(), chat_team:false, world, audio: Audio::silent(), mode: Mode::Play, ember: true, map: MapId::Valley,
             hud: None, frame_aspect: 1.6, stick: [0.;2], touch: false, grabbed: false,
             touch_jump: false, touch_jet: false, touch_fire: false, touch_interact: false,
             touch_swap: false, look_pending: Vec2::ZERO, wait_fire_release: false,
@@ -135,6 +140,8 @@ impl PeakRunnerApp {
             effects: Default::default(),
             announcer: Default::default(),
             generator_watch: Default::default(),
+            point_watch: Default::default(),
+            game_mode: Default::default(),
             chat_team: false,
             chat_open: false, chat_text: String::new(), chat_error: String::new(), chat_next: 0.0,
             world: {
@@ -308,7 +315,9 @@ impl PeakRunnerApp {
             self.audio.play_world(name, position, &self.world);
         }
         self.world.spatial_sounds = sounds;
-        if let Ok(hud) = serde_json::from_str::<Hud>(&raw) {
+        if let Ok(mut hud) = serde_json::from_str::<Hud>(&raw) {
+            hud.goal = if self.world.mode == peakrunner_core::map_catalog::SupportedMode::CaptureAndHold {
+                "Hold the points · first to 300" } else { "First to 3 captures" };
             if !hud.events.is_empty() {
                 for event in hud.events.split(',') {
                     self.audio.play(event);
@@ -326,6 +335,9 @@ impl PeakRunnerApp {
     fn start(&mut self, ctx: &egui::Context) {
         self.audio.unlock();
         self.world.set_map(self.map);
+        crate::qa_overrides::stage_points(&mut self.world);
+        let mode = if self.world.control_point_count() >= 2 { self.game_mode } else { Default::default() };
+        self.world.set_mode(mode);
         self.world.start_match(self.ember);
         self.audio.play("start");
         self.mode = Mode::Play;
@@ -469,6 +481,7 @@ impl eframe::App for PeakRunnerApp {
         let dt = ctx.input(|i| i.stable_dt);
         self.step(ctx, if dt > 0.0 { dt } else { 1.0 / 60.0 });
         crate::qa_overrides::apply(&mut self.world);
+        crate::qa_overrides::apply_points(&mut self.world);
         ctx.request_repaint();
     }
 
@@ -503,7 +516,9 @@ impl eframe::App for PeakRunnerApp {
                 let dt = ui.ctx().input(|i| i.stable_dt).min(0.1);
                 crate::world_overlay::draw(ui, &self.world, &mut self.overlay, dt);
                 crate::flag_hud::draw(ui, &self.world);
+                crate::control_hud::draw(ui, &self.world);
                 for text in self.generator_watch.update(&self.world) { self.announcer.push(text); }
+                for text in self.point_watch.update(&self.world) { self.announcer.push(text); }
                 self.announcer.update(&self.world, dt);
                 self.announcer.draw(ui);
                 reference_measurements(ui,&self.world);
@@ -626,6 +641,18 @@ impl PeakRunnerApp {
                     .corner_radius(8.0).inner_margin(16.0).show(ui, |ui| {
                         ui.set_width(360.0);
                         ui.label(RichText::new("MATCH ROSTER").color(GLACIER).size(13.0));
+                        // The client world mirrors the latest snapshot (and QA staging).
+                        let w = &self.world;
+                        if w.mode == peakrunner_core::map_catalog::SupportedMode::CaptureAndHold {
+                            ui.label(RichText::new(format!("CAPTURE & HOLD · Ember {} – Glacier {} · first to {}",
+                                w.score[0], w.score[1], peakrunner_core::control::CNH_TARGET)).color(FG));
+                            ui.horizontal_wrapped(|ui| {
+                                for p in w.points.iter().filter(|p| p.active) {
+                                    let owner = p.owner.map_or("neutral", |o| if o == 0 { "Ember" } else { "Glacier" });
+                                    ui.label(RichText::new(format!("{} · {owner}", p.name)).color(crate::control_hud::team_color(p.owner)));
+                                }
+                            });
+                        }
                         ui.label(RichText::new(format!("{} · input ack {:.0} ms", self.net.lobby.map,
                             self.net.predictor.latency_ms)).color(MUTED));
                         egui::Grid::new("match-scores").striped(true).show(ui, |ui| {
@@ -679,6 +706,25 @@ impl PeakRunnerApp {
                 });
                 if let Some(spec) = terrain::maps().iter().find(|m| m.id == self.map) {
                     ui.label(RichText::new(spec.note).color(MUTED).size(13.0));
+                }
+                ui.add_space(10.0);
+                ui.label(RichText::new("MODE").color(GLACIER).size(13.0));
+                ui.add_space(4.0);
+                let points = crate::qa_overrides::staged_point_count().unwrap_or_else(||
+                    peakrunner_core::map_pack::on(self.map).map_or(0, |p| p.manifest.control_points.len()));
+                ui.horizontal(|ui| {
+                    use peakrunner_core::map_catalog::SupportedMode;
+                    for (mode, label) in [(SupportedMode::Ctf, "Capture the Flag"), (SupportedMode::CaptureAndHold, "Capture & Hold")] {
+                        let usable = mode == SupportedMode::Ctf || points >= 2;
+                        let on = self.game_mode == mode && usable;
+                        let fill = if on { FG } else { Color32::from_rgb(22, 28, 38) };
+                        let text = if on { BG } else if usable { FG } else { MUTED };
+                        let button = egui::Button::new(RichText::new(label).color(text)).fill(fill).min_size(Vec2::new(168.0, 36.0));
+                        if ui.add_enabled(usable, button).clicked() { self.game_mode = mode; }
+                    }
+                });
+                if points < 2 {
+                    ui.label(RichText::new("Capture & Hold needs a map with capture towers; none are placed yet.").color(MUTED).size(12.0));
                 }
                 ui.add_space(12.0);
                 if ui.add(egui::Button::new(RichText::new("Start match").size(20.0).color(BG)).fill(FG).min_size(Vec2::new(180.0, 44.0))).clicked() {
@@ -873,7 +919,7 @@ fn play_hud(
     painter.text(
         rect.center_top() + Vec2::new(0.0, 50.0),
         Align2::CENTER_TOP,
-        "First to 3 captures",
+        hud.goal,
         FontId::proportional(12.0),
         MUTED,
     );
@@ -1182,6 +1228,11 @@ impl PeakRunnerApp {
         if ui.add(egui::TextEdit::singleline(&mut self.net.direct).char_limit(2048)).changed() {
             self.net.settings_edited();
         }
+        let mut antialiasing=scene::MSAA_WANTED.load(std::sync::atomic::Ordering::Relaxed);
+        if ui.checkbox(&mut antialiasing,"Anti-aliasing (smoother edges; off can help slower GPUs)").changed() {
+            scene::MSAA_WANTED.store(antialiasing,std::sync::atomic::Ordering::Relaxed);
+            self.net.preferences.set_antialiasing(antialiasing);
+        }
         if let Some(warning)=&self.net.preferences.warning {
             ui.label(RichText::new(warning).size(11.0).color(EMBER));
         } else if let Some(path)=&self.net.preferences.path {
@@ -1338,6 +1389,7 @@ impl NetUi {
         net.name=net.preferences.saved.name.clone();
         net.directory=net.preferences.saved.directory.clone();
         net.direct=net.preferences.saved.direct.clone();
+        scene::MSAA_WANTED.store(net.preferences.saved.antialiasing,std::sync::atomic::Ordering::Relaxed);
         net
     }
 

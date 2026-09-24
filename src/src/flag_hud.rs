@@ -2,7 +2,7 @@
 use egui::{Align2, Color32, FontId, Pos2, Vec2};
 use glam::Vec3;
 
-fn bearing(delta: Vec3, forward: Vec3, fov: f32, aspect: f32) -> Option<Vec2> {
+pub(crate) fn bearing(delta: Vec3, forward: Vec3, fov: f32, aspect: f32) -> Option<Vec2> {
     if !delta.is_finite() || delta.length_squared() < 0.01 { return None; }
     let right = forward.cross(Vec3::Y).normalize_or_zero();
     let up = right.cross(forward);
@@ -20,6 +20,8 @@ pub fn draw(ui: &egui::Ui, world: &crate::sim::World) {
     let (eye, forward, fov) = world.camera();
     let inset = rect.shrink2(Vec2::new(82.0, 100.0));
     if inset.width() <= 0.0 || inset.height() <= 0.0 { return; }
+    // Capture & Hold has no flags in play; control points get their own markers.
+    if world.mode != peakrunner_core::map_catalog::SupportedMode::Ctf { return; }
     for flag in &world.flags {
         // When carrying the enemy flag, point to our capture stand instead of ourselves.
         if flag.carrier == Some(world.player_id) { continue; }

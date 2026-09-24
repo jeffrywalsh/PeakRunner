@@ -252,3 +252,16 @@ with this source.
   substitute for a human run.
 - The client keeps its own view yaw after a server respawn; whether the new
   per-point facing is applied on a networked client is unverified.
+
+## Open doorways and windows (2026-09-24)
+
+Supersedes the entry-baffle and window-glazing notes above. The three Level 1
+entry baffles and the Level 3 glazing panes are gone: the front door, both
+bridge doors and every Level 3 window are open for shots and players. The
+windows (2.8 m aperture over a 1.1 m sill) are jet-in entries. The pod
+turrets face the field with a 200 degree field of fire beyond 15 m, so they
+still guard their bridges but no longer see into Level 1. Only the keel
+hatch (generator room) keeps its baffle. Level 3's two spawns moved to
+Level 2 and the ship room, since the open windows exposed them; the new
+`test_no_indoor_spawn_shows_through_an_opening_from_the_field` checks it.
+`tower_entries_walk_straight_in` replaces the baffle-route test.

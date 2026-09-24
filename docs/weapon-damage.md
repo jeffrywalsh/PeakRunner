@@ -79,6 +79,12 @@ test. This is binary cover, not a reproduction of T2's partial-coverage routine.
   eye. Player and bot shots now start no farther than the first surface on the
   eye-to-muzzle segment, so a wall-hugging shot hits the wall on the shooter's
   side instead of spawning outside (`muzzle1` compatibility, source only).
+- Bots need line of sight, using the turrets' rule (eye to chest against
+  terrain, map collision and pillars). Each think tests the three nearest
+  enemies within 95 m and targets the nearest one visible. The trigger re-checks
+  sight before every shot, so bots never fire at walls. When sight breaks they
+  drop the target and head for the last-seen spot for 2.5 s without firing; no
+  blind grenade lobs. Bot AI runs only on the authority, so no compatibility change.
 - Turrets and sensors acquire a target only with a clear segment from the muzzle
   (radius + 0.6 m out) to the target's chest, re-checked every tick, against
   terrain, pillars and the map collision mesh; the shot is re-checked before
@@ -116,6 +122,17 @@ They will also need placed objects added to the line-of-sight closure, so a
 deployed shield or turret blocks sight, and placement validation (clearance, no
 placing through walls or with a line straight into an enemy room). Neither
 exists yet.
+
+**Field of fire (`arc1`).** Doorways and windows are open, so fixed turrets
+are no longer walled off from the rooms behind them. Instead each turret in a
+map pack has a `facing` (horizontal direction, toward the enemy flag) and an
+`arc` (200 degrees), written by `scripts/assets/turret_arcs.py`. Before
+`acquire_target`, `step_equipment` drops candidates the turret may not engage
+(`Definition::in_arc`): anything inside `ALL_ROUND_RANGE` (15 m horizontally)
+is fair game in every direction, so a turret still guards its own bridge or
+ramp; beyond that only targets inside the arc count. Packs without `facing`
+keep 360-degree coverage. This is a simulation change, so the compatibility
+marker gains `arc1`.
 
 ## Equipment shields and hit bars
 

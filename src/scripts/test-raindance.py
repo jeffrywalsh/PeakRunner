@@ -13,6 +13,7 @@ import unittest
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
+from assets import sightline_checks
 from assets import budgets
 from assets import raindance_base as base
 from assets import raindance_materials
@@ -193,17 +194,13 @@ class RaindanceTests(unittest.TestCase):
 
     # --- Bishop flag tower ----------------------------------------------------
     def test_chamber_floor_and_ledge_are_standable_with_headroom(self):
-        """The chamber floor (inside the inner wall, off the L baffle) and the
-        ledge round the collar are the floor top, with room to stand."""
-        # The L baffle's two walls, (x0, x1, z0, z1) relative to the axis.
-        walls = [(-2.2, base.BAFFLE+.2, -base.BAFFLE-.2, -base.BAFFLE+.2),
-                 (base.BAFFLE-.2, base.BAFFLE+.2, -base.BAFFLE+.2, 2.2)]
-        near_wall = lambda x, z: any(x0-.3 < x < x1+.3 and z0-.3 < z < z1+.3 for x0, x1, z0, z1 in walls)
+        """The whole chamber floor and the ledge round the collar are the
+        floor top, with room to stand."""
         checked = 0
         for x in np.arange(-6.8, 6.81, .4):
             for z in np.arange(-6.8, 6.81, .4):
                 r = math.hypot(x, z)
-                inside = r < base.R_IN-.3 and not near_wall(x, z)
+                inside = r < base.R_IN-.3
                 ledge = base.R_OUT+.3 < r < base.R_LEDGE-.1
                 if not (inside or ledge): continue
                 p = (x, base.CH_FLOOR+.15, base.TZ+z)
@@ -211,17 +208,20 @@ class RaindanceTests(unittest.TestCase):
                 self.assertTrue(len(first) and first[0] < .17 and fy[0] > .99, (x, z, first[:2]))
                 self.assertGreater(self.soup.first((x, base.CH_FLOOR+.1, base.TZ+z), (0, 1, 0)), 2.6, (x, z))
                 checked += 1
-        self.assertGreater(checked, 400)
+        self.assertGreater(checked, 500)
 
-    def test_doors_are_open_and_lead_to_the_baffle(self):
+    def test_doors_are_open_straight_through_to_the_chamber(self):
         """Front (-Z) and side (+X) doors: a body band passes the wall (1.6 m
-        wide, 3.4 m tall) and meets the L baffle inside, never the chamber."""
+        wide, 3.4 m tall) with nothing behind it, crossing the chamber floor
+        to the far inner wall. The two doors are 90 degrees apart, so neither
+        looks out through the other."""
         for (x, z), (dx, dz) in (((0, -9), (0, 1)), ((9, 0), (-1, 0))):
             for h in (.3, 1., 1.8, 2.5, 3.2):
                 for off in (-.5, 0, .5):
                     o = (x+off*abs(dz), base.CH_FLOOR+h, base.TZ+z+off*abs(dx))
-                    t = self.soup.first(o, (dx, 0, dz), 12)
-                    self.assertAlmostEqual(9-t, base.BAFFLE+.2, places=2, msg=(x, z, h, off))
+                    t = self.soup.first(o, (dx, 0, dz), 20)
+                    self.assertGreater(t, 9+base.R_IN-.8, msg=(x, z, h, off))
+                    self.assertLess(t, 9+base.R_OUT+.1, msg=(x, z, h, off))
             o = (x, base.CH_FLOOR+3.55, base.TZ+z)                       # lintel
             self.assertLess(self.soup.first(o, (dx, 0, dz), 12), 9-base.R_IN+.01)
 
@@ -394,9 +394,11 @@ class RaindanceTests(unittest.TestCase):
         self.assertEqual(len(scenery(self.man)), 195)
 
     def test_turrets_cannot_see_into_the_halls(self):
-        """No turret has a clear line from its barrel start to a player's
-        chest anywhere in either hall (same rule as equipment::acquire_target)."""
-        targets = []
+        """No turret engages a player (field of fire, range and a clear line
+        from its barrel start to the chest, as the server does) anywhere in
+        either hall, basement, service passage or flag chamber, beyond the
+        doorway depth of an open opening (sightline_checks.DOOR_DEPTH)."""
+        targets, openings = [], []
         for b in json.loads((ROOT/'maps/raindance.json').read_text())['bases']:
             m = kit.Mesh(); m.origin = tuple(b['position']); m.yaw = math.radians(b['yaw'])
             for x in np.arange(-29, 29.1, 1.5):
@@ -410,23 +412,22 @@ class RaindanceTests(unittest.TestCase):
                 targets.append(m.point((-3, base.B_FLOOR+base.LIFT+.8, z)))
             for x in np.arange(base.SERVICE_X[0]+.5, base.CEIL_END, 1.5):
                 targets.append(m.point((x, base.service_y(x)+base.LIFT+.8, sum(base.STRIP_Z)/2)))
-            # The flag chamber beyond the L baffle. The two vestibules between
-            # each door and the baffle (x > 3.2 or z < -3.2 from the axis) are
-            # the allowed tolerance, as on the other maps.
-            for x in np.arange(-4.6, 2.81, .5):
-                for z in np.arange(-2.8, 4.61, .5):
+            # The whole flag chamber floor; its two doors are open.
+            for x in np.arange(-4.6, 4.61, .5):
+                for z in np.arange(-4.6, 4.61, .5):
                     if math.hypot(x, z) < base.R_IN-.55:
                         targets.append(m.point((x, base.CH_FLOOR+base.LIFT+.8, base.TZ+z)))
+            pt = lambda x, z: tuple(m.point((x, 0, z))[i] for i in (0, 2))
+            openings += [(pt(-.8, base.TZ-base.R_IN), pt(.8, base.TZ-base.R_IN)),
+                         (pt(base.R_IN, base.TZ-.8), pt(base.R_IN, base.TZ+.8))]
         targets = np.array(targets)
+        allowed = sightline_checks.near_openings(targets, openings)
         turrets = [e for e in self.man['entities'] if e['kind'] == 'turret']
         self.assertEqual(len(turrets), 6)
         for e in turrets:
-            p = np.array(e['position']); d = targets-p; dist = np.linalg.norm(d, axis=1)
-            near = dist < 150
-            if not near.any(): continue
-            starts = p+d[near]/dist[near, None]*(e['radius']+.6)
-            clear = ~self.world.blocked_many(starts, targets[near])
-            self.assertEqual(int(clear.sum()), 0, (e['id'], targets[near][clear][:5]))
+            self.assertLess(e['arc'], 360, e['id'])
+            seen = sightline_checks.visible(self.world, e, targets) & ~allowed
+            self.assertEqual(int(seen.sum()), 0, (e['id'], targets[seen][:5]))
 
     def test_transform_invariance_and_budget(self):
         a, anchors = one_base(0, 'one')
@@ -553,6 +554,11 @@ class SpawnForwardClearance(unittest.TestCase):
         from assets import spawn_checks
         pack = Path(__file__).resolve().parent.parent/'assets/maps/raindance'
         self.assertEqual(spawn_checks.problems(pack), [])
+
+    def test_no_indoor_spawn_shows_through_an_opening_from_the_field(self):
+        from assets import spawn_checks
+        pack = Path(__file__).resolve().parent.parent/'assets/maps/raindance'
+        self.assertEqual(spawn_checks.exposed(pack), [])
 
 
 if __name__ == '__main__':

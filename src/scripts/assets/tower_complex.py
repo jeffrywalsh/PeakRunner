@@ -28,9 +28,11 @@ and none of it encloses a space a player can enter.
 Interior dressing (wall liners, baseboards, cornices, pilasters, light
 fixtures, frames) is render-only and sits at most 0.2 m proud of a solid
 surface, inside the 0.52 m player radius, so it never needs collision.
-Level 3 windows are open apertures with a collision-only pane: players and
-shots are stopped like glass, but the view out is clear. The map shader has
-no alpha-blended glass, so the pane itself is not drawn.
+Doorways and Level 3 windows are open: players and shots pass straight
+through. Nothing stands behind the front openings; the pod turrets face the
+field with a limited field of fire (turret_arcs.py) instead of being walled
+off from the rooms. Only the keel hatch into the generator room keeps its
+airlock baffle.
 
 If the caller's mesh has a `lamps` list, every light fixture appends
 (world_position, intensity) point samples to it for the offline light bake.
@@ -79,16 +81,8 @@ WINDOWS = {'-z': [(-9,-5.8),(5.8,9)], '+z': [(-9,9)], '-x': [(-9,9)], '+x': [(-9
 # Solid wall spans on Level 1 (gaps: front door, two bridge doors, two rear
 # tunnel mouths).
 L1_GAPS = {'-z': [(-11,-7),(-2,2),(7,11)], '+z': [(-10,-6),(6,10)], '-x': [], '+x': []}
-# Entry baffles: solid partitions 2 m inside the front wall. Every straight
-# line from a pod turret through a front opening ends on one of them, so the
-# turrets guard the bridges without seeing into the rooms. The two gaps
-# between them (|x| 4.2-6.0) are out of line with every front opening from
-# both pod turrets; the 2 m vestibule behind the front wall is the only
-# interior floor a turret can see.
-BAFFLE_Z0, BAFFLE_Z1 = -9.6, -9.2
-BAFFLES = [(-INNER,-6.0),(-4.2,4.2),(6.0,INNER)]
-# The L1->L2 ramp starts behind the left baffle (it used to start at the
-# left bridge door, in the turret's line of fire).
+# Front openings (door, two bridge doors) are open straight into Level 1.
+# The L1->L2 ramp foot stays set back from the left bridge door.
 RAMP1_Z0 = -8.8
 
 # Material roles. 'bark' is a kit slot this pack repaints as the interior
@@ -120,10 +114,6 @@ def build(mesh, team, circuit):
         if z0>z1: z0,z1=z1,z0
         if y0>y1: y0,y1=y1,y0
         mesh.box(((x0+x1)/2,(y0+y1)/2,(z0+z1)/2),(x1-x0,y1-y0,z1-z0),mat,solid)
-    def pane(a,b,c,d):
-        # Collision only: invisible glazing.
-        pts=[mesh.point(p) for p in (a,b,c,d)]
-        for tri in ((0,1,2),(0,2,3)): mesh.collision.extend(v for i in tri for v in pts[i])
     def floor_ring(y,mat=DECK,holes=(),shaft_hole=True):
         h=SHAFT_HALF; T=TOWER_HALF
         holes=[*([(-h,h,-h,h)] if shaft_hole else []),*holes]
@@ -295,8 +285,8 @@ def build(mesh, team, circuit):
         if axis == 'z': wall(-T,T,lo,hi,L2,L3)
         else: wall(lo,hi,-T,T,L2,L3)
         dress(axis,plane,into,[(-INNER,INNER)],L2,L2+STOREY)
-    # Level 3: sill, head and piers around real window apertures, with
-    # mullions and a collision-only pane in each aperture.
+    # Level 3: sill, head and piers around open window apertures; the
+    # mullions are decoration, so shots and players pass between them.
     for side,(axis,plane,into) in tower_faces.items():
         outer = plane-into*2*W; lo, hi = min(plane,outer), max(plane,outer)
         def piece(u0,u1,y0,y1):
@@ -308,7 +298,6 @@ def build(mesh, team, circuit):
         mid = (lo+hi)/2
         for u0,u1 in WINDOWS[side]:
             y0,y1 = L3+SILL,L3+HEAD
-            pane(*(at(axis,mid,u,y) for u,y in ((u0,y0),(u1,y0),(u1,y1),(u0,y1))))
             # Frame (proud both faces) and mullions.
             face_box(axis,outer,-into,u0,u1,y0-.12,y0,.16,METAL)
             for face,direction in ((plane,into),(outer,-into)):
@@ -363,16 +352,8 @@ def build(mesh, team, circuit):
     skirt(-7,-INNER,RAMP1_Z0+.6*run1/rise,RAMP1_Z0+(RAMP_HEADROOM+.6)*run1/rise,L1)
     skirt(7,INNER,TOWER_HALF-1-.6*run2/rise,TOWER_HALF-1-(RAMP_HEADROOM+.6)*run2/rise,L2)
 
-    # Entry baffles (see BAFFLES), dressed on both faces, with hazard edges on
-    # their open ends and a light strip down the vestibule.
-    for u0,u1 in BAFFLES:
-        wall(u0,u1,BAFFLE_Z0,BAFFLE_Z1,L1,L1+STOREY)
-        dress('z',BAFFLE_Z1,1,[(u0,u1)],L1,L1+STOREY)
-        dress('z',BAFFLE_Z0,-1,[(u0,u1)],L1,L1+STOREY,pilasters=False)
-        for u in (u0,u1):
-            if abs(u) >= INNER-.01: continue
-            wall(u-.06,u+.06,BAFFLE_Z0-.06,BAFFLE_Z1+.06,L1,L1+DOOR_TOP,HAZARD,False)
-    vz = (-INNER+BAFFLE_Z0)/2
+    # Entry hall light strip just inside the front wall.
+    vz = -INNER+1.2
     mesh.box((0,L1+STOREY-.035,vz),(2*INNER-.4,.07,.8),METAL,False)
     mesh.box((0,L1+STOREY-.07,vz),(2*INNER-.8,.06,.45),GLOW,False)
     for x in range(-9,10,3): lamp((x,L1+STOREY-.3,vz),.5)
@@ -547,7 +528,8 @@ def build(mesh, team, circuit):
         # (x, y, z, local yaw): yaw 0 faces the base front (-Z), pi/2 faces -X.
         'spawn_points': [(-4.2,L1+SPAWN_LIFT,8.5,0), (4.2,L1+SPAWN_LIFT,8.5,0),
                          (-3.5,L2+SPAWN_LIFT,-7.5,-math.pi/2), (4.2,L2+SPAWN_LIFT,-7.5,math.pi/2),
-                         (-4,L3+SPAWN_LIFT,6,0), (4,L3+SPAWN_LIFT,7,0),
+                         # Level 3's windows are open, so no spawn up there.
+                         (4,L2+SPAWN_LIFT,8,0), (8,L1+SPAWN_LIFT,30,0),
                          (-11,L1+SPAWN_LIFT,34,-math.pi/2), (5,L1+SPAWN_LIFT,34,-math.pi/2)],
         'entrances': [(0,.2,-TOWER_HALF),(-8,.2,TOWER_HALF),(8,.2,TOWER_HALF),(-9,.2,POD_Z),(9,.2,POD_Z)],
         'generator': GENERATOR,

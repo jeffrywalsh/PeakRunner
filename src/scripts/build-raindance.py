@@ -16,6 +16,7 @@ import struct
 import sys
 
 from assets import pack_writer
+from assets import turret_arcs
 from assets import raindance_base
 from assets import raindance_materials
 from assets import raindance_structures
@@ -136,7 +137,7 @@ def build(output, bake=True):
     e = d['environment']
     manifest.update(version=1, name=d['name'], flags=flags, spawns=spawns, spawn_points=spawn_points,
         holes=sorted(set(holes)), sky={'visibleDistance': str(e['visibility']), 'fogDistance': str(e['fog_start'])},
-        ambient_emitters=[[1000, 100, 940, .35, 200, 2000]], entities=mesh.entities, instances=mesh.instances,
+        ambient_emitters=[[1000, 100, 940, .35, 200, 2000]], entities=turret_arcs.assign(mesh.entities, flags), instances=mesh.instances,
         materials=list(kit.MATERIALS), asset_catalog=list(kit.ASSETS),
         provenance='PeakRunner original procedural kit v2 (cleaned Raindance); no extracted assets',
         base_asset=raindance_base.ASSET_ID, structures_asset=raindance_structures.ASSET_ID,

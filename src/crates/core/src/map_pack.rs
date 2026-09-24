@@ -47,6 +47,13 @@ pub struct Manifest {
     /// centre and world yaw. Absent: the single `spawns` entry per team.
     #[serde(default)]
     pub spawn_points: Vec<Vec<[f32; 4]>>,
+    /// Optional render look (sun, ambient, exposure, height fog, procedural
+    /// sky); see `crate::look`. Absent: the historical look.
+    #[serde(default)]
+    pub look: crate::look::Look,
+    /// Optional Capture & Hold points; see `crate::control`.
+    #[serde(default)]
+    pub control_points: Vec<crate::control::Definition>,
 }
 
 pub struct MapPack {
@@ -225,6 +232,7 @@ impl MapPack {
         if manifest.sky.get("fogColor").is_some_and(|v| parse_fog(v).is_none()) {
             return Err("Invalid fog colour".into());
         }
+        manifest.look.validate()?;
         if manifest.flags.iter().chain(manifest.spawns.iter()).flatten().any(|v| !v.is_finite() || v.abs()>10000.0) {
             return Err("Invalid map positions".into());
         }
@@ -294,6 +302,7 @@ impl MapPack {
             holes[i]=true;
         }
         crate::equipment::validate(&manifest.entities)?;
+        crate::control::validate(&manifest.control_points)?;
         Ok(Self {embedded:builtin_asset,manifest,root:root.into(),fingerprint:format!("{:x}",Sha256::digest(&json)),triangles,buckets,holes,heights})
     }
 

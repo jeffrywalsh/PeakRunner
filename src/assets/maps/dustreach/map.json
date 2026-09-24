@@ -28,7 +28,7 @@
       0.57735,
       -0.57735
     ],
-    "lamps": 267,
+    "lamps": 265,
     "baker_sha256": "66d1c04a0581f283b62d4a01a9229abd22fbd18a738474c8c5c148db84800fed"
   },
   "version": 1,
@@ -70,7 +70,7 @@
       [
         1042.2,
         136.2,
-        654.5,
+        658.5,
         1.5707963267948966
       ],
       [
@@ -120,7 +120,7 @@
       [
         1005.8,
         136.2,
-        1393.5,
+        1389.5,
         4.71238898038469
       ],
       [
@@ -391,20 +391,30 @@
       "team": 0,
       "circuit": "base-0",
       "radius": 2.2,
-      "weapon": "bullet"
+      "weapon": "bullet",
+      "facing": [
+        0.0,
+        1.0
+      ],
+      "arc": 200.0
     },
     {
       "id": "turret-3",
       "kind": "turret",
       "position": [
-        1048.2,
+        1050.0,
         152.8,
-        653.0
+        651.0
       ],
       "team": 0,
       "circuit": "base-0",
       "radius": 2.2,
-      "weapon": "bullet"
+      "weapon": "bullet",
+      "facing": [
+        0.0,
+        1.0
+      ],
+      "arc": 200.0
     },
     {
       "id": "sensor-4",
@@ -456,7 +466,12 @@
       "team": 0,
       "circuit": "base-0",
       "radius": 2.2,
-      "weapon": "plasma"
+      "weapon": "plasma",
+      "facing": [
+        0.0,
+        1.0
+      ],
+      "arc": 200.0
     },
     {
       "id": "inventory-8",
@@ -495,20 +510,30 @@
       "team": 1,
       "circuit": "base-1",
       "radius": 2.2,
-      "weapon": "bullet"
+      "weapon": "bullet",
+      "facing": [
+        0.0,
+        -1.0
+      ],
+      "arc": 200.0
     },
     {
       "id": "turret-11",
       "kind": "turret",
       "position": [
-        999.8,
+        998.0,
         152.8,
-        1395.0
+        1397.0
       ],
       "team": 1,
       "circuit": "base-1",
       "radius": 2.2,
-      "weapon": "bullet"
+      "weapon": "bullet",
+      "facing": [
+        0.0,
+        -1.0
+      ],
+      "arc": 200.0
     },
     {
       "id": "sensor-12",
@@ -560,7 +585,12 @@
       "team": 1,
       "circuit": "base-1",
       "radius": 2.2,
-      "weapon": "plasma"
+      "weapon": "plasma",
+      "facing": [
+        0.0,
+        -1.0
+      ],
+      "arc": 200.0
     }
   ],
   "instances": [
@@ -644,9 +674,9 @@
           691.5
         ],
         "sentry": [
-          1048.2,
+          1050.0,
           150.0,
-          653.0
+          651.0
         ],
         "ruin_turret": [
           952.0,
@@ -812,9 +842,9 @@
           1356.5
         ],
         "sentry": [
-          999.8,
+          998.0,
           150.0,
-          1395.0
+          1397.0
         ],
         "ruin_turret": [
           1096.0,
@@ -1127,7 +1157,7 @@
     "fogDistance": "1500",
     "fogColor": "0.80 0.69 0.52"
   },
-  "asset_sha256": "1723a99099f7a296126c19ac7e1e10d2a51f7111d67a23b834de5261339bba91",
+  "asset_sha256": "2b21acef1db74f96c54de3ab727791785e661e289afea530d5447dcc7abd6b83",
   "gate_asset_sha256": "463844e0c681ff0a7a7a2a9b69757aab937db8a846413c8e03cadccec9339e2d",
   "sewer_asset_sha256": "a1beca97330f536d0837492e12b008ef4226323995ade08a3443b9d55f7a477e",
   "structure_kit_sha256": "0636249d6eb133db27977b895a48d7d50ce7b8882ec8ba8fd0a63908b5f04630",
@@ -1137,10 +1167,10 @@
   "definition_sha256": "3c8dbe0b1b75922fbf6a1a4a1ab87eaca781f9cd9a3f3f2a4c37975db5623583",
   "files": {
     "height.bin": "c6dfaca84a24c372640888f8dd3541dd627144844193ddfc1666a86700e16a38",
-    "vertices.bin": "69569bfbe73cb880ed5953442cff3d966a9958720c0f3bb0f6749e4225841acd",
-    "collision.bin": "ce65a6782d04dd249ac67ce8bdcb23c7c6e97338dd7f04cdc70485ec616d72b3",
+    "vertices.bin": "424bd62bac467086ca0c9625a92d3787690e684c0128e46e157cbb00800aad9b",
+    "collision.bin": "87eaf00088efa11401c183e3998e557217d06a0b3d11d046aa965b379fe1c161",
     "weights.rgba": "f71c0e623e45f28b804145e6f011aed122846b4d1daa4a75a0c032419d6427da",
-    "textures.rgba": "5ae8e03690b13069371f46c534561d164d05dfad60a540b189aca74327e2662a",
+    "textures.rgba": "d661e60b31113ef667bffc5cb6ef0d33e1cc86e537e29b0720de04ee168f1ebd",
     "ambient.f32": "a3938b139d99dbdde7156268f817497624177809ab733a0f0ccc8ccce3782462"
   }
 }

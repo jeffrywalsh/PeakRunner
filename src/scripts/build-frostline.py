@@ -26,6 +26,7 @@ from assets import frostline_materials
 from assets import frostline_station
 from assets import frostline_terrain
 from assets import pack_writer
+from assets import turret_arcs
 from assets import structure_kit
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -215,7 +216,7 @@ def build(output, bake=True):
     manifest['texture_count'] = count
     if lightmap: manifest['lightmap'] = lightmap
     manifest.update(version=1, id=definition['id'], name=definition['name'], flags=flags, spawns=spawns,
-        exact_spawns=True, spawn_points=spawn_points, holes=holes(definition), entities=mesh.entities,
+        exact_spawns=True, spawn_points=spawn_points, holes=holes(definition), entities=turret_arcs.assign(mesh.entities, flags),
         instances=instances, ambient_emitters=[], sky=dict(FOG), trees=len(pines),
         asset_sha256=pack_writer.source_hash(frostline_station.__file__),
         beacon_asset_sha256=pack_writer.source_hash(frostline_beacon.__file__),

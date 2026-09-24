@@ -17,12 +17,16 @@ pub fn game_protocol() -> String {
         // equipment5: generator-powered shields regenerate continuously, destroyed
         // equipment stays offline until repaired past half hull (sent in
         // snapshots), and generators explode visibly. kit1: repair kits.
-        Some(pack) => format!("{PROTOCOL}:equipment5:blast3:chat2:names1:ping1:fov1:muzzle1:kit1:maps6:{}:{}:{}:{}:{}",pack.fingerprint,
+        // cnh1: control points (state in snapshots, drain field in the shared
+        // sim) and the Capture & Hold mode.
+        // arc1: fixed turrets face the field with a limited field of fire beyond
+        // 15 m (equipment::Definition::in_arc), so open doorways need no baffles.
+        Some(pack) => format!("{PROTOCOL}:equipment5:blast3:chat2:names1:ping1:fov1:muzzle1:kit1:cnh1:arc1:maps6:{}:{}:{}:{}:{}",pack.fingerprint,
             map_pack::on(MapId::BroadsideClone).expect("Tower Complex").fingerprint,
             map_pack::on(MapId::StonehengeClone).expect("Cairnhold").fingerprint,
             map_pack::on(MapId::SnowblindClone).expect("Frostline").fingerprint,
             map_pack::on(MapId::DesertOfDeathClone).expect("Dustreach").fingerprint),
-        None => format!("{PROTOCOL}:equipment5:blast3:chat2:names1:ping1:fov1:muzzle1:kit1"),
+        None => format!("{PROTOCOL}:equipment5:blast3:chat2:names1:ping1:fov1:muzzle1:kit1:cnh1:arc1"),
     }
 }
 
@@ -72,6 +76,23 @@ mod tests {
         let text=serde_json::to_string(&super::ServerMsg::Snapshot{state:m.snapshot()}).unwrap();
         let super::ServerMsg::Snapshot{state}=serde_json::from_str(&text).unwrap() else {panic!()};
         let p=&state.players[slot];assert_eq!((p.kits,p.kit_heal),(0,12.5));
+    }
+    #[test]
+    fn control_points_and_mode_survive_the_wire() {
+        use peakrunner_core::{control, map_catalog::SupportedMode};
+        let mut m=peakrunner_core::sim::Match::new(peakrunner_core::terrain::MapId::Raindance);
+        m.world.set_mode(SupportedMode::CaptureAndHold);
+        m.world.set_control_points(vec![control::Definition{id:"beacon".into(),name:"Beacon".into(),pos:[1.,2.,3.],
+            radius:12.,ctf_active:false,drain:Some(control::Drain{radius:60.,rate:10.})}]);
+        m.world.points[0].owner=Some(1);m.world.points[0].progress=0.4;m.world.points[0].capturing=Some(0);m.world.points[0].contested=true;
+        m.world.score=[120,45];
+        let text=serde_json::to_string(&super::ServerMsg::Snapshot{state:m.snapshot()}).unwrap();
+        let super::ServerMsg::Snapshot{state}=serde_json::from_str(&text).unwrap() else {panic!()};
+        assert_eq!(state.mode,SupportedMode::CaptureAndHold);
+        assert_eq!(state.points,m.world.points);
+        assert_eq!(state.score,[120,45]);
+        assert!(super::game_protocol().contains(":cnh1"));
+        assert!(super::game_protocol().contains(":arc1"));
     }
     #[test]
     fn chat_cannot_supply_identity_or_frag_outcomes() {

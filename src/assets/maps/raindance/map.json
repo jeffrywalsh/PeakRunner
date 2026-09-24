@@ -428,7 +428,12 @@
       "team": 0,
       "circuit": "ember",
       "radius": 2.2,
-      "weapon": "plasma"
+      "weapon": "plasma",
+      "facing": [
+        -0.351123,
+        0.936329
+      ],
+      "arc": 200.0
     },
     {
       "id": "turret-6",
@@ -441,7 +446,12 @@
       "team": 0,
       "circuit": "ember",
       "radius": 2.2,
-      "weapon": "plasma"
+      "weapon": "plasma",
+      "facing": [
+        -0.351123,
+        0.936329
+      ],
+      "arc": 200.0
     },
     {
       "id": "generator-7",
@@ -519,7 +529,12 @@
       "team": 1,
       "circuit": "glacier",
       "radius": 2.2,
-      "weapon": "plasma"
+      "weapon": "plasma",
+      "facing": [
+        0.351123,
+        -0.936329
+      ],
+      "arc": 200.0
     },
     {
       "id": "turret-13",
@@ -532,7 +547,12 @@
       "team": 1,
       "circuit": "glacier",
       "radius": 2.2,
-      "weapon": "plasma"
+      "weapon": "plasma",
+      "facing": [
+        0.351123,
+        -0.936329
+      ],
+      "arc": 200.0
     },
     {
       "id": "turret-14",
@@ -545,7 +565,12 @@
       "team": 0,
       "circuit": "ember",
       "radius": 2.2,
-      "weapon": "bullet"
+      "weapon": "bullet",
+      "facing": [
+        -0.351123,
+        0.936329
+      ],
+      "arc": 200.0
     },
     {
       "id": "sensor-15",
@@ -571,7 +596,12 @@
       "team": 1,
       "circuit": "glacier",
       "radius": 2.2,
-      "weapon": "bullet"
+      "weapon": "bullet",
+      "facing": [
+        0.351123,
+        -0.936329
+      ],
+      "arc": 200.0
     },
     {
       "id": "sensor-17",
@@ -2697,16 +2727,16 @@
   "provenance": "PeakRunner original procedural kit v2 (cleaned Raindance); no extracted assets",
   "base_asset": "raindance-base-v4",
   "structures_asset": "raindance-structures-v2",
-  "base_asset_sha256": "f42d04541a8d4b211606287b162c2d01e345f107b56fb78710d2b752b8c3b4e0",
+  "base_asset_sha256": "12b2e5f3d60e7e4c97eedbe022701d8b92abf99ff568852cc4a648d9edc915df",
   "structures_asset_sha256": "2168bd8af5ee259d70362d060f006095d3065f853be12cf5d512ade9a638067b",
   "material_source_sha256": "fe226cf2d1f451356c001f0da50bebb734c1f8cc260864d3ba6b6f94a07ae8ad",
   "definition_sha256": "38bbd0cbb27eceb37ec0916ec5426daed5c33bd31314b6aa85e78db28582e494",
   "files": {
     "height.bin": "7305d9f6ff06e086d7a831130da4116c42522d3e7606f28ebdf5d682bbf16eeb",
     "weights.rgba": "f8e2504e4779325a8afe4f46e269c02dbee2eaf61bbb06bbfbeb3d3eab8da19d",
-    "vertices.bin": "12ef529d8b1ccca004da559f880a0c5ba7b75cb5bd67b5554f9058f2d6b41511",
-    "collision.bin": "b352f7221894b38955c7707229190f1a7df2aab3acb0ad6f66a843867fe23ff3",
-    "textures.rgba": "c80f924471360461d7c62aa18996f59d79334b1ef218277abdc9528190d6afdc",
+    "vertices.bin": "b7bee3d2cc0f08ff68b27c15d83cb178dbe019660510c67ad7a86f1e21232ee1",
+    "collision.bin": "3ff76870d4bf25c68db267449f2b354f68d39fddb1fb1fd437a08df748680eb0",
+    "textures.rgba": "b168a0ab3e556f8c961611b77da329b2829289f839ed739b1aaefbafb6b8f736",
     "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e"
   }
 }

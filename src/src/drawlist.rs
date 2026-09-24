@@ -137,7 +137,9 @@ pub fn build_frame_with(world: &World, aspect: f32, dt: f32, fx: &mut Effects) -
         push_base(&mut lit, world, false);
     }
 
-    for f in &world.flags {
+    // Capture & Hold has no flags in play.
+    let ctf = world.mode == peakrunner_core::map_catalog::SupportedMode::Ctf;
+    for f in world.flags.iter().filter(|_| ctf) {
         // A carried flag rides on its carrier's back (player_model).
         if f.carrier.is_some() { continue; }
         let color = if f.team == Team::Ember {

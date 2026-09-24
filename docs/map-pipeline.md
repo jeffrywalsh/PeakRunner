@@ -69,10 +69,23 @@ Design checklist (each item has bitten us once):
   floor (no deck edge or ramp top). `scripts/assets/spawn_checks.py` checks the
   built pack's whole world (other structures and terrain included); every
   map's suite runs it, and the Rust spawn test walks it.
-- **Turret sightlines:** no turret, sensor or battery may see standable floor
-  inside rooms. Aligned doors are the usual cause: put a baffle wall just
-  inside each door so it opens sideways. Turrets use
-  `equipment::acquire_target` (line of sight + per-type range profile).
+- **Open doorways and windows:** doors, bridge doors and windows are open, so
+  players can shoot and fly straight in. Don't glaze windows or wall off
+  doors. Baffles stay only on generator rooms and spawn rooms. Size each
+  window as either an entry (taller than a 2.56 m body; count it in the route
+  checks) or a firing slit.
+- **Turret sightlines:** fix turrets, not openings. Every fixed turret gets a
+  `facing` and `arc` (`scripts/assets/turret_arcs.py`: toward the enemy
+  flag, 200 degrees). Beyond `equipment::ALL_ROUND_RANGE` (15 m) the server
+  only engages targets inside that field of fire; closer in it covers every
+  direction, so a turret still guards its own bridge or ramp. No turret may
+  engage a standable point more than 3 m (`sightline_checks.DOOR_DEPTH`)
+  past an opening's inner face. When a turret still lines up with an opening,
+  move it (as the Dustreach sentry was) rather than adding a wall. Tests use
+  `sightline_checks.visible` in Python and the same rule in `sim.rs`.
+- **Spawns and openings:** no spawn in a room may be visible from 40-100 m
+  out in the field through an open door or window
+  (`spawn_checks.exposed`). Open colonnades and outdoor spawns are exempt.
 - **Walkable routes:** ramps need headroom and a floor opening above them, and
   closed undersides so players can't walk under a low ramp end. Shafts need an
   open face per level. Check every route with body sweeps. The engine's body
@@ -113,6 +126,35 @@ Design checklist (each item has bitten us once):
 - **Fog colour:** optional manifest `sky.fogColor` (`"r g b"`, 0–1) tints
   distance fog and the sky horizon. Omit it for the default grey (0.62). Pick
   it to match the map's sky (warm haze for desert, near-white for snow).
+- **Look (optional `look` object in `map.json`, `peakrunner_core::look`):**
+  renderer-only, so it never touches gameplay. Every field is optional and
+  unknown keys are rejected:
+  - `sun_direction` `[x,y,z]` toward the sun, and `sun_color` `[r,g,b]`.
+    Lightmaps are baked with the fixed sun `[-1,1,-1]`, so a moved sun needs a
+    rebake. A core test fails if it's more than 3° from the bake.
+  - `sun_disc`: brightness of the visible sun in the sky (default 1, 0 hides it).
+  - `exposure`: 0.25–4, default 1.
+  - `ambient_sky` / `ambient_ground`: hemisphere ambient; the defaults average
+    the old flat 0.55.
+  - `height_fog` `{density, base, falloff}`: exponential fog that pools below
+    `base` height, e.g. valley mist or a whiteout.
+  - `sky` `{zenith, horizon, cloud_cover 0–1, cloud_color, cloud_scale,
+    sun_size}`: a procedural gradient-and-cloud sky that replaces the cubemap
+    faces. Use it to give each map a distinct sky.
+
+  Preview a look without rebuilding: set `QA_LOOK='{"sky":{...}}'` (the same
+  JSON object) on a `QA_LOCAL` capture. It applies to every map, and invalid
+  JSON is ignored.
+
+  Global renderer changes apply to every map regardless: 4× MSAA when the GPU
+  supports it (a settings toggle), a close-range terrain detail layer, softer
+  terrain blending from the air, hemisphere ambient, a gentle highlight
+  shoulder, and a sun disc at the lighting direction.
+- **Control points:** Capture & Hold towers go in the manifest's
+  `control_points` (id, name, pos on the floor at the ring centre, radius, optional
+  `ctf_active` and `drain`). Give every map at least 2 (centre plus one per side,
+  mirrored), keep each ring on open, walkable ground with more than one approach,
+  and keep spawns outside rings. See `docs/capture-and-hold.md`.
 - **Pads:** optional `landing_pad` with named `deploy_slots` anchors for future
   player-placed turrets and vehicles.
 

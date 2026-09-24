@@ -25,9 +25,11 @@ wall runs 3 m below that. The underground level sits in terrain holes (HOLES,
 whole 8 m cells). Every hole cell lies under the terrace or the tower, so no
 lid is exposed and the cut's edge stays at the flat site height.
 
-Sightlines: every door into a room opens into a vestibule closed by a baffle,
-so no turret outside has a straight line into a hall, the storehouse, the
-tower room or the cistern.
+Sightlines: the keep's doors and the watch tower's back door are open, so
+attackers can shoot and fly straight in. Turrets face the field with a
+limited field of fire (turret_arcs.py) instead of being walled off. Baffles
+remain only inside the storehouse, a spawn room; the cistern (generator)
+is reached only by the hall stair and the tunnel.
 
 Dressing is render-only and stays within the 0.52 m player radius of a solid
 surface. If the caller's mesh has a `lamps` list, light fixtures add bake
@@ -42,13 +44,11 @@ ASSET_ID = 'dustreach-citadel-v3'
 TER = 5.0                                   # terrace top
 TX, TZ0, TZ1 = 21.2, -18.0, 30.0            # terrace half-width and depth
 FOOT = -3.0                                 # outer walls run this far below ground
-# Keep: walls, doors, vestibule baffles.
+# Keep: walls and open doors.
 KX, KZ0, KZ1 = 14.0, -16.0, 4.0
 WALL = .8
 CEIL, ROOF = 11.0, 12.0
 DOOR, DOOR_TOP = (-2.5, 2.5), TER+4.5
-FRONT_BAFFLE_Z, BACK_BAFFLE_Z = (-12.8, -12.4), (0.0, 0.4)
-BAFFLE_X = 8.5
 # Pylon towers flanking the keep front.
 PYLON = (14.0, 20.0, -18.5, -12.5)          # |x| from, to, z from, to (meets the curtain)
 PYLON_TOP, PYLON_CAP = 19.0, 21.0
@@ -71,7 +71,7 @@ BACK_RAMP = (-4.0, 4.0, 46.0, TZ1)
 # tunnel's end; the rest is solid up to the sentry deck.
 TOWER = (-32.0, -TX, 15.0, 31.0)
 TOWER_TOP = 20.0
-SENTRY, SENSOR = (-24.2, 26.0), (-27.0, 22.8)
+SENTRY, SENSOR = (-26.0, 28.0), (-27.0, 22.8)   # sentry set back so it cannot see down through the keep's open back door
 # Watch ruin on the right flank, forward.
 RUIN = (72.0, -64.0)
 RUIN_R, RUIN_TOP = 5.5, 7.0
@@ -103,11 +103,6 @@ TOWER_ROOM_TOP = 4.5
 TOWER_RAMP = (-31.2, -27.2, 22.5, 26.5)    # x0, x1, z at the room floor, z at the landing
 LANDING = -0.1
 TOWER_DOOR = (-30.5, -26.5)                # in the tower's back (+Z) face
-# Porch outside the tower's back door: a baffle wall parallel to the face, a
-# closed west end and a roof, so the only way in is from the east and nobody
-# outside has a straight view up the exit ramp.
-PORCH = (-32.0, -22.0, 33.6, 34.2)         # baffle x0, x1, z0, z1
-PORCH_TOP = TOWER_ROOM_TOP
 HOLES = {'cistern': (-16.0, 16.0, -17.0, 7.0), 'tunnel north': TUNNEL_N,
          'tunnel west': TUNNEL_W, 'tower': TOWER_HOLE}
 # --- Storehouse (v2): right of the courtyard, two floors ------------------------
@@ -272,26 +267,18 @@ def build(mesh, team, circuit):
         for x0, x1 in [(-ix, DOOR[0]), (DOOR[1], ix)]: wall(x0, x1, zf, zb, TER, CEIL, HULL)
         wall(DOOR[0], DOOR[1], zf, zb, DOOR_TOP, CEIL, HULL)
     slab(-KX, KX, KZ0, KZ1, ROOF, HULL)
-    for z0b, z1b in (FRONT_BAFFLE_Z, BACK_BAFFLE_Z): wall(-BAFFLE_X, BAFFLE_X, z0b, z1b, TER, CEIL, HULL)
     # Dressing: plaster liners, iron base and cornice, team stripe.
     b.dress('z', iz0, 1, _runs_without(-ix, ix, [DOOR]), TER, CEIL)
     b.dress('z', iz1, -1, _runs_without(-ix, ix, [DOOR]), TER, CEIL)
     for s in (-1, 1): b.dress('x', s*ix, -s, [(iz0, iz1)], TER, CEIL)
-    b.dress('z', FRONT_BAFFLE_Z[0], -1, [(-BAFFLE_X, BAFFLE_X)], TER, CEIL, pilasters=False)
-    b.dress('z', FRONT_BAFFLE_Z[1], 1, [(-BAFFLE_X, BAFFLE_X)], TER, CEIL)
-    b.dress('z', BACK_BAFFLE_Z[0], -1, [(-BAFFLE_X, BAFFLE_X)], TER, CEIL)
-    b.dress('z', BACK_BAFFLE_Z[1], 1, [(-BAFFLE_X, BAFFLE_X)], TER, CEIL, pilasters=False)
     for z, into_list in [(iz0, (1,)), (iz1, (-1,))]:
         for into in into_list:
             b.face_box('z', z, into, DOOR[0]-.35, DOOR[0], TER, DOOR_TOP, .12, METAL)
             b.face_box('z', z, into, DOOR[1], DOOR[1]+.35, TER, DOOR_TOP, .12, METAL)
             b.face_box('z', z, into, DOOR[0]-.35, DOOR[1]+.35, DOOR_TOP, DOOR_TOP+.35, .12, METAL)
-    for z0b, z1b in (FRONT_BAFFLE_Z, BACK_BAFFLE_Z):
-        for u in (-BAFFLE_X, BAFFLE_X):
-            wall(u-.08, u+.08, z0b-.05, z1b+.05, TER, DOOR_TOP, METAL, False)
-    b.ceiling_strip('x', (iz0+FRONT_BAFFLE_Z[0])/2, -ix+1, ix-1, CEIL, .45)
-    b.ceiling_strip('x', (BACK_BAFFLE_Z[1]+iz1)/2, -ix+1, ix-1, CEIL, .45)
-    for x in (-6, 6): b.ceiling_strip('z', x, FRONT_BAFFLE_Z[1]+1, BACK_BAFFLE_Z[0]-1, CEIL, .7)
+    b.ceiling_strip('x', iz0+1.6, -ix+1, ix-1, CEIL, .45)
+    b.ceiling_strip('x', iz1-1.6, -ix+1, ix-1, CEIL, .45)
+    for x in (-6, 6): b.ceiling_strip('z', x, iz0+3, iz1-3, CEIL, .7)
     # Hall cover and inventories. The generator is below, in the cistern.
     wall(-.8, .8, -6.8, -5.2, TER, TER+2.6, HULL)
     wall(-.9, .9, -6.9, -5.1, TER+2.6, TER+2.74, METAL, False)
@@ -412,16 +399,7 @@ def build(mesh, team, circuit):
     for x in TOWER_DOOR:
         b.face_box('z', wz1, 1, x-.35 if x == TOWER_DOOR[0] else x, x if x == TOWER_DOOR[0] else x+.35,
                    LANDING, TOWER_ROOM_TOP, .12, METAL)
-    # Porch: baffle wall, closed west end, roof; open to the east.
-    qx0, qx1, qz0, qz1 = PORCH
-    wall(qx0, qx1, qz0, qz1, FOOT, PORCH_TOP, HULL)
-    wall(qx0, qx0+.6, wz1, qz0, FOOT, PORCH_TOP, HULL)
-    slab(qx0, qx1, wz1, qz1, PORCH_TOP+.5, HULL, .5)
-    b.dress('z', qz0, -1, [(qx0+.6, qx1)], LANDING, PORCH_TOP, pilasters=False)
-    b.face_box('z', qz1, 1, qx0, qx1, PORCH_TOP-.35, PORCH_TOP, .15, METAL)
-    b.face_box('x', qx1, 1, wz1, qz1, PORCH_TOP-.35, PORCH_TOP, .12, METAL)
-    b.ceiling_strip('x', (wz1+qz0)/2, qx0+1.2, qx1-1.2, PORCH_TOP, .45)
-    b.lamp(((TOWER_DOOR[0]+TOWER_DOOR[1])/2, 3.6, (wz1+qz0)/2), .45)
+    b.lamp(((TOWER_DOOR[0]+TOWER_DOOR[1])/2, 3.6, wz1+1.5), .45)
     t = .5
     for x0, x1, za, zb in [(wx0, wx1, wz0, wz0+t), (wx0, wx1, wz1-t, wz1), (wx0, wx0+t, wz0+t, wz1-t),
                            (wx1-t, wx1, wz0+t, wz1-t)]:
@@ -632,7 +610,7 @@ def build(mesh, team, circuit):
         # (x, y, z, local yaw): yaw 0 faces the base front (-Z). No spawn is in
         # the keep hall or the cistern: the stair down to the generator starts
         # in the hall, so every spawn is at least ~30 m on foot from its head.
-        'spawn_points': [(18.2, TER+lift, 20.5, math.pi/2), (-18.2, TER+lift, 24.5, -math.pi/2),
+        'spawn_points': [(18.2, TER+lift, 20.5, math.pi/2), (-18.2, TER+lift, 20.5, -math.pi/2),
                          (36.0, lift, 4.2, math.pi), (41.0, lift, 5.0, math.pi),
                          (36.0, STORE_UP+lift, 9.0, -math.pi/2), (34.0, STORE_UP+lift, 18.0, -math.pi/2),
                          (-18.2, TER+lift, 15.5, -math.pi/2), (px-5, PAD_TOP+lift, pz+4, 0.0)],

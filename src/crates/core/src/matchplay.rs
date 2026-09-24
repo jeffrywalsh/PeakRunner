@@ -58,6 +58,10 @@ pub struct Snapshot {
     pub flags: [Flag; 2],
     pub score: [u32; 2],
     pub time_left: f32,
+    #[serde(default)]
+    pub mode: crate::map_catalog::SupportedMode,
+    #[serde(default)]
+    pub points: Vec<crate::control::Point>,
 }
 
 pub struct Match {
@@ -75,7 +79,14 @@ impl Match {
     /// Server-owned round boundary: retain connection slots/identities and clocks,
     /// but never carry projectiles, equipment, scores or movement between maps.
     pub fn rotate_to(&mut self, map: MapId) {
+        let mode = self.world.mode;
+        self.rotate_to_mode(map, mode);
+    }
+
+    /// Server rotation boundary with the entry's mode.
+    pub fn rotate_to_mode(&mut self, map: MapId, mode: crate::map_catalog::SupportedMode) {
         let mut next = Self::new(map);
+        next.world.set_mode(mode);
         next.tick = self.tick;
         next.round = self.round;
         next.phase = self.phase;
@@ -168,7 +179,9 @@ impl Match {
         if self.world.players.iter().all(|p| p.net_id == 0) {
             // Fresh session, but keep the transport/healthcheck clock monotonic.
             let tick = self.tick;
+            let mode = self.world.mode;
             *self = Self::new(self.world.map);
+            self.world.set_mode(mode);
             self.tick = tick;
         }
     }
@@ -202,6 +215,7 @@ impl Match {
         self.world.explosions.clear();
         self.world.smoke.clear();
         self.world.place_flags();
+        self.world.reset_points();
         self.world.score = [0, 0];
         self.world.time_left = MATCH_TIME;
         self.world.state = MatchState::Playing;
@@ -259,6 +273,10 @@ impl Match {
         if self.phase != Phase::Intermission {
             self.world.physics_step();
             if self.phase != Phase::Playing {
+                // Warmup and countdown never capture or score.
+                if self.world.points.iter().any(|p| p.owner.is_some() || p.progress > 0.0) {
+                    self.world.reset_points();
+                }
                 self.world.score = [0, 0];
                 self.world.time_left = MATCH_TIME;
                 self.world.state = MatchState::Playing;
@@ -274,7 +292,8 @@ impl Match {
             phase_left: self.phase_left, map: self.world.map, players: self.world.players.clone(),
             acks: self.acks.clone(), discs: self.world.discs.clone(),
             explosions: self.world.explosions.clone(), smoke: self.world.smoke.clone(),
-            flags: self.world.flags.clone(), score: self.world.score, time_left: self.world.time_left }
+            flags: self.world.flags.clone(), score: self.world.score, time_left: self.world.time_left,
+            mode: self.world.mode, points: self.world.points.clone() }
     }
 
     pub fn snapshot_for(&self, slot: usize) -> Snapshot {
@@ -346,6 +365,8 @@ impl World {
         self.explosions = snapshot.explosions.clone();
         self.smoke = snapshot.smoke.clone();
         self.flags = snapshot.flags.clone();
+        self.mode = snapshot.mode;
+        self.points = snapshot.points.clone();
         self.score = snapshot.score;
         self.time_left = snapshot.time_left;
         self.state = if snapshot.phase == Phase::Intermission { MatchState::Ended } else { MatchState::Playing };

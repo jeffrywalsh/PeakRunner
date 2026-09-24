@@ -206,3 +206,14 @@ unchanged.
 - Turtling: spawns no longer sit by the generator stair (v3), but the stair
   is still the only way from the keep to the generator, 30 m from the nearest
   spawn. Whether defenders can hold it too easily needs a playtest.
+
+## Open doorways (2026-09-24)
+
+Supersedes the keep-baffle and tower-porch notes above. The keep's front and
+back doors and the watch tower's back door are open straight in; the porch is
+gone. The storehouse keeps its baffles (it holds spawns). The sentry turret
+moved 2.6 m back on the tower top (to local -26, 28), because from its old
+spot it could look down through the keep's open back door. One left-arcade
+spawn moved from z 24.5 to 20.5 to mirror the right one: from behind the
+citadel it was visible through the back-wall breach (true before this change
+as well).

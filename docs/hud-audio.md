@@ -88,12 +88,45 @@ compatibility change, and no gameplay change.
 - **All original, all synthesized.** Every sound is generated at startup from
   deterministic noise, oscillators, resonators and FM; no samples from any
   game or library. 27 one-shot cues (many with 2–6 variants so rapid fire never
-  repeats one clip) and 6 loops.
+  repeats one clip) and 9 loops.
+- **Deep, layered design (v2).** The first palette sounded thin and "DOS": bare
+  sine sweeps and FM bells with no low end (shield hit, shield down and repair kit
+  had 0% of their energy below 250 Hz), hiss-only ski and jet loops (56% and 16%
+  above 6 kHz), and short dry tails under 0.5 s. Every cue is now layered: a sub
+  (30–80 Hz) for weight, a saturated body, filtered pink-noise texture and a
+  short transient. Oscillators are band-limited (polyBLEP saws), filters are
+  zero-delay state-variable filters, envelopes rise and fall smoothly, and a
+  gentle tanh saturation glues the layers. Flag and match cues are warm
+  detuned-saw stings an octave lower instead of bells. Measured change, spectral
+  centroid before → after: shield hit 1559 → 291 Hz, ski 7971 → 438 Hz, jet
+  3254 → 180 Hz, repair kit 1913 → 286 Hz; tails now 0.3–3.3 s. Tests keep the
+  weight (minimum energy below 150 Hz per cue) and forbid aliasing buzz (under 1%
+  above 12 kHz for tonal sounds).
+- **Held-weapon idle hums.** The weapon in your hands hums quietly: the disc
+  launcher a deep throbbing electric hum (55 Hz with a 3 Hz throb) with a
+  spinning whir inside it, the chaingun a low motor tick, the grenade launcher a
+  mechanical settle. Only your own weapon; ducked to 30% while it fires; the
+  mixer crossfades on a switch.
+- **Master bus.** A stereo feedback-delay-network reverb (pre-delay, four damped
+  lines, Householder mix) replaces the small metallic room: long and dark
+  outdoors (RT60 2.4 s), shorter and brighter under a roof (0.9 s). Its input is
+  high-passed at 140 Hz so the low end stays mono and tight. A soft-knee 20:1
+  limiter at -2 dBFS keeps pile-ups from clipping.
+- **Your own sounds.** Put WAV files (8/16/24/32-bit PCM or 32-bit float, any
+  rate, mono or stereo) in a sounds folder and they replace the synthesized cue
+  at startup; anything missing stays synthesized. Folder: `PEAKRUNNER_SOUND_DIR`,
+  else `sounds/` beside the executable (macOS: `Contents/Resources/sounds/`),
+  else `assets/sounds/` when run from `src/`. Names: `disc-fire.wav`, with
+  optional variants `disc-fire-2.wav` … `-8.wav`; loops use `loop-idle-disc.wav`,
+  `loop-jet.wav` and so on (the full list is `Cue::file_stem` and
+  `Loop::file_stem` in `sound.rs`). Desktop only; the browser build always uses
+  synthesis. Packaging doesn't copy a sounds folder yet. Shipped sounds must stay
+  original: never drop in audio taken from another game.
 - **One mixer on both platforms.** Native renders it through rodio in 512-frame
   blocks; the browser runs the same mixer in a WebAudio script node created on
   the first user gesture. A missing device (e.g. Linux "ALSA no device") leaves
   the game silent, never crashed.
-- **Voices.** 32 one-shot voices plus 6 loops and the map ambient bed. Per-cue
+- **Voices.** 32 one-shot voices plus 9 loops and the map ambient bed. Per-cue
   caps (chaingun and turret bullets 8, footsteps 4, shield and hull hits 4,
   explosions 6, others 3). When full, the least important, most finished voice is
   stolen; a newcomer never steals from a higher-priority voice. Priorities, from
@@ -128,7 +161,9 @@ compatibility change, and no gameplay change.
   hum and chaingun spin. A source scan fails the build if the sim or network code
   emits an event name with no cue.
 - **Listen.** `cargo test -p peakrunner --lib render_audio_samples -- --ignored`
-  writes WAVs to ignored `research/audio-samples/`.
+  writes WAVs, including the weapon idles and a `demo.wav` walkthrough, to
+  ignored `research/audio-samples/v2/after/`; the pre-v2 renders are in
+  `research/audio-samples/v2/before/`.
 - Not done: wall occlusion, HRTF, Doppler on anything but passing discs,
   third-person jet loops for other players, bullet ricochets. Mix balance still
   needs a human ear.

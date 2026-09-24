@@ -167,7 +167,7 @@ class TowerComplexTests(unittest.TestCase):
         self.assertAlmostEqual(fy,top+.05,places=6)
         self.assertFalse(any(top+.1<h<top+2.5 for h in heights),'flag needs headroom')
 
-    def test_level3_windows_are_glazed_openings(self):
+    def test_level3_windows_are_open_entries(self):
         import numpy as np
         mesh=kit.Mesh(); tower_complex.build(mesh,0,'one')
         def hits(tris,a,b):
@@ -181,10 +181,18 @@ class TowerComplexTests(unittest.TestCase):
         solid=np.array(mesh.collision).reshape(-1,3,3)
         render=np.array(mesh.vertices).reshape(-1,3,12)[:,:,:3]
         y=tower_complex.L3+2.2
-        # Mid-bay on each side wall: glass blocks, nothing drawn in the way.
+        # Mid-bay on each side wall: open, so shots and players pass and
+        # nothing is drawn in the way. The aperture (sill 1.1 m, head 3.9 m)
+        # is taller than a 2.56 m body, so each window is a jet-in entry.
+        self.assertGreater(tower_complex.HEAD-tower_complex.SILL,2.56)
         for a,b in [((1.5,y,10),(1.5,y,14)),((10,y,1.5),(14,y,1.5)),((-10,y,-1.5),(-14,y,-1.5)),((7.4,y,-10),(7.4,y,-14))]:
-            self.assertGreater(hits(solid,a,b),0,(a,'pane'))
+            for dy in (-.95,0,.95):
+                a2,b2=(a[0],a[1]+dy,a[2]),(b[0],b[1]+dy,b[2])
+                self.assertEqual(hits(solid,a2,b2),0,(a2,'blocked'))
             self.assertEqual(hits(render,a,b),0,(a,'view blocked'))
+        # Sill and head stay solid wall.
+        self.assertGreater(hits(solid,(1.5,tower_complex.L3+.6,10),(1.5,tower_complex.L3+.6,14)),0)
+        self.assertGreater(hits(solid,(1.5,tower_complex.L3+4.4,10),(1.5,tower_complex.L3+4.4,14)),0)
         # The front banner strip stays solid wall.
         self.assertGreater(hits(render,(0,y,-10),(0,y,-14)),0)
 
@@ -365,7 +373,9 @@ class TowerComplexTests(unittest.TestCase):
         self.assertGreaterEqual(len(points),6)
         self.assertEqual(tuple(anchors['spawn']),tuple(points[0][:3]))
         levels={round(p[1]-tower_complex.SPAWN_LIFT) for p in points}
-        self.assertEqual(levels,{tower_complex.L1,tower_complex.L2,tower_complex.L3})
+        # Level 3's windows are open, so its spawns moved down; the rest
+        # stay off lines through the open openings (see spawn_checks.exposed).
+        self.assertEqual(levels,{tower_complex.L1,tower_complex.L2})
         tris=np.array(mesh.collision).reshape(-1,3,3)
         def first_hit(o,d):
             o,d=np.array(o,float),np.array(d,float); a,b,c=tris[:,0],tris[:,1],tris[:,2]
@@ -526,6 +536,11 @@ class SpawnForwardClearance(unittest.TestCase):
         from assets import spawn_checks
         pack = Path(__file__).resolve().parent.parent/'assets/maps/tower-complex'
         self.assertEqual(spawn_checks.problems(pack), [])
+
+    def test_no_indoor_spawn_shows_through_an_opening_from_the_field(self):
+        from assets import spawn_checks
+        pack = Path(__file__).resolve().parent.parent/'assets/maps/tower-complex'
+        self.assertEqual(spawn_checks.exposed(pack), [])
 
 
 if __name__=='__main__':unittest.main()

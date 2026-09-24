@@ -10,6 +10,11 @@ use crate::grass;
 use crate::terrain::{self, MapId};
 
 const SLOT: u64 = 512;
+
+/// Anti-aliasing request from the settings (on by default). The scene
+/// rebuilds its pipelines when this changes; unsupported adapters stay at 1x.
+pub static MSAA_WANTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+const MSAA_SAMPLES: u32 = 4;
 const WORLD_SIZE: u64 = 304;
 const SKY_SIZE: u64 = 96;
 const EMIT_SIZE: u64 = 96;
@@ -87,6 +92,11 @@ pub struct SceneGpu {
     depth: wgpu::Texture,
     depth_view: wgpu::TextureView,
     blit_bg: wgpu::BindGroup,
+    /// Multisampled colour target the 3D passes draw into; resolved into
+    /// `color` (which stays single-sampled for the blit and captures).
+    msaa: Option<(wgpu::Texture, wgpu::TextureView)>,
+    samples: u32,
+    max_samples: u32,
     size: (u32, u32),
     snow: Vec<Vec3>,
     target_is_srgb: bool,
@@ -132,10 +142,10 @@ impl SceneGpu {
             ],
         });
 
-        let world_pipe = lit_pipeline(device, &shader, &world_layout, false, target_format);
-        let emit_pipe = emit_pipeline(device, &shader, &emit_layout, false);
-        let smoke_pipe = emit_pipeline(device, &shader, &emit_layout, true);
-        let sky_pipe = sky_pipeline(device, &shader, &sky_layout);
+        let world_pipe = lit_pipeline(device, &shader, &world_layout, false, target_format, 1);
+        let emit_pipe = emit_pipeline(device, &shader, &emit_layout, false, 1);
+        let smoke_pipe = emit_pipeline(device, &shader, &emit_layout, true, 1);
+        let sky_pipe = sky_pipeline(device, &shader, &sky_layout, 1);
         let blit_entry = if target_format.is_srgb() {
             "fs_blit_srgb"
         } else {
@@ -169,8 +179,8 @@ impl SceneGpu {
         );
         let sky_bg = uniform_group(device, &sky_layout, &uniform, SKY_SIZE);
         let emit_bg = uniform_group(device, &emit_layout, &uniform, EMIT_SIZE);
-        let (color, color_view, depth, depth_view, blit_bg) =
-            make_target(device, &blit_layout, &sampler, 4, 4);
+        let (color, color_view, depth, depth_view, blit_bg, msaa) =
+            make_target(device, &blit_layout, &sampler, 4, 4, 1);
 
         let mut snow = Vec::new();
         let mut rng = 0x91A2u32;
@@ -207,6 +217,9 @@ impl SceneGpu {
             depth,
             depth_view,
             blit_bg,
+            msaa,
+            samples: 1,
+            max_samples: 1,
             size: (4, 4),
             snow,
             target_is_srgb: target_format.is_srgb(),
@@ -220,6 +233,30 @@ impl SceneGpu {
         }
     }
 
+    /// Highest MSAA sample count the adapter can render and resolve for the
+    /// scene formats. Tests and headless captures stay at 1x unless set.
+    pub fn set_max_samples(&mut self, samples: u32) {
+        self.max_samples = samples.max(1);
+    }
+
+    fn set_samples(&mut self, device: &wgpu::Device, samples: u32) {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("peakrunner"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders.wgsl").into()),
+        });
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        self.world_pipe = lit_pipeline(device, &shader, &self.world_layout, false, format, samples);
+        self.emit_pipe = emit_pipeline(device, &shader, &self.emit_layout, false, samples);
+        self.smoke_pipe = emit_pipeline(device, &shader, &self.emit_layout, true, samples);
+        self.sky_pipe = sky_pipeline(device, &shader, &self.sky_layout, samples);
+        self.samples = samples;
+        // Force new targets and map pipelines at the new sample count.
+        self.size = (0, 0);
+        if self.imported.is_some() {
+            self.imported = crate::map_scene::MapGpu::new(device, self.terrain_map, samples);
+        }
+    }
+
     pub fn render(
         &mut self,
         device: &wgpu::Device,
@@ -230,8 +267,12 @@ impl SceneGpu {
         frame: &DrawFrame,
     ) {
         self.upload_grass(queue);
+        let want = if MSAA_WANTED.load(std::sync::atomic::Ordering::Relaxed) && self.max_samples >= MSAA_SAMPLES { MSAA_SAMPLES } else { 1 };
+        if want != self.samples {
+            self.set_samples(device, want);
+        }
         if self.terrain_map != frame.map {
-            self.imported = crate::map_scene::MapGpu::new(device,frame.map);
+            self.imported = crate::map_scene::MapGpu::new(device,frame.map,self.samples);
             self.meshes[0] = upload(device, "terrain", &terrain::sample_mesh_of(frame.map));
             self.terrain_map = frame.map;
         }
@@ -240,13 +281,14 @@ impl SceneGpu {
         let width = width.max(1);
         let height = height.max(1);
         if self.size != (width, height) {
-            let (color, color_view, depth, depth_view, blit_bg) =
-                make_target(device, &self.blit_layout, &self.sampler, width, height);
+            let (color, color_view, depth, depth_view, blit_bg, msaa) =
+                make_target(device, &self.blit_layout, &self.sampler, width, height, self.samples);
             self.color = color;
             self.color_view = color_view;
             self.depth = depth;
             self.depth_view = depth_view;
             self.blit_bg = blit_bg;
+            self.msaa = msaa;
             self.size = (width, height);
         }
 
@@ -289,6 +331,11 @@ impl SceneGpu {
             offset
         };
 
+        // A map that sets `look.sun_direction` lights entities from it too;
+        // otherwise the frame's historical sun is kept.
+        let sun = peakrunner_core::map_pack::on(frame.map)
+            .and_then(|p| p.manifest.look.sun_direction.map(|_| Vec3::from(p.manifest.look.resolved().sun_direction)))
+            .unwrap_or(frame.sun);
         let sky_off = push(
             &mut staging,
             &mut cursor,
@@ -296,7 +343,7 @@ impl SceneGpu {
                 inv_vp: frame.inv_vp.to_cols_array_2d(),
                 cam: frame.eye.to_array(),
                 pad0: 0.0,
-                sun: frame.sun.to_array(),
+                sun: sun.to_array(),
                 pad1: 0.0,
             }),
         );
@@ -306,7 +353,7 @@ impl SceneGpu {
             lit_offs.push(push(
                 &mut staging,
                 &mut cursor,
-                bytemuck::bytes_of(&world_uniform(draw, frame.proj * frame.view, frame.eye, frame.sun, frame.fog, frame.fog_density, frame.time, frame.map)),
+                bytemuck::bytes_of(&world_uniform(draw, frame.proj * frame.view, frame.eye, sun, frame.fog, frame.fog_density, frame.time, frame.map)),
             ));
         }
         let mut emit_offs = Vec::with_capacity(frame.emit.len());
@@ -344,9 +391,9 @@ impl SceneGpu {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("world"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &self.color_view,
+                view: self.msaa.as_ref().map_or(&self.color_view, |m| &m.1),
                 depth_slice: None,
-                resolve_target: None,
+                resolve_target: self.msaa.as_ref().map(|_| &self.color_view),
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
                         r: 0.07,
@@ -415,9 +462,9 @@ impl SceneGpu {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("viewmodel"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.color_view,
+                    view: self.msaa.as_ref().map_or(&self.color_view, |m| &m.1),
                     depth_slice: None,
-                    resolve_target: None,
+                    resolve_target: self.msaa.as_ref().map(|_| &self.color_view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
@@ -739,12 +786,14 @@ fn make_target(
     sampler: &wgpu::Sampler,
     width: u32,
     height: u32,
+    samples: u32,
 ) -> (
     wgpu::Texture,
     wgpu::TextureView,
     wgpu::Texture,
     wgpu::TextureView,
     wgpu::BindGroup,
+    Option<(wgpu::Texture, wgpu::TextureView)>,
 ) {
     let color = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("scene-color"),
@@ -770,7 +819,7 @@ fn make_target(
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: 1,
+        sample_count: samples,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Depth24Plus,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -791,7 +840,21 @@ fn make_target(
             },
         ],
     });
-    (color, color_view, depth, depth_view, blit_bg)
+    let msaa = (samples > 1).then(|| {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("scene-color-msaa"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: samples,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        (texture, view)
+    });
+    (color, color_view, depth, depth_view, blit_bg, msaa)
 }
 
 fn lit_pipeline(
@@ -800,6 +863,7 @@ fn lit_pipeline(
     layout: &wgpu::BindGroupLayout,
     _emit: bool,
     _target: wgpu::TextureFormat,
+    samples: u32,
 ) -> wgpu::RenderPipeline {
     let pipe_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("world"),
@@ -820,7 +884,7 @@ fn lit_pipeline(
             ..Default::default()
         },
         depth_stencil: Some(depth_state(true)),
-        multisample: wgpu::MultisampleState::default(),
+        multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
         fragment: Some(wgpu::FragmentState {
             module: shader,
             entry_point: Some("fs_world"),
@@ -843,6 +907,7 @@ fn emit_pipeline(
     shader: &wgpu::ShaderModule,
     layout: &wgpu::BindGroupLayout,
     smoke: bool,
+    samples: u32,
 ) -> wgpu::RenderPipeline {
     let blend = if smoke {
         wgpu::BlendState {
@@ -893,7 +958,7 @@ fn emit_pipeline(
             ..Default::default()
         },
         depth_stencil: Some(depth_state(false)),
-        multisample: wgpu::MultisampleState::default(),
+        multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
         fragment: Some(wgpu::FragmentState {
             module: shader,
             entry_point: Some(if smoke { "fs_smoke" } else { "fs_emit" }),
@@ -913,6 +978,7 @@ fn sky_pipeline(
     device: &wgpu::Device,
     shader: &wgpu::ShaderModule,
     layout: &wgpu::BindGroupLayout,
+    samples: u32,
 ) -> wgpu::RenderPipeline {
     let pipe_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("sky"),
@@ -939,7 +1005,7 @@ fn sky_pipeline(
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),
-        multisample: wgpu::MultisampleState::default(),
+        multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
         fragment: Some(wgpu::FragmentState {
             module: shader,
             entry_point: Some("fs_sky"),
@@ -1251,12 +1317,29 @@ impl CallbackTrait for SceneCallback {
     }
 }
 
+/// 4x when the adapter can multisample and resolve the scene colour format and
+/// multisample the depth format (WebGPU guarantees this; WebGL2 and some
+/// native adapters may not), otherwise 1x.
+fn supported_samples(adapter: &wgpu::Adapter) -> u32 {
+    let color = adapter.get_texture_format_features(wgpu::TextureFormat::Rgba8Unorm).flags;
+    let depth = adapter.get_texture_format_features(wgpu::TextureFormat::Depth24Plus).flags;
+    if color.sample_count_supported(MSAA_SAMPLES)
+        && color.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE)
+        && depth.sample_count_supported(MSAA_SAMPLES)
+    {
+        MSAA_SAMPLES
+    } else {
+        1
+    }
+}
+
 pub fn install(cc: &eframe::CreationContext<'_>) -> Result<(), String> {
     let state = cc
         .wgpu_render_state
         .as_ref()
         .ok_or_else(|| "PeakRunner needs the wgpu renderer".to_string())?;
-    let scene = SceneGpu::new(&state.device, state.target_format);
+    let mut scene = SceneGpu::new(&state.device, state.target_format);
+    scene.set_max_samples(supported_samples(&state.adapter));
     state.renderer.write().callback_resources.insert(scene);
     Ok(())
 }
@@ -1866,18 +1949,24 @@ mod shader_check {
             let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await.expect("GPU adapter");
             let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.expect("GPU device");
             let mut scene = SceneGpu::new(&device, wgpu::TextureFormat::Rgba8Unorm);
-            let mut times = Vec::new();
-            for k in 0..80 {
-                let start = std::time::Instant::now();
-                let mut encoder = device.create_command_encoder(&Default::default());
-                scene.render(&device, &queue, &mut encoder, 1280, 800, &frame);
-                queue.submit([encoder.finish()]);
-                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-                if k >= 20 { times.push(start.elapsed().as_secs_f64() * 1000.0); }
+            scene.set_max_samples(supported_samples(&adapter));
+            for msaa in [false, true] {
+                MSAA_WANTED.store(msaa, std::sync::atomic::Ordering::Relaxed);
+                let mut times = Vec::new();
+                for k in 0..80 {
+                    let start = std::time::Instant::now();
+                    let mut encoder = device.create_command_encoder(&Default::default());
+                    scene.render(&device, &queue, &mut encoder, 1280, 800, &frame);
+                    queue.submit([encoder.finish()]);
+                    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                    if k >= 20 { times.push(start.elapsed().as_secs_f64() * 1000.0); }
+                }
+                times.sort_by(f64::total_cmp);
+                println!("heaviest frame ({} lit, {} emit, {} smoke), {}x MSAA: render median {:.2} ms, p95 {:.2} ms",
+                    frame.lit.len(), frame.emit.len(), frame.smoke.len(), scene.samples,
+                    times[times.len() / 2], times[times.len() * 95 / 100]);
             }
-            times.sort_by(f64::total_cmp);
-            println!("heaviest frame ({} lit, {} emit, {} smoke): render median {:.2} ms, p95 {:.2} ms",
-                frame.lit.len(), frame.emit.len(), frame.smoke.len(), times[times.len() / 2], times[times.len() * 95 / 100]);
+            MSAA_WANTED.store(true, std::sync::atomic::Ordering::Relaxed);
         });
     }
 

@@ -25,6 +25,7 @@ from assets import dustreach_materials
 from assets import dustreach_sewer
 from assets import dustreach_terrain
 from assets import pack_writer
+from assets import turret_arcs
 from assets import structure_kit
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -224,7 +225,7 @@ def build(output, bake=True):
     if lightmap: manifest['lightmap'] = lightmap
     gx, gy, gz = definition['gate']['position']
     manifest.update(version=1, id=definition['id'], name=definition['name'], flags=flags, spawns=spawns,
-        exact_spawns=True, spawn_points=spawn_points, holes=holes(definition), entities=mesh.entities,
+        exact_spawns=True, spawn_points=spawn_points, holes=holes(definition), entities=turret_arcs.assign(mesh.entities, flags),
         instances=instances, ambient_emitters=[[gx, gy+20, gz, .25, 400, 2400]],
         sky={'visibleDistance': '2600', 'fogDistance': '1500', 'fogColor': '0.80 0.69 0.52'},
         asset_sha256=pack_writer.source_hash(dustreach_citadel.__file__),

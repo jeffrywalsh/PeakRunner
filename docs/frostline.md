@@ -225,3 +225,14 @@ Screenshots: `research/screenshots/frostline-v5-{ridge,mouth-red,mouth-blue,insi
 - **Not playtested by a human:** skiing feel on 36° median slopes, how far the
   outpost is from the station, and how readable the fog is are all unverified.
 - No real glow or bloom; the lit surfaces are bright textures.
+
+## Open doorways and windows (2026-09-24)
+
+Supersedes the baffle and glazing notes above. The front door (still under its
+porch roof), the rear door, the east door, the service shed door and the
+command deck's window bands are open. The windows (2.6 m tall) are jet-in
+entries onto the flag deck. Baffles remain at the basement's tunnel door
+(generator room) and inside the relay outpost (a spawn room). The open windows
+and the now open-ended rear hall exposed spawns on the command deck and in the
+rear hall, so all five station spawns now stand in the front hall, near the
+front wall or down its sides, where no line through an opening reaches them.

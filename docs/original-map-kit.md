@@ -281,3 +281,10 @@ the GPU captures exercise the real gameplay renderer.
 The code and generated original kit follow this project's MIT license declaration.
 That does **not** extend to the private extracted Tribes reference files or old
 reference bundle, which must not be included in releases.
+
+### Open chamber doors (2026-09-24)
+
+Supersedes the L baffle above: the bishop tower's chamber doors are open
+straight through to the flag. Turrets face the field with a 200 degree field
+of fire beyond 15 m (`turret_arcs.py`), and none of them engages the chamber
+floor.

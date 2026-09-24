@@ -18,9 +18,9 @@
     "position": "-384 -160 54",
     "scale": "720 150 1"
   },
-  "texture_count": 34,
+  "texture_count": 33,
   "lightmap": {
-    "pages": 14,
+    "pages": 13,
     "first_layer": 20,
     "texel_m": 0.5,
     "sun": [
@@ -316,7 +316,12 @@
       "team": 0,
       "circuit": "base-0",
       "radius": 2.2,
-      "weapon": "bullet"
+      "weapon": "bullet",
+      "facing": [
+        0.022551,
+        0.999746
+      ],
+      "arc": 200.0
     },
     {
       "id": "turret-4",
@@ -329,7 +334,12 @@
       "team": 0,
       "circuit": "base-0",
       "radius": 2.2,
-      "weapon": "bullet"
+      "weapon": "bullet",
+      "facing": [
+        0.022551,
+        0.999746
+      ],
+      "arc": 200.0
     },
     {
       "id": "sensor-5",
@@ -355,7 +365,12 @@
       "team": 0,
       "circuit": "base-0",
       "radius": 2.2,
-      "weapon": "plasma"
+      "weapon": "plasma",
+      "facing": [
+        0.022551,
+        0.999746
+      ],
+      "arc": 200.0
     },
     {
       "id": "inventory-7",
@@ -407,7 +422,12 @@
       "team": 1,
       "circuit": "base-1",
       "radius": 2.2,
-      "weapon": "bullet"
+      "weapon": "bullet",
+      "facing": [
+        -0.022551,
+        -0.999746
+      ],
+      "arc": 200.0
     },
     {
       "id": "turret-11",
@@ -420,7 +440,12 @@
       "team": 1,
       "circuit": "base-1",
       "radius": 2.2,
-      "weapon": "bullet"
+      "weapon": "bullet",
+      "facing": [
+        -0.022551,
+        -0.999746
+      ],
+      "arc": 200.0
     },
     {
       "id": "sensor-12",
@@ -446,7 +471,12 @@
       "team": 1,
       "circuit": "base-1",
       "radius": 2.2,
-      "weapon": "plasma"
+      "weapon": "plasma",
+      "facing": [
+        -0.022551,
+        -0.999746
+      ],
+      "arc": 200.0
     }
   ],
   "instances": [
@@ -824,7 +854,7 @@
     "visibleDistance": "2500",
     "fogDistance": "1500"
   },
-  "asset_sha256": "a5eb2709dea51f5bf07d117e8deb155cfdf2e06f58461ef30293f77624f9615c",
+  "asset_sha256": "d42eb64c55c2cdbb3c35cfd9b6956119d48eaaf2d876c91f9addb7950f887ed4",
   "ring_asset_sha256": "185b25abc6b4c54c9ae5f166d3bd66c5e6fd2791778f65aecc86b27a49b78c3d",
   "structure_kit_sha256": "0636249d6eb133db27977b895a48d7d50ce7b8882ec8ba8fd0a63908b5f04630",
   "terrain_source_sha256": "3dc2fac10f82a9a6b88e9e4bf4ba8640cfb74e400227d795d05822265f14b690",
@@ -833,10 +863,10 @@
   "definition_sha256": "dbd0e88673740af42b9815ad9eb5cb5e86fb801e174cdc6ea274f595265dbac4",
   "files": {
     "height.bin": "014e4957c2f65bd9df9d3e92838ba8e8d8c943ce35a2f3951bb33d494fd7072e",
-    "vertices.bin": "26e6881a84ca20721a630795ca4236f19b79cc05981e189c20ffb768cc57b561",
-    "collision.bin": "f9ded405070e6134a2813750501e7a5116d2887f3efbeff469f399ae51c65e5e",
+    "vertices.bin": "1785b807d458926ec99c353f09496848e2d955cdb0e0c3f90270a95460e00645",
+    "collision.bin": "62390607282a89f7787f7e3cd93658954e4fd92bc73654ed90ad81452f8f2854",
     "weights.rgba": "5321e3f710ca7ffea0d57ab3d7eb9e825a91fb98013a8d098e5da594b79f7f7e",
-    "textures.rgba": "6a34c492ae8505d69a685b5f4357220f409f01069aeee2eaff3ef895c637dfb8",
+    "textures.rgba": "b1e38700c70a6f6d08e270ddff9bf1e0881048eaadd0d133b5dc3496e96ac2ca",
     "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e"
   }
 }

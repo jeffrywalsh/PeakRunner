@@ -7,8 +7,10 @@ and the exposed roof flag stand):
 
 - The tower's lower half is solid; its chamber floor is 9 m above the roof,
   with the flag on it. Three ways in: a front door (-Z), a side door (+X),
-  and a slit cut diagonally through the mitre's back-left face. An L-shaped
-  baffle inside the doors blocks turret sightlines across the chamber.
+  and a slit cut diagonally through the mitre's back-left face. The doors
+  are open, with nothing behind them: attackers can shoot and fly straight
+  in. Turrets face the enemy flag with a limited field of fire
+  (`turret_arcs.py`), so none of them fires back into the chamber.
 - The chamber is reached by jetting: from the front deck up to the ledge
   round the collar, or over the mitre and in through the slit.
 
@@ -64,8 +66,6 @@ CH_FLOOR = ROOF_TOP+9.0                      # chamber floor and outer ledge top
 R_OUT, R_IN, R_LEDGE = 5.8, 5.2, 7.4         # stem outer / inner radius at the floor, ledge rim
 DOOR_PANELS = (14, 19)                       # front (-Z) and side (+X) doors
 CH_LINTEL = CH_FLOOR+3.4                     # both doors are one panel (1.6 m) wide, 3.4 m tall
-BAFFLE = 3.0                                 # the L-shaped baffle's walls sit 3 m from the axis
-BAFFLE_TOP = CH_FLOOR+4.2
 R_BULB = 6.5                                 # widest part of the mitre
 SLIT_DIR = (-math.sqrt(.5), math.sqrt(.5))   # the mitre slit faces back-left (-X, +Z)
 SLIT_Y, SLIT_W, SLIT_TILT = ROOF_TOP+18.2, 3.6, math.radians(40)
@@ -238,8 +238,8 @@ def bishop_tower(mesh, b, accent):
     flared foot, stem, a collar whose top is the chamber floor and an outer
     landing ledge, a hollow upper stem and mitre, and a ball finial. Three
     ways into the chamber: a front door (-Z), a side door (+X) and the slit
-    cut diagonally through the mitre's back-left face. An L-shaped baffle
-    inside the doors keeps turrets from seeing across the chamber floor."""
+    cut diagonally through the mitre's back-left face. The doors are open
+    straight through to the chamber floor."""
     lift = lambda prof: [(ROOF_TOP+h, r) for h, r in prof]
     # Solid lower half: sealed underneath, stepped rings, flare, stem, collar.
     annulus(mesh, ROOF_TOP, 0, 7.6, 'trim', False)
@@ -280,11 +280,6 @@ def bishop_tower(mesh, b, accent):
     lathe(mesh, bulb, 'concrete', skip=slit)
     lathe(mesh, hollow, 'panel', inward=True, skip=slit)
     lathe(mesh, lift([(23.6, .35), (24.0, .35), (24.3, .75), (24.7, .75), (25.0, .45), (25.2, 0)]), 'trim', solid=False, sides=8)
-    # L-shaped baffle: a wall across the front door and one across the side
-    # door, joined at the corner so the two vestibules open only at their far
-    # ends (the -X end in front, the +Z end at the side).
-    b.wall(-2.2, BAFFLE+.2, TZ-BAFFLE-.2, TZ-BAFFLE+.2, CH_FLOOR, BAFFLE_TOP, 'trim')
-    b.wall(BAFFLE-.2, BAFFLE+.2, TZ-BAFFLE+.2, TZ+2.2, CH_FLOOR, BAFFLE_TOP, 'trim')
     # Team trim and light: flag ring on the floor, glow strips on the inner
     # wall between the doors, a lit ring under the neck.
     lathe(mesh, [(CH_FLOOR+.02, 1.6), (CH_FLOOR+.02, 1.2)], accent, solid=False)

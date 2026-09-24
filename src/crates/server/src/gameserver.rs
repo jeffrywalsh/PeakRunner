@@ -59,6 +59,7 @@ impl GameHost {
     }
     fn run(mut self, stop: Arc<AtomicBool>, count: Arc<AtomicU32>, status: Arc<Mutex<peakrunner_discovery::MatchStatus>>) {
         let mut game = Match::new(self.map);
+        game.world.set_mode(self.rotation.current_mode());
         let mut peers: Vec<Peer> = Vec::new();
         let mut id = 0u32;
         let step = Duration::from_secs_f64(STEP as f64);
@@ -146,9 +147,12 @@ impl GameHost {
             let previous_phase = game.phase;
             if game.world.players.iter().all(|p| p.net_id == 0) {
                 let first = self.rotation.reset();
-                if game.world.map != first { game.rotate_to(first); }
+                if game.world.map != first || game.world.mode != self.rotation.current_mode() {
+                    game.rotate_to_mode(first, self.rotation.current_mode());
+                }
             } else if game.phase == peakrunner_core::sim::Phase::Intermission && game.phase_left <= STEP {
-                game.rotate_to(self.rotation.advance());
+                let next = self.rotation.advance();
+                game.rotate_to_mode(next, self.rotation.current_mode());
                 commands.fill(None);
                 for peer in &mut peers { peer.current = Command::default(); peer.queue.clear(); }
             }

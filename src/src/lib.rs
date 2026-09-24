@@ -2,6 +2,7 @@ mod app;
 mod audio;
 mod sound;
 mod flag_hud;
+mod control_hud;
 mod flag_announce;
 mod generator_announce;
 mod world_overlay;

@@ -15,6 +15,7 @@ from assets import tower_complex_materials
 from assets import tower_complex_terrain
 from assets import landing_pad
 from assets import pack_writer
+from assets import turret_arcs
 
 ROOT = Path(__file__).resolve().parent.parent
 loader = importlib.util.spec_from_file_location('kit', ROOT/'scripts/build-original-map.py')
@@ -79,7 +80,7 @@ def build(output, bake=True):
     manifest['texture_count']=count
     if lightmap: manifest['lightmap']=lightmap
     manifest.update(version=1, id=spec['id'], name=spec['name'], flags=flags, spawns=spawns,
-        exact_spawns=True, spawn_points=spawn_points, holes=[], entities=mesh.entities, instances=instances, ambient_emitters=[],
+        exact_spawns=True, spawn_points=spawn_points, holes=[], entities=turret_arcs.assign(mesh.entities, flags), instances=instances, ambient_emitters=[],
         sky={'visibleDistance':'2500','fogDistance':'1500'},
         asset_sha256=pack_writer.source_hash(tower_complex.__file__),
         pad_asset_sha256=pack_writer.source_hash(landing_pad.__file__),

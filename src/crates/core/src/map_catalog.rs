@@ -17,9 +17,9 @@ pub struct MapDescriptor {
 }
 
 /// Only implemented rules can be advertised. DM/TDM belong to later branches.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SupportedMode { Ctf }
+pub enum SupportedMode { #[default] Ctf, CaptureAndHold }
 
 pub fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 48

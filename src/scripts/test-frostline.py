@@ -19,6 +19,8 @@ from assets import frostline_flora as flora
 from assets import frostline_materials as materials
 from assets import frostline_station as st
 from assets import frostline_terrain as terrain
+from assets import sightline_checks
+from assets import turret_arcs
 
 HERE = Path(__file__).parent
 def _load(name, file):
@@ -84,9 +86,12 @@ def whole_map():
     """(spec, mesh, soup, grid) for the complete map, built once."""
     if not _WHOLE:
         spec = build.spec(); mesh = kit.Mesh()
+        flags = [None, None]
         for b in spec['bases']:
             mesh.origin = tuple(b['position']); mesh.yaw = math.radians(b['yaw'])
-            st.build(mesh, b['team'], f"base-{b['team']}")
+            anchors = st.build(mesh, b['team'], f"base-{b['team']}")
+            flags[b['team']] = mesh.point(anchors['flag'])
+        turret_arcs.assign(mesh.entities, flags)
         mesh.origin = tuple(spec['beacon']['position']); mesh.yaw = 0
         beacon.build(mesh)
         grid = build.terrain_grid(spec)
@@ -294,18 +299,25 @@ class FrostlineTests(unittest.TestCase):
 
     # --- Sightlines ---------------------------------------------------------
     def test_turrets_cannot_see_into_rooms(self):
-        """No turret on the map has a clear line from its barrel to a player's
-        chest anywhere inside the station hall, rear hall, command deck, the
-        basement generator room, its tunnel, or the outpost behind its baffle.
-        Allowed: the vestibules between each door and its baffle."""
+        """No turret engages a player (field of fire, range, clear line from
+        its barrel to the chest, as the server does) anywhere inside the
+        station hall, rear hall, command deck, the basement generator room,
+        its tunnel, or the outpost behind its baffle, beyond the doorway depth
+        (sightline_checks.DOOR_DEPTH) of an open door or window."""
         spec, mesh, soup, _ = whole_map()
-        rooms = [(st.RAMP_X[1]+.6, st.E_RAMP_X[0]-.6, st.BAFFLE_Z[1]+.6, st.PARTITION_Z[0]-.6, st.L1),
-                 (-st.IX+.6, st.EAST_BAFFLE[0]-.6, st.PARTITION_Z[1]+.6, st.IZ1-.6, st.L1),
+        rooms = [(st.RAMP_X[1]+.6, st.E_RAMP_X[0]-.6, st.IZ0+.6, st.PARTITION_Z[0]-.6, st.L1),
+                 (-st.IX+.6, st.IX-.6, st.PARTITION_Z[1]+.6, st.IZ1-.6, st.L1),
                  (-st.IX+.6, st.IX-.6, st.IZ0+.6, st.IZ1-.6, st.L2),
                  (st.B_IN[0]+.6, st.B_BAFFLE[0]-.6, st.B_IN[2]+.6, st.B_IN[3]-.6, st.B_FLOOR),
                  (st.B_BAFFLE[0], st.B_IN[1]-.6, st.B_BAFFLE[3]+.6, st.B_IN[3]-.6, st.B_FLOOR),
                  (st.T_CELLS[0]+.6, st.X_STAIR[0]-.6, st.T_IN[0]+.6, st.T_IN[1]-.6, st.B_FLOOR),
                  (OX-st.OH+st.OW+.6, OX+st.OH-st.OW-.6, OZ-st.OH+st.OW+.6, OZ+st.O_BAFFLE_Z[0]-.6, st.OG)]
+        # Inner faces of every open door and window: (x0, z0, x1, z1).
+        local_openings = [(*st.DOOR, st.IZ0), (*st.REAR_DOOR, st.IZ1)]
+        local_openings = [(x0, z, x1, z) for x0, x1, z in local_openings]
+        local_openings += [(x0, z, x1, z) for x0, x1 in st.FRONT_WINDOWS for z in (st.IZ0, st.IZ1)]
+        local_openings += [(x, z0, x, z1) for z0, z1 in st.SIDE_WINDOWS for x in (-st.IX, st.IX)]
+        local_openings += [(st.IX, st.EAST_DOOR[0], st.IX, st.EAST_DOOR[1])]
         def no_floor(x, y, z):
             if y == st.L2:
                 return any(x0 <= x <= x1 and st.OPENING_Z[0] <= z <= st.OPENING_Z[1] for x0, x1 in (st.RAMP_X, st.E_RAMP_X))
@@ -313,7 +325,7 @@ class FrostlineTests(unittest.TestCase):
                 bx0, bx1, bz0, bz1 = st.B_OPENING
                 return bx0-.3 <= x <= bx1+.3 and bz0 <= z <= bz1+.3
             return False
-        targets = []
+        targets, openings = [], []
         for b in spec['bases']:
             m = kit.Mesh(); m.origin = tuple(b['position']); m.yaw = math.radians(b['yaw'])
             for x0, x1, z0, z1, y in rooms:
@@ -322,15 +334,15 @@ class FrostlineTests(unittest.TestCase):
                         if no_floor(x, y, z): continue   # ramp and stair openings have no floor
                         if soup.first(m.point((x, y+.1, z)), (0, 1, 0), 2.3) < 2.3: continue   # inside a prop
                         targets.append(m.point((x, y+LIFT+.8, z)))
+            pt = lambda x, z: tuple(m.point((x, 0, z))[i] for i in (0, 2))
+            openings += [(pt(x0, z0), pt(x1, z1)) for x0, z0, x1, z1 in local_openings]
         targets = np.array(targets)
+        allowed = sightline_checks.near_openings(targets, openings)
         turrets = [e for e in mesh.entities if e['kind'] == 'turret']
         self.assertEqual(len(turrets), 6)
         for e in turrets:
-            p = np.array(e['position']); d = targets-p; dist = np.linalg.norm(d, axis=1)
-            near = dist < 150
-            starts = p+d[near]/dist[near, None]*(e['radius']+.6)
-            clear = ~soup.blocked_many(starts, targets[near])
-            self.assertEqual(int(clear.sum()), 0, (e['id'], targets[near][clear][:5]))
+            seen = sightline_checks.visible(soup, e, targets) & ~allowed
+            self.assertEqual(int(seen.sum()), 0, (e['id'], targets[seen][:5]))
         self.assertGreater(len(targets), 1500)
 
     def test_generators_are_underground_in_covered_cut_cells(self):
@@ -565,6 +577,11 @@ class SpawnForwardClearance(unittest.TestCase):
         from assets import spawn_checks
         pack = Path(__file__).resolve().parent.parent/'assets/maps/frostline'
         self.assertEqual(spawn_checks.problems(pack), [])
+
+    def test_no_indoor_spawn_shows_through_an_opening_from_the_field(self):
+        from assets import spawn_checks
+        pack = Path(__file__).resolve().parent.parent/'assets/maps/frostline'
+        self.assertEqual(spawn_checks.exposed(pack), [])
 
 
 if __name__ == '__main__':

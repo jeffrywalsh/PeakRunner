@@ -136,7 +136,12 @@ impl Backend {
             .map_err(|err| log::warn!("audio output unavailable: {err}"))
             .ok();
         let Some(sink) = sink else { return Backend { _sink: None, mixer: None } };
-        let mixer = std::sync::Arc::new(std::sync::Mutex::new(Mixer::new(RATE as f32)));
+        let mut m = Mixer::new(RATE as f32);
+        if let Some(dir) = sound_dir() {
+            let used = m.load_overrides(&dir);
+            if used > 0 { log::info!("using {used} custom sound files from {}", dir.display()); }
+        }
+        let mixer = std::sync::Arc::new(std::sync::Mutex::new(m));
         sink.mixer().add(Engine { mixer: mixer.clone(), block: vec![0.0; BLOCK * 2], at: BLOCK * 2 });
         Backend { _sink: Some(sink), mixer: Some(mixer) }
     }
@@ -148,6 +153,18 @@ impl Backend {
             if let Ok(mut m) = m.lock() { f(&mut m); }
         }
     }
+}
+
+/// Folder of custom sound files that replace the synthesized ones:
+/// `PEAKRUNNER_SOUND_DIR`, else `sounds/` beside the executable (or in the
+/// macOS bundle's Resources), else `assets/sounds` when run from `src/`.
+#[cfg(not(target_arch = "wasm32"))]
+fn sound_dir() -> Option<std::path::PathBuf> {
+    if let Ok(dir) = std::env::var("PEAKRUNNER_SOUND_DIR") { return Some(dir.into()); }
+    let exe = std::env::current_exe().ok()?;
+    let parent = exe.parent()?;
+    [parent.join("sounds"), parent.join("../Resources/sounds"), std::path::PathBuf::from("assets/sounds")]
+        .into_iter().find(|d| d.is_dir())
 }
 
 #[cfg(not(target_arch = "wasm32"))]

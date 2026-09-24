@@ -13,7 +13,7 @@ pub struct MapGpu {
 }
 
 impl MapGpu {
-    pub fn new(device:&wgpu::Device,map:MapId)->Option<Self> {
+    pub fn new(device:&wgpu::Device,map:MapId,samples:u32)->Option<Self> {
         let pack=map_pack::on(map)?;
         let layout=device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label:Some("imported map"),entries:&[
@@ -37,7 +37,7 @@ impl MapGpu {
             primitive:wgpu::PrimitiveState {cull_mode:None,..Default::default()},
             depth_stencil:Some(wgpu::DepthStencilState {format:wgpu::TextureFormat::Depth24Plus,
                 depth_write_enabled:Some(!sky&&!water),depth_compare:Some(wgpu::CompareFunction::LessEqual),stencil:Default::default(),bias:Default::default()}),
-            multisample:Default::default(),fragment:Some(wgpu::FragmentState {module:&shader,
+            multisample:wgpu::MultisampleState {count:samples,..Default::default()},fragment:Some(wgpu::FragmentState {module:&shader,
                 entry_point:Some(if sky {"fs_map_sky"} else {"fs_map"}),compilation_options:Default::default(),
                 targets:&[Some(wgpu::ColorTargetState {format:wgpu::TextureFormat::Rgba8Unorm,
                     blend:water.then_some(wgpu::BlendState::ALPHA_BLENDING),write_mask:wgpu::ColorWrites::ALL})]}),multiview_mask:None,cache:None,
@@ -49,7 +49,7 @@ impl MapGpu {
             address_mode_u:wgpu::AddressMode::Repeat,address_mode_v:wgpu::AddressMode::Repeat,
             mag_filter:wgpu::FilterMode::Linear,min_filter:wgpu::FilterMode::Linear,mipmap_filter:wgpu::MipmapFilterMode::Linear,
             anisotropy_clamp:8,..Default::default()});
-        let uniform=device.create_buffer(&wgpu::BufferDescriptor {label:Some("map uniforms"),size:224,usage:wgpu::BufferUsages::UNIFORM|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false});
+        let uniform=device.create_buffer(&wgpu::BufferDescriptor {label:Some("map uniforms"),size:UNIFORM_BYTES,usage:wgpu::BufferUsages::UNIFORM|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false});
         let group=device.create_bind_group(&wgpu::BindGroupDescriptor {label:Some("map"),layout:&layout,entries:&[
             wgpu::BindGroupEntry {binding:0,resource:uniform.as_entire_binding()},
             wgpu::BindGroupEntry {binding:1,resource:wgpu::BindingResource::TextureView(&images.create_view(&wgpu::TextureViewDescriptor {dimension:Some(wgpu::TextureViewDimension::D2Array),..Default::default()}))},
@@ -94,14 +94,7 @@ impl MapGpu {
             }
             self.uploaded=true;
         }
-        let mut data=Vec::with_capacity(56);
-        data.extend((frame.proj*frame.view).to_cols_array());data.extend(frame.inv_vp.to_cols_array());
-        let sky=&pack.manifest.sky;
-        let far=sky.get("visibleDistance").and_then(|s|s.parse().ok()).unwrap_or(450.0);
-        let near=sky.get("fogDistance").and_then(|s|s.parse().ok()).unwrap_or(200.0);
-        data.extend([frame.eye.x,frame.eye.y,frame.eye.z,far]);data.extend([-0.57735,0.57735,-0.57735,0.0]);
-        let [fr,fg,fb]=pack.fog_color();data.extend([fr,fg,fb,near]);data.extend(pack.manifest.terrain_layers.map(|n|n as f32));
-        for i in 0..8 {data.push(*pack.manifest.sky_layers.get(i).unwrap_or(&0) as f32);}
+        let data=uniform_data(pack,frame);
         queue.write_buffer(&self.uniform,0,bytemuck::cast_slice(&data));
     }
 
@@ -121,4 +114,69 @@ fn texture(device:&wgpu::Device,layers:u32,mips:u32)->wgpu::Texture {
         size:wgpu::Extent3d {width:256,height:256,depth_or_array_layers:layers},mip_level_count:mips,sample_count:1,
         dimension:wgpu::TextureDimension::D2,format:wgpu::TextureFormat::Rgba8Unorm,
         usage:wgpu::TextureUsages::TEXTURE_BINDING|wgpu::TextureUsages::COPY_DST,view_formats:&[]})
+}
+
+/// QA-only: `QA_LOOK` holds a manifest `look` object (JSON) applied to every
+/// map, so a sky or fog can be previewed before a pack is rebuilt. Invalid
+/// JSON or values are ignored. Absent the variable, packs render as authored.
+fn qa_look()->Option<&'static peakrunner_core::look::Look> {
+    static LOOK:std::sync::OnceLock<Option<peakrunner_core::look::Look>>=std::sync::OnceLock::new();
+    LOOK.get_or_init(|| {
+        #[cfg(target_arch="wasm32")] {None}
+        #[cfg(not(target_arch="wasm32"))] {
+            let raw=std::env::var("QA_LOOK").ok()?;
+            let look:peakrunner_core::look::Look=serde_json::from_str(&raw).ok()?;
+            look.validate().ok().map(|_|look)
+        }
+    }).as_ref()
+}
+
+/// `map.wgsl`'s `U`: the original 224 bytes plus seven look vectors.
+const UNIFORM_FLOATS:usize=84;
+const UNIFORM_BYTES:u64=(UNIFORM_FLOATS*4) as u64;
+
+fn uniform_data(pack:&map_pack::MapPack,frame:&DrawFrame)->Vec<f32> {
+    let mut data=Vec::with_capacity(UNIFORM_FLOATS);
+    data.extend((frame.proj*frame.view).to_cols_array());data.extend(frame.inv_vp.to_cols_array());
+    let sky=&pack.manifest.sky;
+    let far=sky.get("visibleDistance").and_then(|s|s.parse().ok()).unwrap_or(450.0);
+    let near=sky.get("fogDistance").and_then(|s|s.parse().ok()).unwrap_or(200.0);
+    let look=qa_look().unwrap_or(&pack.manifest.look).resolved();
+    let [sx,sy,sz]=look.sun_direction;
+    data.extend([frame.eye.x,frame.eye.y,frame.eye.z,far]);data.extend([sx,sy,sz,frame.time]);
+    let [fr,fg,fb]=pack.fog_color();data.extend([fr,fg,fb,near]);data.extend(pack.manifest.terrain_layers.map(|n|n as f32));
+    for i in 0..8 {data.push(*pack.manifest.sky_layers.get(i).unwrap_or(&0) as f32);}
+    let procedural=look.sky;
+    let sky_mode=if procedural.is_some() {1.0} else {0.0};
+    let p=procedural.unwrap_or(peakrunner_core::look::ResolvedSky {zenith:[0.;3],horizon:[0.;3],cloud_cover:0.,
+        cloud_color:[0.;3],cloud_scale:1.,sun_size:0.022});
+    let [r,g,b]=look.sun_color;data.extend([r,g,b,look.exposure]);
+    let [r,g,b]=look.ambient_sky;data.extend([r,g,b,sky_mode]);
+    let [r,g,b]=look.ambient_ground;data.extend([r,g,b,look.sun_disc]);
+    let [r,g,b]=p.zenith;data.extend([r,g,b,p.cloud_cover]);
+    let [r,g,b]=p.horizon;data.extend([r,g,b,p.sun_size]);
+    let [r,g,b]=p.cloud_color;data.extend([r,g,b,p.cloud_scale]);
+    let [d,base,fall]=look.height_fog;data.extend([d,base,fall,0.0]);
+    debug_assert_eq!(data.len(),UNIFORM_FLOATS);
+    data
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn uniform_layout_matches_the_shader_and_defaults_keep_the_old_values() {
+        use peakrunner_core::terrain::MapId;
+        let pack=super::map_pack::on(MapId::Raindance).unwrap();
+        let frame=crate::drawlist::build_frame(&crate::sim::World::new(),1.6,0.016);
+        let data=super::uniform_data(pack,&frame);
+        assert_eq!(data.len(),super::UNIFORM_FLOATS);
+        // Sun and the historical grey fog sit where the shader always read them.
+        assert_eq!(&data[36..39],&peakrunner_core::look::DEFAULT_SUN);
+        assert_eq!(&data[40..43],&pack.fog_color());
+        // No look fields: cubemap sky, unit exposure, no height fog.
+        // Exposure 1, cubemap sky mode, sun disc on, height fog off.
+        assert_eq!(data[59],1.0);assert_eq!(data[63],0.0);assert_eq!(data[67],1.0);assert_eq!(data[80],0.0);
+        let wgsl=include_str!("map.wgsl");
+        assert!(wgsl.contains("hfog: vec4<f32>,"),"map.wgsl uniform must end with the look block");
+    }
 }

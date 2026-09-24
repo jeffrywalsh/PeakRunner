@@ -15,6 +15,8 @@ pub(crate) struct Preferences {
     pub name: String,
     pub directory: String,
     pub direct: String,
+    /// 4x multisample anti-aliasing when the GPU supports it.
+    pub antialiasing: bool,
 }
 
 impl Default for Preferences {
@@ -24,6 +26,7 @@ impl Default for Preferences {
             name: "Skier".into(),
             directory: "https://dir.peakrunner.net/servers".into(),
             direct: "quic://play.peakrunner.net:7777".into(),
+            antialiasing: true,
         }
     }
 }
@@ -48,6 +51,7 @@ impl Preferences {
                 .unwrap_or_else(|| self.name.clone()),
             directory: address(directory).unwrap_or_else(|| self.directory.clone()),
             direct: address(direct).unwrap_or_else(|| self.direct.clone()),
+            antialiasing: self.antialiasing,
         }
     }
 }
@@ -130,6 +134,15 @@ impl Store {
 
     pub fn save(&mut self, name: &str, directory: &str, direct: &str) {
         let next = self.saved.edited(name, directory, direct);
+        self.commit(next);
+    }
+
+    pub fn set_antialiasing(&mut self, on: bool) {
+        let next = Preferences { antialiasing: on, ..self.saved.clone() };
+        self.commit(next);
+    }
+
+    fn commit(&mut self, next: Preferences) {
         if next == self.saved {
             return;
         }
@@ -161,7 +174,9 @@ fn read(path: &Path) -> io::Result<Preferences> {
     if raw.schema != 1 {
         return Err(io::Error::other("unsupported preferences schema"));
     }
-    Ok(Preferences::default().edited(&raw.name, &raw.directory, &raw.direct))
+    let mut prefs = Preferences::default().edited(&raw.name, &raw.directory, &raw.direct);
+    prefs.antialiasing = raw.antialiasing;
+    Ok(prefs)
 }
 
 fn write(path: &Path, prefs: &Preferences) -> io::Result<()> {
@@ -253,7 +268,8 @@ mod tests {
         );
         assert_eq!(Store::load(path.clone()).saved.name, "Pilot 3");
         let value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        assert_eq!(value.as_object().unwrap().len(), 4);
+        // schema, name, directory, direct, antialiasing: nothing else.
+        assert_eq!(value.as_object().unwrap().len(), 5);
         assert!(value.get("password").is_none());
         #[cfg(unix)]
         {
@@ -263,6 +279,23 @@ mod tests {
                 0o600
             );
         }
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn antialiasing_defaults_on_persists_and_survives_name_edits() {
+        let dir = temp();
+        let path = dir.join("client.json");
+        // A file written before the setting existed keeps anti-aliasing on.
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&path, br#"{"schema":1,"name":"Pilot","directory":"https://example.net/s","direct":"quic://example.net:7777"}"#).unwrap();
+        let mut s = Store::load(path.clone());
+        assert!(s.saved.antialiasing);
+        s.set_antialiasing(false);
+        assert!(!Store::load(path.clone()).saved.antialiasing);
+        s.save("Pilot 9", &s.saved.directory.clone(), &s.saved.direct.clone());
+        let loaded = Store::load(path.clone()).saved;
+        assert_eq!(loaded.name, "Pilot 9");
+        assert!(!loaded.antialiasing, "editing the name must not reset anti-aliasing");
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

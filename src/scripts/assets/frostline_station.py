@@ -10,13 +10,15 @@ right hand is +X.
 
 Station: an insulated plinth lifts both storeys above the snow. Level 1 holds
 the spawn hall with two inventory stations and a rear hall; Level 2 is the
-command deck with the flag, glazed window bands and a roof hatch. Ramps along
+command deck with the flag, open window bands and a roof hatch. Ramps along
 the west and east walls join the levels, so the deck has two approaches and
 nobody has to leave the way they came. Three doors reach Level 1 from three
-sides: the front airlock, the rear door and an east side door. Every door has
-a baffle wall inside (the front one a porch as well), so no turret or sniper
-has a straight line into a room. Windows carry invisible glazing that stops
-shots and sightlines.
+sides: the front porch, the rear door and an east side door. The doors and
+the command deck's window bands are open: players and shots go straight
+through. Turrets face the field with a limited field of fire
+(turret_arcs.py) rather than being walled off, and no spawn sits in a
+straight line through an opening. Baffles remain only at the basement
+(generator room) door and inside the relay outpost (a spawn room).
 
 Generator: in a basement under the hall, in cut terrain cells, with exactly
 two ways in: a stair down from the hall and a tunnel from a sunken stair in
@@ -43,11 +45,8 @@ L1, L1_CEIL, L2, L2_CEIL, ROOF = 0.0, 6.5, 7.5, 13.5, 14.5
 SKIRT = G-.3
 DOOR, DOOR_TOP = (-2.2, 2.2), 3.8
 REAR_DOOR = (-10.0, -6.5)
-# Airlock porch in front of the door and the baffle behind it.
+# Roofed porch in front of the door (open straight through into the hall).
 PORCH_X, PORCH_Z, PORCH_TOP = 2.6, -18.0, 4.4
-BAFFLE_Z, BAFFLE_X = (-10.6, -10.0), 7.0
-# Rear airlock: baffle inside the back door; walk round its west end or east side.
-REAR_BAFFLE_Z, REAR_BAFFLE_X = (IZ1-2.0, IZ1-1.4), (-11.9, -4.6)
 PARTITION_Z, PART_DOOR, PART_DOOR_TOP = (6.0, 6.6), (6.5, 10.0), 4.0
 # West ramp: surface y = L2 at RAMP_TOP_Z down to L1 at RAMP_FOOT_Z.
 RAMP_X = (-IX, -10.4)
@@ -64,9 +63,8 @@ CRATES = (((1.0, -4.5), (2.2, 1.5, 1.8)), ((6.0, -1.0), (1.8, 1.5, 2.6)))
 # East ramp, the mirror of the west one: the deck's second approach.
 E_RAMP_X = (10.4, IX)
 E_OPENING_Z = OPENING_Z
-# East side door into the rear hall, its baffle and the stair down to the shelf.
+# East side door into the rear hall and the stair down to the shelf.
 EAST_DOOR, EAST_DOOR_TOP = (7.0, 10.5), 3.8
-EAST_BAFFLE = (10.6, 11.2, PARTITION_Z[1], 11.8)   # x0, x1, z0, z1
 EAST_STAIR_FOOT_X = SX+6.0
 
 # --- Basement generator room (v3) ---------------------------------------------
@@ -87,7 +85,6 @@ X_STAIR = (16.0, 24.0)                     # x at the tunnel floor, x at the she
 ANNEX = (16.0, 32.6, -8.6, 0.6)            # service shed over the sunken stair (outer faces)
 ANNEX_ROOF = G+4.4
 ANNEX_DOOR, ANNEX_DOOR_TOP = (26.0, 30.0), G+3.4
-ANNEX_BAFFLE = (25.0, 25.6, -8.0, -3.0)
 DUCT = (14.0, 16.0, -8.6, 0.6)             # cable duct between the station and the shed
 HOLES = {'basement': B_CELLS, 'tunnel': T_CELLS}
 CONSOLES = (((-7.5, -12.4), (4.0, 1.1, .9)), ((7.5, -12.4), (4.0, 1.1, .9)), ((9.0, 10.0), (3.0, 1.1, 2.0)))
@@ -112,8 +109,12 @@ APRON_TOP = G+.12
 DEPLOY_SLOTS = ((-4.5, -4.5), (4.5, -4.5), (-4.5, 4.5), (4.5, 4.5))
 SPAWN_LIFT = 1.2
 # (x, floor, z, yaw); yaw 0 faces -Z, -pi/2 faces +X, pi/2 faces -X, pi faces +Z.
-STATION_SPAWNS = ((-2.0, L1, -6.0, math.pi), (4.0, L1, -6.0, math.pi), (-4.0, L1, 10.0, -math.pi/2),
-                  (-4.0, L2, -6.0, -math.pi/2), (7.0, L2, -9.0, math.pi/2))
+# Station spawns all stand in the front hall, near the front wall or down its
+# sides, where no straight line through an open door or window reaches them
+# from the field (the rear hall is open at both ends and the command deck has
+# window bands all round).
+STATION_SPAWNS = ((-8.0, L1, -11.6, -math.pi/2), (8.0, L1, -11.6, math.pi/2), (-9.0, L1, -6.0, math.pi),
+                  (8.0, L1, -6.0, math.pi/2), (9.2, L1, -4.0, 0.0))
 OUTPOST_SPAWNS = ((-3.4, -3.6, -3*math.pi/8), (2.6, 1.8, math.pi/2), (-4.8, 5.3, -math.pi/2))
 
 HULL, DECKING, GRATE, METAL, GLOW, WOOD, SNOWPINE = 'concrete', 'panel', 'grate', 'trim', 'light', 'bark', 'leaf'
@@ -243,21 +244,11 @@ def build(mesh, team, circuit):
         for u0, u1 in _runs_without(SZ0+WALL, SZ1-WALL, windows): wall(x0, x1, u0, u1, *WINDOW_BAND, HULL)
         wall(x0, x1, SZ0+WALL, SZ1-WALL, WINDOW_BAND[1], ROOF, HULL)
 
-    def glaze_z(z, windows):
-        for u0, u1 in windows:
-            b.pane((u0, WINDOW_BAND[0], z), (u1, WINDOW_BAND[0], z), (u1, WINDOW_BAND[1], z), (u0, WINDOW_BAND[1], z))
-
-    def glaze_x(x, windows):
-        for u0, u1 in windows:
-            b.pane((x, WINDOW_BAND[0], u0), (x, WINDOW_BAND[0], u1), (x, WINDOW_BAND[1], u1), (x, WINDOW_BAND[1], u0))
-
     # --- Station shell ------------------------------------------------------
     shell_z(SZ0, IZ0, DOOR, DOOR_TOP, FRONT_WINDOWS)
     shell_z(IZ1, SZ1, REAR_DOOR, DOOR_TOP, FRONT_WINDOWS)
     shell_x(-SX, -IX, SIDE_WINDOWS)
     shell_x(IX, SX, SIDE_WINDOWS, EAST_DOOR)
-    glaze_z(SZ0+WALL/2, FRONT_WINDOWS); glaze_z(SZ1-WALL/2, FRONT_WINDOWS)
-    glaze_x(-SX+WALL/2, SIDE_WINDOWS); glaze_x(SX-WALL/2, SIDE_WINDOWS)
     # Floors: L1 over the plinth with the basement stair's opening; L2 with
     # both ramp openings; roof with the hatch.
     bx0, bx1, bz0, bz1 = B_OPENING
@@ -283,7 +274,7 @@ def build(mesh, team, circuit):
     for x0, x1, z0, z1 in ((hx0-.4, hx1+.4, hz0-.4, hz0), (hx0-.4, hx1+.4, hz1, hz1+.4),
                            (hx0-.4, hx0, hz0, hz1), (hx1, hx1+.4, hz0, hz1)):
         wall(x0, x1, z0, z1, ROOF, ROOF+1.0, METAL)
-    # Airlock: porch walls and roof over the front deck, baffle inside.
+    # Porch: side walls and roof over the front deck, open into the hall.
     dx0, dx1, dz0, dz1 = DECK
     slab(dx0, dx1, dz0, dz1, L1, GRATE)
     for s in (-1, 1):
@@ -292,14 +283,12 @@ def build(mesh, team, circuit):
     # Under the deck: closed down to the shelf.
     wall(dx0, dx1, dz0, dz0+.4, SKIRT, L1-1, HULL)
     for s in (-1, 1): wall(s*dx1-.2, s*dx1+.2, dz0, dz1, SKIRT, L1-1, HULL)
-    wall(-BAFFLE_X, BAFFLE_X, BAFFLE_Z[0], BAFFLE_Z[1], L1, L1_CEIL, HULL)
     # Stair from the shelf up to the deck, with closed sides.
     mesh.ramp(0, 2*STAIR_X, STAIR_FOOT_Z, PORCH_Z, G, L1, GRATE)
     for s in (-1, 1): closed_side(s*STAIR_X, STAIR_FOOT_Z, PORCH_Z, G-.06, stair_surface)
     rx0, rx1 = REAR_DOOR; rxc = (rx0+rx1)/2
     mesh.ramp(rxc, rx1-rx0, SZ1, REAR_STAIR_FOOT_Z, L1, G, GRATE)
     for x in (rx0, rx1): closed_side(x, SZ1, REAR_STAIR_FOOT_Z, G-.06, rear_stair_surface)
-    wall(*REAR_BAFFLE_X, *REAR_BAFFLE_Z, L1, L1_CEIL, HULL)
     mesh.box((rxc, DOOR_TOP+.25, SZ1+.35), (rx1-rx0+.6, .3, .7), accent, False)
     mesh.box((rxc, DOOR_TOP+.45, SZ1+.4), (1.2, .1, .6), GLOW, False)
     b.lamp((rxc, DOOR_TOP-.2, SZ1+1.5), .5)
@@ -314,8 +303,7 @@ def build(mesh, team, circuit):
     mesh.ramp((ex0+ex1)/2, ex1-ex0, RAMP_TOP_Z, RAMP_FOOT_Z, L2, L1, GRATE)
     closed_side(ex0, RAMP_TOP_Z, RAMP_FOOT_Z, L1, ramp_surface)
     wall(ex0, ex1, RAMP_TOP_Z-.4, RAMP_TOP_Z, L1, L2-1, HULL)
-    # East side door: baffle inside, stair down to the shelf outside.
-    wall(*EAST_BAFFLE[:2], *EAST_BAFFLE[2:], L1, L1_CEIL, HULL)
+    # East side door: open into the rear hall, stair down to the shelf outside.
     xramp(SX, EAST_STAIR_FOOT_X, *EAST_DOOR, L1, G, GRATE)
     for z in EAST_DOOR: closed_side_x(z, SX, EAST_STAIR_FOOT_X, G-.06, east_stair_surface)
     ezc = sum(EAST_DOOR)/2
@@ -350,7 +338,7 @@ def build(mesh, team, circuit):
     slab(tx0, xs0, tz0, tz1, G, HULL, .4)
     xramp(xs0, xs1, *T_IN, B_FLOOR, G, GRATE)
     wall(*DUCT, G-.3, G+2.0, METAL)
-    # Service shed over the stair: door on the south face, baffle inside.
+    # Service shed over the stair: door on the south face, open inside.
     ax0, ax1, az0, az1 = ANNEX
     slab(xs1, ax1-WALL, az0+WALL, az1-WALL, G, DECKING)
     top = ANNEX_ROOF-.5                                            # underside of the shed roof
@@ -360,7 +348,6 @@ def build(mesh, team, circuit):
     for u0, u1 in _runs_without(ax0+WALL, ax1-WALL, [ANNEX_DOOR]):
         wall(u0, u1, az0, az0+WALL, G-.3, top, HULL)
     wall(*ANNEX_DOOR, az0, az0+WALL, ANNEX_DOOR_TOP, top, HULL)
-    wall(*ANNEX_BAFFLE[:2], *ANNEX_BAFFLE[2:], G, G+3.6, HULL)
     slab(ax0, ax1, az0, az1, ANNEX_ROOF, HULL, .5)
     # Cover crates in the hall, consoles on the command deck.
     for (x, z), (w, h, d) in CRATES:
@@ -398,8 +385,8 @@ def build(mesh, team, circuit):
                                     ('x', IX, -1, _runs_without(IZ0, IZ1, SIDE_WINDOWS)),
                                     ('x', -IX, 1, _runs_without(IZ0, IZ1, SIDE_WINDOWS))):
         b.dress(axis, plane, into, runs, L2, L2_CEIL, pilasters=False)
-    for x in (-4.0, 4.0): b.ceiling_strip('z', x, BAFFLE_Z[1]+1, PARTITION_Z[0]-1, L1_CEIL, .7)
-    b.ceiling_strip('x', (IZ0+BAFFLE_Z[0])/2, -BAFFLE_X+1, BAFFLE_X-1, L1_CEIL, .5)
+    for x in (-4.0, 4.0): b.ceiling_strip('z', x, IZ0+1.5, PARTITION_Z[0]-1, L1_CEIL, .7)
+    b.ceiling_strip('x', IZ0+1.2, -6.0, 6.0, L1_CEIL, .5)
     b.ceiling_strip('x', (PARTITION_Z[1]+IZ1)/2, -IX+2, IX-2, L1_CEIL, .7)
     for x in (-6.0, 1.0, 11.0): b.ceiling_strip('z', x, IZ0+1.5, IZ1-1.5, L2_CEIL, .7)
     # Window frames and mullions inside and out.

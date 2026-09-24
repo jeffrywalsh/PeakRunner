@@ -18,9 +18,9 @@
     "position": "-384 -160 54",
     "scale": "720 150 1"
   },
-  "texture_count": 33,
+  "texture_count": 32,
   "lightmap": {
-    "pages": 13,
+    "pages": 12,
     "first_layer": 20,
     "texel_m": 0.5,
     "sun": [
@@ -86,15 +86,15 @@
         4.71238898038469
       ],
       [
-        1028.0,
-        255.2,
-        814.0,
+        1020.0,
+        248.2,
+        812.0,
         3.141592653589793
       ],
       [
-        1020.0,
-        255.2,
-        813.0,
+        1016.0,
+        241.2,
+        790.0,
         3.141592653589793
       ],
       [
@@ -136,15 +136,15 @@
         1.5707963267948966
       ],
       [
-        1020.0,
-        255.2,
-        1234.0,
+        1028.0,
+        248.2,
+        1236.0,
         0.0
       ],
       [
-        1028.0,
-        255.2,
-        1235.0,
+        1032.0,
+        241.2,
+        1258.0,
         0.0
       ],
       [
@@ -239,7 +239,12 @@
       "team": 0,
       "circuit": "base-0",
       "radius": 2.2,
-      "weapon": "bullet"
+      "weapon": "bullet",
+      "facing": [
+        0.026951,
+        0.999637
+      ],
+      "arc": 200.0
     },
     {
       "id": "turret-6",
@@ -252,7 +257,12 @@
       "team": 0,
       "circuit": "base-0",
       "radius": 2.2,
-      "weapon": "bullet"
+      "weapon": "bullet",
+      "facing": [
+        0.026951,
+        0.999637
+      ],
+      "arc": 200.0
     },
     {
       "id": "generator-7",
@@ -330,7 +340,12 @@
       "team": 1,
       "circuit": "base-1",
       "radius": 2.2,
-      "weapon": "bullet"
+      "weapon": "bullet",
+      "facing": [
+        -0.026951,
+        -0.999637
+      ],
+      "arc": 200.0
     },
     {
       "id": "turret-13",
@@ -343,7 +358,12 @@
       "team": 1,
       "circuit": "base-1",
       "radius": 2.2,
-      "weapon": "bullet"
+      "weapon": "bullet",
+      "facing": [
+        -0.026951,
+        -0.999637
+      ],
+      "arc": 200.0
     }
   ],
   "instances": [
@@ -703,7 +723,7 @@
     "visibleDistance": "2500",
     "fogDistance": "1500"
   },
-  "asset_sha256": "a312250968f3dad250aba35adef7e252cbf737f177c7c727e55caf5221c9612b",
+  "asset_sha256": "c6d9cdad3e406170729bb02571c0d0ea89a9d551c93788f8c862772e670f9418",
   "pad_asset_sha256": "e08760880694f1e3903e43d2ed1761e8537bf477e8212b3cffddca00786a85d8",
   "terrain_source_sha256": "b0eb73f41448b92fc1b37552b7c5e300eb4892e17d819966405cb5fdf3e7e72b",
   "material_source_sha256": "d86aa4cb8e7facef1838d50786a3ae0486303984f7428e3381169d18ee6d4293",
@@ -711,10 +731,10 @@
   "definition_sha256": "2c57b9bb44f141cadfec2f0f31aaff50ecd384f111a84699434cfac7bc8a7193",
   "files": {
     "height.bin": "c7cbbeee0459c9f4338a9336f6c11abdc472dd98f224672d1056edfdbdc429a6",
-    "vertices.bin": "c28b186c0f3474978bbf91789846c81234c39de19801cb13fac326585d862c91",
-    "collision.bin": "c3ad032a7bc06d270b46e56394bcdfa544e4c5f904f34808e03b061c990e6672",
+    "vertices.bin": "ed9ac494450ca600e4a04b23aaa89265389bb4eecdbbad06e284f989ecea1f87",
+    "collision.bin": "fb61c8704a86ef2597c57e14ee6a933e25242beda39bd0ee2accd2cd36cdab25",
     "weights.rgba": "2c0e11be87e32040a6133893c6ba22f07ea57ea0618175cf51ca7f32dfe14c77",
-    "textures.rgba": "bcc66f0832a77e83aef22440325e46a02a0d4fe049664582dd31c25e7ac43a9c",
+    "textures.rgba": "5feaba084d8f71e5ea3c4ca741a67d99fcb0e48964a014dfb425ef0b454c4689",
     "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e"
   }
 }

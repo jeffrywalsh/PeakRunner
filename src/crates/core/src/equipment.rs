@@ -1,5 +1,5 @@
 //! Map-authored equipment definitions and authoritative runtime state.
-use glam::Vec3;
+use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 use crate::{sim::{Player, ENERGY_MAX}, terrain::MapId};
 
@@ -149,9 +149,32 @@ pub struct Definition {
     pub radius: f32,
     #[serde(default)]
     pub weapon: TurretWeapon,
+    /// Horizontal (x, z) direction the turret faces. With `arc` below 360 it
+    /// only engages targets within `arc / 2` degrees of this direction, which
+    /// keeps a turret standing in front of an open doorway from firing back
+    /// into its own rooms. Absent means it covers all directions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub facing: Option<[f32;2]>,
+    #[serde(default = "full_arc")]
+    pub arc: f32,
 }
+fn full_arc()->f32 {360.}
+/// Horizontal distance within which a turret with a limited field of fire
+/// still engages in every direction.
+pub const ALL_ROUND_RANGE: f32 = 15.;
 impl Definition {
     pub fn pos(&self)->Vec3 {Vec3::from_array(self.position)}
+    /// Whether this turret may engage `target`: anywhere within
+    /// `ALL_ROUND_RANGE` (it guards its own surroundings, bridge and ramps
+    /// included), and beyond that only inside its horizontal field of fire.
+    pub fn in_arc(&self, target:Vec3)->bool {
+        let Some(f)=self.facing else {return true};
+        if self.arc>=360. {return true;}
+        let d=Vec2::new(target.x-self.position[0],target.z-self.position[2]);
+        let f=Vec2::from_array(f);
+        if d.length()<=ALL_ROUND_RANGE || f.length_squared()<1e-6 {return true;}
+        d.normalize().dot(f.normalize())>=(self.arc.to_radians()/2.).cos()
+    }
     pub fn max_health(&self)->f32 {durability(self.kind).hull}
     pub fn max_shield(&self)->f32 {durability(self.kind).shield_max}
 }
@@ -208,7 +231,9 @@ pub fn validate(defs:&[Definition])->Result<(),String> {
     for d in defs {
         if d.id.is_empty() || d.id.len()>64 || !ids.insert(&d.id) || d.team>1
             || d.circuit.is_empty() || d.circuit.len()>64 || !d.radius.is_finite()
-            || !(0.5..=8.).contains(&d.radius) || d.position.iter().any(|v|!v.is_finite() || v.abs()>10000.) {
+            || !(0.5..=8.).contains(&d.radius) || d.position.iter().any(|v|!v.is_finite() || v.abs()>10000.)
+            || !d.arc.is_finite() || !(1.0..=360.).contains(&d.arc)
+            || d.facing.is_some_and(|f|f.iter().any(|v|!v.is_finite()) || Vec2::from_array(f).length()<1e-3) {
             return Err("Invalid equipment definition".into());
         }
         if d.circuit!="always-on" && !defs.iter().any(|g|g.kind==Kind::Generator && g.team==d.team && g.circuit==d.circuit) {
@@ -310,7 +335,7 @@ mod tests {
     #[test]
     fn always_on_circuits_need_no_fabricated_generator() {
         let d=Definition{id:"station".into(),kind:Kind::Inventory,position:[0.;3],team:0,
-            circuit:"always-on".into(),radius:1.5,weapon:TurretWeapon::Bullet};
+            circuit:"always-on".into(),radius:1.5,weapon:TurretWeapon::Bullet,facing:None,arc:360.};
         assert!(validate(&[d.clone()]).is_ok());
         let mut states=vec![State{health:100.,powered:false,cooldown:0.,aim:Vec3::ZERO,contacts:0,shield:0.,offline:false}];
         power(&[d.clone()],&mut states);assert!(states[0].powered);
@@ -331,7 +356,7 @@ mod tests {
     }
     #[test]
     fn generator_loss_only_disables_its_own_circuit() {
-        let make=|id:&str,kind,team|Definition {id:id.into(),kind,team,circuit:format!("base{team}"),position:[0.;3],radius:2.,weapon:TurretWeapon::Bullet};
+        let make=|id:&str,kind,team|Definition {id:id.into(),kind,team,circuit:format!("base{team}"),position:[0.;3],radius:2.,weapon:TurretWeapon::Bullet,facing:None,arc:360.};
         let defs=vec![make("a",Kind::Generator,0),make("b",Kind::Inventory,0),make("c",Kind::Generator,1)];
         assert!(validate(&defs).is_ok());
         let mut states:Vec<_>=defs.iter().map(|d|State::new(d)).collect();
@@ -343,7 +368,7 @@ mod tests {
         assert!(states[1].powered);
     }
     fn def(id:&str,kind:Kind,circuit:&str)->Definition {
-        Definition {id:id.into(),kind,team:0,circuit:circuit.into(),position:[0.;3],radius:2.,weapon:TurretWeapon::Bullet}
+        Definition {id:id.into(),kind,team:0,circuit:circuit.into(),position:[0.;3],radius:2.,weapon:TurretWeapon::Bullet,facing:None,arc:360.}
     }
     #[test]
     fn only_sensors_and_turrets_are_shielded() {
@@ -426,9 +451,25 @@ mod tests {
     }
     #[test]
     fn rejects_missing_generator_and_duplicate_ids() {
-        let d=Definition {id:"station".into(),kind:Kind::Inventory,team:0,circuit:"a".into(),position:[0.;3],radius:2.,weapon:TurretWeapon::Bullet};
+        let d=Definition {id:"station".into(),kind:Kind::Inventory,team:0,circuit:"a".into(),position:[0.;3],radius:2.,weapon:TurretWeapon::Bullet,facing:None,arc:360.};
         assert!(validate(&[d.clone()]).is_err());
         let mut g=d.clone();g.kind=Kind::Generator;
         assert!(validate(&[g,d]).is_err());
+    }
+    #[test]
+    fn a_facing_arc_limits_what_a_turret_may_engage() {
+        let mut d=def("t",Kind::Turret,"always-on");
+        assert!(d.in_arc(Vec3::new(0.,0.,-50.)),"no facing covers every direction");
+        d.facing=Some([0.,-1.]);d.arc=200.;
+        assert!(validate(&[d.clone()]).is_ok());
+        assert!(d.in_arc(Vec3::new(0.,0.,-50.)));
+        assert!(d.in_arc(Vec3::new(50.,0.,0.)),"flanks are inside a 200 degree arc");
+        assert!(!d.in_arc(Vec3::new(0.,0.,50.)),"straight behind is outside");
+        assert!(!d.in_arc(Vec3::new(20.,0.,50.)));
+        assert!(d.in_arc(Vec3::new(0.,30.,0.)),"straight above counts as inside");
+        assert!(d.in_arc(Vec3::new(0.,0.,ALL_ROUND_RANGE-1.)),"close behind is still covered");
+        assert!(!d.in_arc(Vec3::new(0.,0.,ALL_ROUND_RANGE+1.)));
+        for bad in [0.,400.,f32::NAN] {let mut b=d.clone();b.arc=bad;assert!(validate(&[b]).is_err());}
+        let mut b=d.clone();b.facing=Some([0.,0.]);assert!(validate(&[b]).is_err());
     }
 }

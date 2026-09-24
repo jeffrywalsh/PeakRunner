@@ -12,6 +12,8 @@ import unittest
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
+from assets import sightline_checks
+from assets import turret_arcs
 from assets import budgets
 from assets import dustreach_citadel as base
 from assets import dustreach_gate as gate
@@ -288,42 +290,18 @@ class DustreachTests(unittest.TestCase):
             self.assertFalse(-ix < x < ix and iz0 < z < iz1 and y > base.TER, (x, z, 'in the keep hall'))
             self.assertGreaterEqual(math.hypot(x-head[0], z-head[1]), 15.0, (x, z))
 
-    def test_tower_back_door_porch_hides_the_exit_ramp(self):
-        """Nobody outside the porch sees into the tower room or up its ramp:
-        rays from a ring of outside viewpoints behind and beside the tower to
-        points in the room, on the ramp and on the landing are all blocked.
-        The porch is still open to the east for the route out."""
+    def test_tower_back_door_is_open_straight_in(self):
+        """The watch tower's back door has nothing outside or behind it: a
+        body band walks and shoots straight in from the ground behind the
+        tower, over the landing and down the exit ramp's line."""
         wx0, wx1, wz0, wz1 = base.TOWER
-        qx0, qx1, qz0, qz1 = base.PORCH
-        targets = []
-        r0, r1, rz0, rz1 = base.TOWER_RAMP
-        for z in np.arange(rz0+.4, rz1, 1.0):
-            for x in (r0+.6, (r0+r1)/2, r1-.6):
-                targets.append((x, base.tower_ramp_y(z)+1.0, z))
-        for x in np.arange(wx0+1.5, base.TOWER_HOLE[1]-1.0, 1.5):
-            for z in np.arange(wz0+1.5, rz0, 1.5):
-                targets.append((x, base.CIS_FLOOR+1.0, z))
-            targets.append((x, base.LANDING+1.0, (rz1+wz1)/2))
-        viewers = []
-        for ang in np.linspace(-.25*np.pi, 1.25*np.pi, 25):   # behind (+Z) and to both sides
-            for dist in (6.0, 15.0, 40.0):
-                for h in (1.7, 6.0, 14.0):
-                    cx, cz = (qx0+qx1)/2, qz1
-                    x, z = cx+dist*math.cos(ang), cz+dist*math.sin(ang)
-                    if z < wz1+.5 and wx0-1 < x < wx1+1: continue
-                    if qx0 <= x <= qx1+2 and wz1 <= z <= qz1: continue   # inside the porch itself
-                    viewers.append((x, h, z))
-        starts = np.array([v for v in viewers for _ in targets], float)
-        ends = np.array([t for _ in viewers for t in targets], float)
-        blocked = self.soup.blocked_many(starts, ends)
-        self.assertTrue(blocked.all(), [tuple(starts[i]) + tuple(ends[i]) for i in np.flatnonzero(~blocked)[:3]])
-        # East opening: open from the ground outside, through the porch, to the door.
-        y = base.LANDING+1.0
-        for a, c in [((qx1+4, y, (wz1+qz0)/2), ((base.TOWER_DOOR[0]+base.TOWER_DOOR[1])/2, y, (wz1+qz0)/2)),
-                     (((base.TOWER_DOOR[0]+base.TOWER_DOOR[1])/2, y, (wz1+qz0)/2),
-                      ((base.TOWER_DOOR[0]+base.TOWER_DOOR[1])/2, y, wz1-1.0))]:
-            d = np.subtract(c, a); n = np.linalg.norm(d)
-            self.assertEqual(self.soup.first(a, d/n, n), np.inf, (a, c))
+        xc = (base.TOWER_DOOR[0]+base.TOWER_DOOR[1])/2
+        for off in (-1.0, 0.0, 1.0):
+            for h in (.6, 1.6, 2.6):
+                a = (xc+off, base.LANDING+h, wz1+8.0)
+                c = (xc+off, base.LANDING+h, wz1-1.5)
+                d = np.subtract(c, a); n = np.linalg.norm(d)
+                self.assertEqual(self.soup.first(a, d/n, n), np.inf, (a, c))
 
     def test_new_ramps_climb_with_headroom_and_closed_undersides(self):
         cases = [(base.STAIR, base.stair_y, base.CIS_FLOOR, 1),        # open (railed) side at x0, probe from -x
@@ -427,15 +405,17 @@ class DustreachTests(unittest.TestCase):
     def whole_map(cls):
         if not hasattr(cls, '_map'):
             spec = build.spec(); mesh = kit.Mesh()
-            build.build_structures(spec, mesh)
+            flags = build.build_structures(spec, mesh)[0]
+            turret_arcs.assign(mesh.entities, flags)
             grid = build.terrain_grid(spec)
             cls._map = spec, mesh, Soup(mesh.collision), grid
         return cls._map
 
-    # Rooms no turret may see into: (name, x0, x1, z0, z1, floor), local. The
-    # vestibules between each door and its baffle lie outside these boxes.
+    # Rooms no turret may see into beyond the doorway depth of an open
+    # opening: (name, x0, x1, z0, z1, floor), local. The storehouse's
+    # baffled entry vestibules lie outside its boxes.
     ROOMS = [('keep hall', -(base.KX-base.WALL)+.6, base.KX-base.WALL-.6,
-              base.FRONT_BAFFLE_Z[1]+.6, base.BACK_BAFFLE_Z[0]-.6, TER),
+              base.KZ0+base.WALL+.6, base.KZ1-base.WALL-.6, TER),
              ('cistern', base.CIS[0]+.6, base.CIS[1]-.6, base.CIS[2]+.6, base.CIS[3]-.6, base.CIS_FLOOR),
              ('tunnel north', base.TUNNEL_N[0]+1.4, base.TUNNEL_N[1]-1.4, base.TUNNEL_N[2]+.6, base.TUNNEL_W[3]-1.4, base.CIS_FLOOR),
              ('tunnel west', base.TUNNEL_W[0]+.6, base.TUNNEL_W[1]+.6, base.TUNNEL_W[2]+1.4, base.TUNNEL_W[3]-1.4, base.CIS_FLOOR),
@@ -446,13 +426,18 @@ class DustreachTests(unittest.TestCase):
               base.STORE[2]+base.WALL+.6, base.STORE[3]-base.WALL-.6, base.STORE_UP)]
 
     def test_turrets_cannot_see_into_rooms(self):
-        """No turret has a clear line from its barrel to a player's chest
-        anywhere in the spawn hall, the cistern, the tunnel, the tower room or
-        the storehouse, at sensor-extended range."""
+        """No turret engages a player (field of fire, sensor-extended range,
+        clear line from its barrel to the chest) anywhere in the keep hall,
+        the cistern, the tunnel, the tower room or the storehouse, beyond the
+        doorway depth (sightline_checks.DOOR_DEPTH) of an open door."""
         spec, mesh, soup, _ = self.whole_map()
-        targets, counts = [], {}
+        targets, counts, openings = [], {}, []
+        ix, iz0, iz1 = base.KX-base.WALL, base.KZ0+base.WALL, base.KZ1-base.WALL
+        local = [(*base.DOOR, iz0), (*base.DOOR, iz1), (*base.TOWER_DOOR, base.TOWER[3]-.5)]
         for b in spec['bases']:
             m = kit.Mesh(); m.origin = tuple(b['position']); m.yaw = math.radians(b['yaw'])
+            pt = lambda x, z: tuple(m.point((x, 0, z))[i] for i in (0, 2))
+            openings += [(pt(x0, z), pt(x1, z)) for x0, x1, z in local]
             for name, x0, x1, z0, z1, floor in self.ROOMS:
                 for x in np.arange(x0, x1+.01, 1.0):
                     for z in np.arange(z0, z1+.01, 1.0):
@@ -463,12 +448,10 @@ class DustreachTests(unittest.TestCase):
         targets = np.array(targets)
         turrets = [e for e in mesh.entities if e['kind'] == 'turret']
         self.assertEqual(len(turrets), 6)
+        allowed = sightline_checks.near_openings(targets, openings)
         for e in turrets:
-            p = np.array(e['position']); d = targets-p; dist = np.linalg.norm(d, axis=1)
-            near = dist < 150
-            starts = p+d[near]/dist[near, None]*(e['radius']+.6)
-            clear = ~soup.blocked_many(starts, targets[near])
-            self.assertEqual(int(clear.sum()), 0, (e['id'], targets[near][clear][:5]))
+            seen = sightline_checks.visible(soup, e, targets) & ~allowed
+            self.assertEqual(int(seen.sum()), 0, (e['id'], targets[seen][:5]))
         for name, *_ in self.ROOMS: self.assertGreater(counts.get(name, 0), 20, (name, counts))
         self.assertGreater(len(targets), 1500)
 
@@ -764,6 +747,11 @@ class SpawnForwardClearance(unittest.TestCase):
         from assets import spawn_checks
         pack = Path(__file__).resolve().parent.parent/'assets/maps/dustreach'
         self.assertEqual(spawn_checks.problems(pack), [])
+
+    def test_no_indoor_spawn_shows_through_an_opening_from_the_field(self):
+        from assets import spawn_checks
+        pack = Path(__file__).resolve().parent.parent/'assets/maps/dustreach'
+        self.assertEqual(spawn_checks.exposed(pack), [])
 
 
 if __name__ == '__main__':
