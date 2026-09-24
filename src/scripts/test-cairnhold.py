@@ -659,7 +659,7 @@ class CairnholdTests(unittest.TestCase):
                 build.build(out, bake=False)
                 digests.append({f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in out.iterdir()})
             self.assertEqual(digests[0], digests[1])
-            self.assertEqual(len(digests[0]), 8)   # map.json, six payloads, shade.rg
+            self.assertEqual(len(digests[0]), 9)   # map.json, six payloads, shade.rg, props.bin
 
 class PlayabilityV4(unittest.TestCase):
     """The playability-survey fixes (research/playability-survey): a

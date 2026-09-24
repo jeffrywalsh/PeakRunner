@@ -97,6 +97,7 @@ macro_rules! embedded_map {
                 "textures.rgba" => packed!("textures.rgba"),
                 "ambient.f32" => packed!("ambient.f32"),
                 "shade.rg" => packed!("shade.rg"),
+                "props.bin" => packed!("props.bin"),
                 _ => Err(concat!("Unknown ", $label, " asset").into()),
             }
         }
@@ -177,6 +178,74 @@ pub fn on(map: crate::terrain::MapId) -> Option<&'static MapPack> {
 /// Side of the optional `shade.rg` terrain shade map, in texels (2 bytes each).
 pub const SHADE_SIZE: u32 = 1024;
 const SHADE_BYTES: usize = (SHADE_SIZE * SHADE_SIZE * 2) as usize;
+
+/// Upper bound on `props.bin`: header, mesh table, vertices and instances.
+const PROPS_MAX_BYTES: usize = 64_000_000;
+/// Floats per prop vertex (local position, local normal, material, pad) and
+/// per instance (world position, yaw, scale, mesh index, pad, pad).
+pub const PROP_FLOATS: usize = 8;
+
+/// One shared prop shape and the contiguous run of instances that use it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PropMesh { pub first_vertex: u32, pub vertex_count: u32, pub first_instance: u32, pub instance_count: u32 }
+
+/// Render-only props as GPU instances, parsed from `props.bin`: a few local
+/// meshes per kind and a sorted instance list. Placement applies the kit's yaw
+/// (`Mesh.point`) and a uniform scale; collision never comes from here.
+pub struct PropSet { pub meshes: Vec<PropMesh>, pub vertices: Vec<f32>, pub instances: Vec<f32> }
+
+impl PropSet {
+    pub fn parse(bytes: &[u8], texture_count: u32) -> Result<Self, String> {
+        let bad = |what: &str| format!("Invalid props.bin: {what}");
+        if bytes.len() < 16 || &bytes[..4] != b"PRP1" { return Err(bad("header")); }
+        let word = |i: usize| u32::from_le_bytes(bytes[i..i + 4].try_into().unwrap());
+        let (meshes, instances) = (word(4) as usize, word(8) as usize);
+        if meshes == 0 || meshes > 4096 || instances > 1_000_000 { return Err(bad("counts")); }
+        let table_end = 16 + meshes * 16;
+        if bytes.len() < table_end { return Err(bad("table")); }
+        let mut table = Vec::with_capacity(meshes);
+        let (mut next_vertex, mut next_instance) = (0u32, 0u32);
+        for m in 0..meshes {
+            let at = 16 + m * 16;
+            let mesh = PropMesh { first_vertex: word(at), vertex_count: word(at + 4),
+                first_instance: word(at + 8), instance_count: word(at + 12) };
+            // Meshes are packed back to back, in instance order, whole triangles only.
+            if mesh.first_vertex != next_vertex || mesh.first_instance != next_instance
+                || mesh.vertex_count == 0 || mesh.vertex_count % 3 != 0 || mesh.vertex_count > 30_000 {
+                return Err(bad("mesh table"));
+            }
+            next_vertex = next_vertex.checked_add(mesh.vertex_count).ok_or_else(|| bad("mesh table"))?;
+            next_instance = next_instance.checked_add(mesh.instance_count).ok_or_else(|| bad("mesh table"))?;
+            table.push(mesh);
+        }
+        if next_instance as usize != instances { return Err(bad("instance count")); }
+        let floats = (next_vertex as usize + instances) * PROP_FLOATS;
+        if bytes.len() != table_end + floats * 4 { return Err(bad("length")); }
+        let data: Vec<f32> = bytes[table_end..].chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().unwrap())).collect();
+        if data.iter().any(|v| !v.is_finite()) { return Err(bad("non-finite value")); }
+        let (vertices, instances) = data.split_at(next_vertex as usize * PROP_FLOATS);
+        for v in vertices.chunks_exact(PROP_FLOATS) {
+            if v[..3].iter().any(|x| x.abs() > 64.0) || v[3..6].iter().any(|x| x.abs() > 1.001)
+                || v[6] < 0.0 || v[6] >= texture_count as f32 || v[6].fract() != 0.0 {
+                return Err(bad("vertex"));
+            }
+        }
+        for (m, mesh) in table.iter().enumerate() {
+            let run = &instances[mesh.first_instance as usize * PROP_FLOATS..][..mesh.instance_count as usize * PROP_FLOATS];
+            for i in run.chunks_exact(PROP_FLOATS) {
+                if i[..3].iter().any(|x| x.abs() > 10000.0) || !(0.0..=64.0).contains(&i[4]) || i[4] == 0.0
+                    || i[5] != m as f32 {
+                    return Err(bad("instance"));
+                }
+            }
+        }
+        Ok(Self { meshes: table, vertices: vertices.to_vec(), instances: instances.to_vec() })
+    }
+
+    pub fn triangle_count(&self) -> usize {
+        self.meshes.iter().map(|m| m.vertex_count as usize / 3 * m.instance_count as usize).sum()
+    }
+}
 
 /// Distance-fog colour used by every map before per-map colours existed.
 pub const DEFAULT_FOG: [f32; 3] = [0.62, 0.62, 0.62];
@@ -298,6 +367,14 @@ impl MapPack {
                 return Err("Checksum mismatch: shade.rg".into());
             }
             if bytes.len() != SHADE_BYTES { return Err("Invalid terrain shade".into()); }
+        }
+        // Optional render-only prop instances (scripts/assets/props.py Instancer).
+        if manifest.files.contains_key("props.bin") {
+            let bytes = read("props.bin", PROPS_MAX_BYTES as u64)?;
+            if manifest.files.get("props.bin") != Some(&format!("{:x}", Sha256::digest(&bytes))) {
+                return Err("Checksum mismatch: props.bin".into());
+            }
+            PropSet::parse(&bytes, manifest.texture_count)?;
         }
         if collision.len()%36 != 0 || collision.len()>36*500_000 {return Err("Invalid collision data".into());}
         let mut triangles=Vec::new();
@@ -494,6 +571,46 @@ mod tests {
     }
 
     #[test]
+    fn props_instances_parse_and_reject_malformed_data() {
+        use super::*;
+        use crate::terrain::MapId;
+        // Every shipped map carries its grass and small scenery as instances.
+        for map in [MapId::Raindance, MapId::BroadsideClone, MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone] {
+            let pack = on(map).unwrap();
+            let set = PropSet::parse(&pack.asset("props.bin").unwrap(), pack.manifest.texture_count).unwrap();
+            assert!(set.meshes.len() >= 24 && set.instances.len() / PROP_FLOATS > 1000, "{map:?}");
+            assert!(set.triangle_count() > 50_000, "{map:?} {}", set.triangle_count());
+        }
+        // A minimal valid set: one triangle mesh, two instances.
+        let build = |table: [u32; 4], verts: &[[f32; 8]], inst: &[[f32; 8]], meshes: u32, count: u32| {
+            let mut b = b"PRP1".to_vec();
+            for w in [meshes, count, 0] { b.extend(w.to_le_bytes()); }
+            for w in table { b.extend(w.to_le_bytes()); }
+            for row in verts.iter().chain(inst) { for v in row { b.extend(v.to_le_bytes()); } }
+            b
+        };
+        let tri = [[0., 0., 0., 0., 1., 0., 2., 0.], [1., 0., 0., 0., 1., 0., 2., 0.], [0., 1., 0., 0., 1., 0., 2., 0.]];
+        let inst = [[10., 20., 30., 0.5, 1.2, 0., 0., 0.], [11., 20., 30., 0.1, 0.8, 0., 0., 0.]];
+        let good = build([0, 3, 0, 2], &tri, &inst, 1, 2);
+        let set = PropSet::parse(&good, 8).unwrap();
+        assert_eq!(set.meshes, vec![PropMesh { first_vertex: 0, vertex_count: 3, first_instance: 0, instance_count: 2 }]);
+        assert_eq!(set.triangle_count(), 2);
+        // Each corruption is refused.
+        let mut magic = good.clone(); magic[0] = b'X';
+        assert!(PropSet::parse(&magic, 8).is_err());
+        assert!(PropSet::parse(&good[..good.len() - 4], 8).is_err(), "truncated");
+        assert!(PropSet::parse(&good, 2).is_err(), "material beyond the texture count");
+        assert!(PropSet::parse(&build([0, 2, 0, 2], &tri[..2], &inst, 1, 2), 8).is_err(), "partial triangle");
+        assert!(PropSet::parse(&build([0, 3, 0, 1], &tri, &inst, 1, 2), 8).is_err(), "instance count mismatch");
+        let mut wrong_mesh = inst; wrong_mesh[1][5] = 3.;
+        assert!(PropSet::parse(&build([0, 3, 0, 2], &tri, &wrong_mesh, 1, 2), 8).is_err(), "instance points at another mesh");
+        let mut zero = inst; zero[0][4] = 0.;
+        assert!(PropSet::parse(&build([0, 3, 0, 2], &tri, &zero, 1, 2), 8).is_err(), "zero scale");
+        let mut far = inst; far[0][0] = f32::NAN;
+        assert!(PropSet::parse(&build([0, 3, 0, 2], &tri, &far, 1, 2), 8).is_err(), "non-finite");
+    }
+
+    #[test]
     fn fog_colour_parses_validates_and_defaults() {
         use super::*;
         assert_eq!(parse_fog("0.8 0.69 0.52"), Some([0.8, 0.69, 0.52]));
@@ -520,6 +637,13 @@ mod tests {
         for name in ["map.json","vertices.bin","collision.bin","height.bin","weights.rgba","textures.rgba","shade.rg"] {
             std::fs::write(root.join(name), builtin_asset(name).unwrap()).unwrap();
         }
+        // A pack that lists props.bin refuses to load without it.
+        let mut listed: serde_json::Value = serde_json::from_slice(&builtin_asset("map.json").unwrap()).unwrap();
+        listed["files"]["ambient.f32"] = format!("{:x}",Sha256::digest([])).into();
+        std::fs::write(root.join("map.json"),serde_json::to_vec(&listed).unwrap()).unwrap();
+        assert!(MapPack::load(&root).is_err(), "missing props.bin must fail");
+        std::fs::write(root.join("props.bin"), builtin_asset("props.bin").unwrap()).unwrap();
+        std::fs::write(root.join("map.json"), builtin_asset("map.json").unwrap()).unwrap();
         assert!(MapPack::load(&root).is_err(), "missing nonempty audio must fail");
         let mut manifest: serde_json::Value = serde_json::from_slice(&builtin_asset("map.json").unwrap()).unwrap();
         manifest["files"]["ambient.f32"] = format!("{:x}",Sha256::digest([])).into();

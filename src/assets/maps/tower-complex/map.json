@@ -1358,18 +1358,24 @@
   "definition_sha256": "e0944046c146c9613c56d3cdae86ced71a3fa6d9d5ce77c89e08f38665de6a26",
   "props": {
     "theme": "tower-complex",
-    "version": 5,
+    "version": 6,
     "counts": {
       "outcrop": 28,
       "cover_debris": 10,
       "cover_rock_cluster": 10,
       "scrub": 1000,
-      "clump": 8014,
-      "meadow_patch": 99
+      "clump": 7729,
+      "meadow_patch": 95
     },
-    "render_triangles": 111229,
+    "render_triangles": 111227,
+    "baked_triangles": 4224,
+    "instanced": {
+      "meshes": 48,
+      "instances": 8729,
+      "triangles": 107003
+    },
     "solid_triangles": 3864,
-    "ground_triangles": 80005,
+    "ground_triangles": 80003,
     "big": [
       [
         879.15,
@@ -1790,7 +1796,7 @@
         1.3
       ]
     ],
-    "source_sha256": "f2615a5af34d64512f5fa2903a1876d10080abe15cfa74615b69f9678c27aaa5"
+    "source_sha256": "362873f0ccfeb3173d606d8a2a225db67e9199acb7d008caa7f54aa85e676ffa"
   },
   "terrain_shade": {
     "size": 1024,
@@ -1805,11 +1811,12 @@
   },
   "files": {
     "height.bin": "1014aeaec08e5cc78795cbbecdf8c2d4d69ebecca4e36a871167b7866bf37f29",
-    "vertices.bin": "5e334154b5ab4692ddde513a0818f9b66e067c68179e39ddb87a594cf7946b41",
+    "vertices.bin": "d9f19f657a8165484ee941c0379932a16c18477901bf4e33b5c874db6c283f23",
     "collision.bin": "fc8cc0941e854f38608ad5438f2ae9b7a6d92961b2175205601508916d0d8b8c",
     "weights.rgba": "b3602075041a5f0854eaaefe3d0d02d2b8208e322b9c0d89d908de9f33411ef5",
     "textures.rgba": "88ae9701722e898a945ae315ddeaea40d1819e723f2d5a48c109261de6086e5a",
     "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e",
+    "props.bin": "4d92b64fe1207fcbb117aa217473fc4b8205ff7f25270f33abe40d9a5cdba3ac",
     "shade.rg": "7c45ae8dd7b222b57ce7d5364e207eb4d4ea8fbe5aaf6c8ede4d4650fcf5f898"
   }
 }

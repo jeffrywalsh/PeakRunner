@@ -220,9 +220,27 @@ Design checklist (each item has bitten us once):
   - **Ground layer** (`ground_layer`): up to `props.GROUND_TRIS` (80,000)
     render-only triangles of grass clumps (8–12 blades each). Two thirds go
     into dense meadow patches 4–9 m across, weighted towards ski lanes, flags
-    and control points; the rest is scattered, thinner away from them. Baked
-    grass cannot cover the whole 4 km² densely; that would need GPU-instanced
-    grass.
+    and control points; the rest is scattered, thinner away from them.
+  - **Instanced props (`props.bin`):** every render-only prop (grass clumps,
+    tufts, ferns, heather, scrub, saplings, small ice shards, bones) is a GPU
+    instance, not baked vertices. `props.Instancer` builds
+    `props.INSTANCE_VARIANTS` (24) shapes per kind at size 1; each placement
+    picks a variant by its shape seed and keeps its own position, yaw and
+    size as a uniform scale. The renderer (`map.wgsl` `vs_prop`) applies the
+    kit's `Mesh.point` yaw, recomputes the kit's planar world UVs (world / 4
+    on the two axes other than the dominant normal) and shares `fs_map`, so
+    lighting, terrain shade, fog, look and bloom match baked geometry. Solid
+    props (big scenery, cover) stay baked: their collision is in
+    `collision.bin` and they cast into `shade.rg`. Layout: header `PRP1`,
+    mesh count, instance count, a mesh table (first vertex, vertex count,
+    first instance, instance count), 8-float vertices (local position,
+    normal, material) and 8-float instances (x, y, z, yaw, scale, mesh
+    index), sorted by mesh, so each mesh is one instanced draw.
+    `map_pack::PropSet` validates it at load. The payload is optional (older
+    packs load without it) and is compressed by `crates/core/build.rs` and
+    copied by the bundle scripts. The grass budget counts instance triangles,
+    so it no longer grows the pack: Tower Complex went from 19.1 MB of
+    vertices to 3.7 MB plus 0.4 MB of instances.
   - Nothing is placed near existing collision geometry, terrain holes and
     their neighbour cells, flags, spawns, capture rings, water, or the map
     edge. Density thins away from the flags and points.
@@ -241,7 +259,9 @@ Design checklist (each item has bitten us once):
     checks at least 12 mirrored cover pieces clear of lanes, flags, spawns,
     rings and holes, that each piece stops a shot at crouch height, that
     a player standing a metre out from any face can walk three metres away,
-    and that the ground layer spends its triangle budget.
+    that the ground layer spends its triangle budget, and that `props.bin`
+    matches its manifest hash and summary with instances on the ground and
+    clear of flags and rings (`check_instances`).
 
 ## 4. Look at it before wiring
 

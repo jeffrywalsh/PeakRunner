@@ -18,7 +18,8 @@ Rules (docs/map-pipeline.md):
   is solid and deliberate: mirrored pieces beside the ski lanes and around
   control points that block movement and shots (see `place_cover`).
 * Small props (ferns, heather, scrub, saplings, bones) and the grass layer
-  (`ground_layer`) are render-only.
+  (`ground_layer`) are render-only, and are stored as GPU instances of a few
+  shared shapes per kind (`Instancer`, `props.bin`) rather than baked vertices.
 * Nothing lands in protected space: under or near any existing collision
   geometry (bases, towers, bridges, pads, trees), terrain holes (bunker cuts,
   sewer and cavern mouths, trenches) and their neighbours, around flags, spawn
@@ -31,10 +32,19 @@ terrain shade map (terrain_shade.py) shades them where they stand.
 """
 import math
 import random
+import struct
+import zlib
 
 import numpy as np
 
-SOURCE_VERSION = 5
+SOURCE_VERSION = 6
+# Seeds the scatter. Kept at 5 when instancing arrived so every placement,
+# cover piece and collision triangle stayed exactly where it was.
+PLACEMENT_VERSION = 5
+# Render-only props (small scenery and the grass layer) are not baked into
+# vertices.bin. Each kind gets INSTANCE_VARIANTS shapes built once at size 1;
+# every placement is an instance of one of them (props.bin).
+INSTANCE_VARIANTS = 24
 # Solid triangles all of a map's props (scenery plus cover) may add, outside
 # the per-base budget.
 PROP_COLLISION_TRIS = 4000
@@ -496,6 +506,62 @@ def rock_cluster(mesh, rng, size, height, ground, mats):
     return size*1.7, size*1.1
 
 
+class Instancer:
+    """Render-only props as GPU instances: a few shared local meshes per kind
+    and one small record per placement, written to `props.bin`.
+
+    Layout (little endian), read by crates/core/src/map_pack.rs `PropSet`:
+      header   b'PRP1', u32 mesh count M, u32 instance count N, u32 0
+      M x      u32 first vertex, vertex count, first instance, instance count
+      V x 8 f32  local position, local normal, material layer, 0
+      N x 8 f32  world x, y, z, yaw (radians), uniform scale, mesh index, 0, 0
+    Instances are sorted by mesh so each mesh is one instanced draw. A variant
+    is built at size 1 at the origin; the renderer applies the kit's yaw
+    (Mesh.point) and scale, and recomputes the kit's planar world UVs."""
+    MAGIC = b'PRP1'
+
+    def __init__(self, kit):
+        self.kit = kit; self.keys = {}; self.meshes = []; self.records = []; self.triangles = 0
+
+    def add(self, kind, mats, x, y, z, size, yaw, shape):
+        variant = shape % INSTANCE_VARIANTS
+        key = (kind, mats if isinstance(mats, str) else tuple(mats), variant)
+        index = self.keys.get(key)
+        if index is None:
+            mesh = self.kit.Mesh()
+            BUILDERS[kind](mesh, random.Random(zlib.crc32(repr(key).encode())), 1.0, mats, False)
+            index = self.keys[key] = len(self.meshes); self.meshes.append(mesh)
+        self.records.append((index, x, y, z, yaw, size))
+        tris = len(self.meshes[index].vertices)//36
+        self.triangles += tris
+        return tris
+
+    def to_bytes(self):
+        if not self.records: return b''
+        order = sorted(range(len(self.records)), key=lambda i: self.records[i][0])
+        table, verts, first_vertex = [], [], 0
+        counts = [0]*len(self.meshes)
+        for index, *_ in self.records: counts[index] += 1
+        first_instance = 0
+        for index, mesh in enumerate(self.meshes):
+            v = np.frombuffer(mesh.vertices.tobytes(), '<f4').reshape(-1, 12)
+            out = np.zeros((len(v), 8), '<f4')
+            out[:, 0:6] = v[:, 0:6]; out[:, 6] = v[:, 10]
+            verts.append(out)
+            table.append((first_vertex, len(v), first_instance, counts[index]))
+            first_vertex += len(v); first_instance += counts[index]
+        inst = np.zeros((len(self.records), 8), '<f4')
+        for row, i in enumerate(order):
+            index, x, y, z, yaw, size = self.records[i]
+            inst[row] = (x, y, z, yaw, size, index, 0, 0)
+        head = struct.pack('<4sIII', self.MAGIC, len(self.meshes), len(self.records), 0)
+        head += b''.join(struct.pack('<4I', *t) for t in table)
+        return head+np.concatenate(verts).tobytes()+inst.tobytes()
+
+    def summary(self):
+        return dict(meshes=len(self.meshes), instances=len(self.records), triangles=self.triangles)
+
+
 class _Offset:
     """Mesh proxy that shifts local points by a fixed offset."""
     def __init__(self, mesh, offset): self.mesh, self.o = mesh, offset
@@ -538,15 +604,16 @@ def _terrain_ok(kind, terrain, x, z):
 
 def scatter(kit, theme, seed, terrain, protect):
     """Build the theme's props into a fresh kit Mesh. Returns
-    (render vertex bytes, collision bytes, caster vertex bytes, summary)."""
+    (render vertex bytes, collision bytes, caster vertex bytes, summary,
+    props.bin bytes for the render-only instances)."""
     spec = THEMES[theme]
-    mesh = kit.Mesh(); casters = kit.Mesh()
+    mesh = kit.Mesh(); casters = kit.Mesh(); instancer = Instancer(kit)
     # Big props mirror through the midpoint of the two flags (the first two
     # interest points), which is each map's symmetry centre.
     (ax, az), (bx, bz) = protect.interest[:2]
     cx, cz = (ax+bx)/2, (az+bz)/2
     placed, big = {}, []
-    rng = random.Random(seed*7919+SOURCE_VERSION)
+    rng = random.Random(seed*7919+PLACEMENT_VERSION)
 
     def valid(kind, x, z, size, is_big):
         if not (EDGE <= x <= 2048-EDGE and EDGE <= z <= 2048-EDGE): return None
@@ -564,8 +631,12 @@ def scatter(kit, theme, seed, terrain, protect):
     def build(target, kind, mats, x, y, z, size, yaw, solid, shape):
         # Each prop's shape comes from its own seed, drawn from the scatter's
         # generator, so builds are deterministic and mirrored pairs match.
+        # Render-only props become instances; returns their triangle count.
+        if not solid and target is mesh:
+            return instancer.add(kind, mats, x, y, z, size, yaw, shape)
         target.origin = (x, y, z); target.yaw = yaw
         BUILDERS[kind](target, random.Random(shape), size, mats, solid)
+        return 0
 
     for kind, mats, pairs, (smin, smax) in spec['big']:
         count = 0
@@ -622,17 +693,17 @@ def scatter(kit, theme, seed, terrain, protect):
     ground_tris = 0
     if 'ground' in spec:
         mat, (smin, smax) = spec['ground']
-        before = len(mesh.vertices)
-        clumps, patches = ground_layer(mesh, rng, mat, smin, smax, valid, clear_of_solids, protect, build)
-        ground_tris = (len(mesh.vertices)-before)//36
+        clumps, patches, ground_tris = ground_layer(mesh, rng, mat, smin, smax, valid, clear_of_solids, protect, build)
         placed['clump'] = clumps; placed['meadow_patch'] = patches
     summary = dict(theme=theme, version=SOURCE_VERSION, counts=placed,
-                   render_triangles=len(mesh.vertices)//36, solid_triangles=len(mesh.collision)//9,
+                   render_triangles=len(mesh.vertices)//36+instancer.triangles,
+                   baked_triangles=len(mesh.vertices)//36, instanced=instancer.summary(),
+                   solid_triangles=len(mesh.collision)//9,
                    ground_triangles=ground_tris,
                    big=[[round(x, 2), math.floor(y*100)/100, round(z, 2), kind, round(size, 2)] for x, z, kind, size, y in big],
                    cover=[[round(c['x'], 2), round(c['y'], 2), round(c['z'], 2), c['kind'], round(c['length'], 2),
                            round(c['height'], 2), round(c['yaw'], 4), round(c['hx'], 2), round(c['hz'], 2)] for c in cover])
-    return mesh.vertices.tobytes(), mesh.collision.tobytes(), casters.vertices.tobytes(), summary
+    return mesh.vertices.tobytes(), mesh.collision.tobytes(), casters.vertices.tobytes(), summary, instancer.to_bytes()
 
 
 def _cover_candidates(protect, rng):
@@ -726,26 +797,25 @@ def place_cover(kit, entries, rng, terrain, protect, centre, big, mesh, casters,
 def ground_layer(mesh, rng, mat, smin, smax, valid, clear_of_solids, protect, build):
     """Grass where players fight: dense meadow patches along the ski lanes and
     around flags and control points, and lighter clumps everywhere else, up
-    to GROUND_TRIS triangles. Returns (clumps, patches)."""
-    start = len(mesh.vertices)
-    budget = GROUND_TRIS*36
-    clumps = patches = 0
+    to GROUND_TRIS triangles. Returns (clumps, patches, triangles)."""
+    budget = GROUND_TRIS
+    clumps = patches = tris = 0
 
     def weight(x, z):
         near = max(math.exp(-protect.lane_distance(x, z)/80), math.exp(-protect.interest_distance(x, z)/300))
         return .12+.88*near
 
     def plant(x, z):
-        nonlocal clumps
+        nonlocal clumps, tris
         size = rng.uniform(smin, smax); yaw = rng.uniform(0, math.tau); shape = rng.getrandbits(32)
         y = valid('tuft', x, z, size, False)
         if y is None or not clear_of_solids(x, z): return
-        build(mesh, 'clump', mat, x, y, z, size, yaw, False, shape)
+        tris += build(mesh, 'clump', mat, x, y, z, size, yaw, False, shape)
         clumps += 1
 
     # Meadow patches take roughly two thirds of the budget.
     for _ in range(40000):
-        if len(mesh.vertices)-start >= budget*.66: break
+        if tris >= budget*.66: break
         x, z = rng.uniform(EDGE, 2048-EDGE), rng.uniform(EDGE, 2048-EDGE)
         if rng.random() > weight(x, z)**1.5: continue
         if valid('tuft', x, z, smax, False) is None: continue
@@ -755,8 +825,9 @@ def ground_layer(mesh, rng, mat, smin, smax, valid, clear_of_solids, protect, bu
             a = rng.uniform(0, math.tau); r = radius*math.sqrt(rng.random())
             plant(x+r*math.cos(a), z+r*math.sin(a))
     for _ in range(200000):
-        if len(mesh.vertices)-start >= budget: break
+        if tris >= budget: break
         x, z = rng.uniform(EDGE, 2048-EDGE), rng.uniform(EDGE, 2048-EDGE)
         if rng.random() > weight(x, z): continue
         plant(x, z)
+    return clumps, patches, tris
     return clumps, patches

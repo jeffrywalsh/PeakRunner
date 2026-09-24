@@ -11,7 +11,9 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/map"
 cp target/release/peakrunner "$APP/Contents/MacOS/peakrunner"
 cp assets/Info.plist "$APP/Contents/Info.plist"
 chmod +x "$APP/Contents/MacOS/peakrunner"
-for file in map.json vertices.bin collision.bin height.bin weights.rgba textures.rgba ambient.f32 shade.rg; do
+for file in map.json vertices.bin collision.bin height.bin weights.rgba textures.rgba ambient.f32 shade.rg props.bin; do
+  # props.bin (instanced scenery) is optional; the manifest says whether it is needed.
+  [ "$file" = props.bin ] && [ ! -f "assets/maps/raindance/$file" ] && continue
   cp "assets/maps/raindance/$file" "$APP/Contents/Resources/map/$file"
 done
 

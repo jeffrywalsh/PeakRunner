@@ -1425,19 +1425,25 @@
   "definition_sha256": "7efd906cc478e792b500fdaf1c1574b2891dfefcc3404cf6afac0e83b63e5242",
   "props": {
     "theme": "cairnhold",
-    "version": 5,
+    "version": 6,
     "counts": {
       "standing_stone": 24,
       "boulder": 40,
       "cover_rock_cluster": 12,
       "cover_stone_wall": 8,
       "heather": 1900,
-      "clump": 8023,
+      "clump": 8052,
       "meadow_patch": 107
     },
-    "render_triangles": 129800,
+    "render_triangles": 129804,
+    "baked_triangles": 4200,
+    "instanced": {
+      "meshes": 48,
+      "instances": 9952,
+      "triangles": 125604
+    },
     "solid_triangles": 3384,
-    "ground_triangles": 80000,
+    "ground_triangles": 80004,
     "big": [
       [
         1539.25,
@@ -2110,7 +2116,7 @@
         2.36
       ]
     ],
-    "source_sha256": "f2615a5af34d64512f5fa2903a1876d10080abe15cfa74615b69f9678c27aaa5"
+    "source_sha256": "362873f0ccfeb3173d606d8a2a225db67e9199acb7d008caa7f54aa85e676ffa"
   },
   "terrain_shade": {
     "size": 1024,
@@ -2125,11 +2131,12 @@
   },
   "files": {
     "height.bin": "2f5e02ce3a36552805b87445a3ac4347873c61b387434ab2db228d3bba650401",
-    "vertices.bin": "07dd6608ad18d9e828c000fc49f5ed595916f0996da9d72a377d90e826588602",
+    "vertices.bin": "d0e8ad5521138bd8e26460ab53a266b00f9ba72a32444d7345be530b2fa5a53c",
     "collision.bin": "414adaebef67789abbae82b8bde6e58e73a33db60ab005355c4f63354afc9af1",
     "weights.rgba": "6596c50e800ddf331697fde00e16ca72cbc1e29fd756981baefc64854fe541b6",
     "textures.rgba": "6fe06ac1e23c4c5cfa5b9c9efac398762787193508c4a422a8bc1acfd11d94c9",
     "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e",
+    "props.bin": "60f42b585b21693142b1cd052e40dd2606e21c6536418c47013a59bebb69b3ed",
     "shade.rg": "c86fb2e7bb6e151cd141842a6c5f4cfc01f2aec6800cb20b897f69bfb50dba88"
   }
 }

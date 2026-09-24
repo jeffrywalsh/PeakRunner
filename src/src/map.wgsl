@@ -57,6 +57,26 @@ fn layer_mix(uv:vec2<f32>,w:vec4<f32>,l:vec4<i32>)->vec4<f32> {
     var o: Out; o.pos=u.vp*vec4<f32>(v.pos,1.0); o.world=v.pos;
     o.normal=v.normal; o.uv=v.uv; o.lmuv=v.lmuv; o.layer=v.layer; return o;
 }
+// Render-only prop instances (props.bin): a shared local mesh per shape plus
+// per-instance world position, yaw and uniform scale.
+struct PropIn {
+    @location(0) pos: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) material: f32,
+    @location(5) at: vec3<f32>, @location(6) yaw_scale: vec2<f32>,
+}
+// The build kit's Mesh.point rotation: x' = x c + z s, z' = -x s + z c.
+fn kit_yaw(p:vec3<f32>,c:f32,s:f32)->vec3<f32> {return vec3<f32>(p.x*c+p.z*s,p.y,-p.x*s+p.z*c);}
+@vertex fn vs_prop(v: PropIn) -> Out {
+    let c=cos(v.yaw_scale.x);let s=sin(v.yaw_scale.x);
+    let world=v.at+kit_yaw(v.pos*v.yaw_scale.y,c,s);
+    let n=kit_yaw(v.normal,c,s);
+    // The kit's planar texture coordinates: world metres / 4 on the two axes
+    // other than the face normal's dominant one (first axis wins ties).
+    let a=abs(n);
+    var uv=world.xy;
+    if (a.x>=a.y && a.x>=a.z) {uv=world.zy;} else if (a.y>=a.z) {uv=world.xz;}
+    var o: Out; o.pos=u.vp*vec4<f32>(world,1.0); o.world=world; o.normal=n;
+    o.uv=uv/4.0; o.lmuv=vec2<f32>(0.0); o.layer=vec2<f32>(v.material,-1.0); return o;
+}
 @fragment fn fs_map(v: Out) -> @location(0) vec4<f32> {
     var color=textureSample(images,samp,v.uv,i32(v.layer.x));
     // Water volumes with a colour carry it packed in the otherwise unused

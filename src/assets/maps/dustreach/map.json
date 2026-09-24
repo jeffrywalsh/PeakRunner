@@ -1709,7 +1709,7 @@
   "definition_sha256": "9bedb94934dedcd8d1c886c3a16b0f291fc08c8fef2bab6e96a05965ccbc9199",
   "props": {
     "theme": "dustreach",
-    "version": 5,
+    "version": 6,
     "counts": {
       "boulder": 48,
       "cover_ruin_wall": 10,
@@ -1717,10 +1717,16 @@
       "cover_crates": 8,
       "scrub": 1000,
       "bones": 40,
-      "clump": 7996,
-      "meadow_patch": 99
+      "clump": 8104,
+      "meadow_patch": 100
     },
     "render_triangles": 111948,
+    "baked_triangles": 3264,
+    "instanced": {
+      "meshes": 68,
+      "instances": 9144,
+      "triangles": 108684
+    },
     "solid_triangles": 2784,
     "ground_triangles": 80004,
     "big": [
@@ -2305,7 +2311,7 @@
         0.78
       ]
     ],
-    "source_sha256": "f2615a5af34d64512f5fa2903a1876d10080abe15cfa74615b69f9678c27aaa5"
+    "source_sha256": "362873f0ccfeb3173d606d8a2a225db67e9199acb7d008caa7f54aa85e676ffa"
   },
   "terrain_shade": {
     "size": 1024,
@@ -2320,11 +2326,12 @@
   },
   "files": {
     "height.bin": "b51809e63702b0c2b9024c8e9edfa70ecd8963b37b75a7c846d34558eebe10cb",
-    "vertices.bin": "94dc2e0ab3dd219fee87c35838c4ded3f972127ee96dec083502fda164c5aff7",
+    "vertices.bin": "a488786a246cd570e870991ecd33c13fe1ab5bdb1b73134438a776a30069d16d",
     "collision.bin": "feb869370fe97bbb8fe2502298af077dd1ad4e5a74d036d754ad31849e12ae48",
     "weights.rgba": "f81b829658da739e50807530bed69ec3a97a882aeb719193f6e59d152dec2cf9",
     "textures.rgba": "d00a9963a9e7c12b60ecc2a41c3ab016dc040c5604e4c5e123787c965b71f6d5",
     "ambient.f32": "a3938b139d99dbdde7156268f817497624177809ab733a0f0ccc8ccce3782462",
+    "props.bin": "2dfa3096a1c00cb31a73f73204f57d8d3a3bfb2068bff9314c7be793338241d5",
     "shade.rg": "f6d5e6bd2cff1a32df439032a996422ee2b27bc85fcf4a000d6478191d316921"
   }
 }

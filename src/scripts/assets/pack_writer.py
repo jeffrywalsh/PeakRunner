@@ -77,10 +77,12 @@ def add_props_and_shade(kit, files, manifest, theme, seed, holes, flags, spawn_p
     from assets import props, terrain_shade
     terrain = props.Terrain(files['height.bin'], files['weights.rgba'], holes, water=water)
     protect = props.Protection(files['collision.bin'], flags, spawn_points, control_points, extra_clear)
-    verts, solid, casters, summary = props.scatter(kit, theme, seed, terrain, protect)
+    verts, solid, casters, summary, instances = props.scatter(kit, theme, seed, terrain, protect)
     structures = files['vertices.bin']
     files['vertices.bin'] = structures+verts
     files['collision.bin'] = files['collision.bin']+solid
+    # Render-only props travel as GPU instances (props.Instancer, props.bin).
+    if instances: files['props.bin'] = instances
     sun = sun or (manifest.get('look') or {}).get('sun_direction') or MAP_SUN
     files['shade.rg'], shade = terrain_shade.bake(files['height.bin'], structures+casters, sun,
                                                   kit.MATERIALS.index('light'))

@@ -4,7 +4,9 @@
 use std::path::Path;
 
 const MAPS: [&str; 5] = ["raindance", "tower-complex", "cairnhold", "frostline", "dustreach"];
-const PAYLOADS: [&str; 7] = ["vertices.bin", "collision.bin", "height.bin", "weights.rgba", "textures.rgba", "ambient.f32", "shade.rg"];
+const PAYLOADS: [&str; 8] = ["vertices.bin", "collision.bin", "height.bin", "weights.rgba", "textures.rgba", "ambient.f32", "shade.rg", "props.bin"];
+/// Payloads a pack may omit; the manifest decides whether they are read.
+const OPTIONAL: [&str; 1] = ["props.bin"];
 
 fn main() {
     let out = std::env::var("OUT_DIR").unwrap();
@@ -18,7 +20,11 @@ fn main() {
         for name in PAYLOADS {
             let source = format!("../../assets/maps/{map}/{name}");
             println!("cargo:rerun-if-changed={source}");
-            let raw = std::fs::read(&source).unwrap_or_else(|e| panic!("{source}: {e}"));
+            let raw = match std::fs::read(&source) {
+                Ok(raw) => raw,
+                Err(e) if OPTIONAL.contains(&name) && e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+                Err(e) => panic!("{source}: {e}"),
+            };
             let packed = miniz_oxide::deflate::compress_to_vec_zlib(&raw, 9);
             std::fs::write(dir.join(format!("{name}.zlib")), packed).unwrap();
         }

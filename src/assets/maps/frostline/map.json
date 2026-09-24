@@ -1391,19 +1391,25 @@
   "definition_sha256": "d28a61af06607a224f64240ac3c4362dac1fc766e490a1612f1f9cd32b2668a0",
   "props": {
     "theme": "frostline",
-    "version": 5,
+    "version": 6,
     "counts": {
       "snow_rock": 44,
       "ice_shard": 344,
       "cover_ice_ridge": 8,
       "cover_rock_cluster": 8,
       "sapling": 260,
-      "clump": 7984,
-      "meadow_patch": 140
+      "clump": 7746,
+      "meadow_patch": 137
     },
-    "render_triangles": 99368,
+    "render_triangles": 99373,
+    "baked_triangles": 5608,
+    "instanced": {
+      "meshes": 72,
+      "instances": 8326,
+      "triangles": 93765
+    },
     "solid_triangles": 2808,
-    "ground_triangles": 80000,
+    "ground_triangles": 80005,
     "big": [
       [
         620.43,
@@ -2060,7 +2066,7 @@
         0.7
       ]
     ],
-    "source_sha256": "f2615a5af34d64512f5fa2903a1876d10080abe15cfa74615b69f9678c27aaa5"
+    "source_sha256": "362873f0ccfeb3173d606d8a2a225db67e9199acb7d008caa7f54aa85e676ffa"
   },
   "terrain_shade": {
     "size": 1024,
@@ -2075,11 +2081,12 @@
   },
   "files": {
     "height.bin": "66d3eaace55eedcc6c0c0cfde9d2ee7ec08e98cb8207a864c592fe45bbb0d5df",
-    "vertices.bin": "cd165402419c189fc95501d5298e1cd4d28c5dab572f98c9da0ec66edc309650",
+    "vertices.bin": "1ad26f1abbe781c2f241ff54ba63545e8fec86bfc0b61b5b5bdeed2db466bafb",
     "collision.bin": "d6e5ab28292ae5c2b01062c7fc363d60d306059f723dea710513b0eb4b140569",
     "weights.rgba": "96ffbbb265f527be00ef6dad0fe95ba029d6fb2ea4ef3069eac840d75fbfae5c",
     "textures.rgba": "81836b8b7c9d46df73072264f7aaeacec478943a87d7df63d5aa524ea8216ab9",
     "ambient.f32": "249173b29122b2fdc3b5605dd94bc708a7c210eec2c6a0e4895e5a8f55630cd8",
+    "props.bin": "8fa63eff7eb1f0da95cebcb559fc621343ca0d2f6af7dd87b7a3f540b3cdb3d3",
     "shade.rg": "ee1dfb4d654ef9725e8c4c4ed2e037c5dfa2ac9fa26d40e988e8b7b6954f36ca"
   }
 }

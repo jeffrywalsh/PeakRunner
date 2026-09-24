@@ -10,7 +10,14 @@ pub struct MapGpu {
     group:wgpu::BindGroup, uniform:wgpu::Buffer, vertices:wgpu::Buffer,
     count:u32, water_start:u32, images:wgpu::Texture, weights:wgpu::Texture,
     shade:wgpu::Texture, shade_size:u32,
+    props:Option<PropsGpu>,
     uploaded:bool,
+}
+
+/// Render-only prop instances (`props.bin`): one instanced draw per shared mesh.
+struct PropsGpu {
+    pipeline:wgpu::RenderPipeline, vertices:wgpu::Buffer, instances:wgpu::Buffer,
+    meshes:Vec<map_pack::PropMesh>,
 }
 
 impl MapGpu {
@@ -32,10 +39,16 @@ impl MapGpu {
         let attrs=wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Float32x2,3=>Float32x2,4=>Float32x2];
         let vb=wgpu::VertexBufferLayout {array_stride:48,step_mode:wgpu::VertexStepMode::Vertex,attributes:&attrs};
         let buffers=[Some(vb)];
-        let make=|sky:bool,water:bool|device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        // Props: per-vertex local shape, per-instance placement (see map.wgsl vs_prop).
+        let prop_attrs=wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Float32];
+        let inst_attrs=wgpu::vertex_attr_array![5=>Float32x3,6=>Float32x2];
+        let stride=(map_pack::PROP_FLOATS*4) as u64;
+        let prop_buffers=[Some(wgpu::VertexBufferLayout {array_stride:stride,step_mode:wgpu::VertexStepMode::Vertex,attributes:&prop_attrs}),
+            Some(wgpu::VertexBufferLayout {array_stride:stride,step_mode:wgpu::VertexStepMode::Instance,attributes:&inst_attrs})];
+        let make_with=|entry:&str,sky:bool,water:bool,buffers:&[Option<wgpu::VertexBufferLayout>]|device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label:Some("map pass"),layout:Some(&pl),
-            vertex:wgpu::VertexState {module:&shader,entry_point:Some(if sky {"vs_map_sky"} else {"vs_map"}),
-                compilation_options:Default::default(),buffers:if sky {&[]} else {&buffers}},
+            vertex:wgpu::VertexState {module:&shader,entry_point:Some(entry),
+                compilation_options:Default::default(),buffers},
             primitive:wgpu::PrimitiveState {cull_mode:None,..Default::default()},
             depth_stencil:Some(wgpu::DepthStencilState {format:wgpu::TextureFormat::Depth24Plus,
                 depth_write_enabled:Some(!sky&&!water),depth_compare:Some(wgpu::CompareFunction::LessEqual),stencil:Default::default(),bias:Default::default()}),
@@ -44,7 +57,18 @@ impl MapGpu {
                 targets:&[Some(wgpu::ColorTargetState {format:wgpu::TextureFormat::Rgba8Unorm,
                     blend:water.then_some(wgpu::BlendState::ALPHA_BLENDING),write_mask:wgpu::ColorWrites::ALL})]}),multiview_mask:None,cache:None,
         });
+        let make=|sky:bool,water:bool|make_with(if sky {"vs_map_sky"} else {"vs_map"},sky,water,if sky {&[][..]} else {&buffers[..]});
         let pipeline=make(false,false);let sky=make(true,false);let water=make(false,true);
+        let props=pack.manifest.files.contains_key("props.bin").then(|| {
+            let set=map_pack::PropSet::parse(&pack.asset("props.bin").expect("validated props"),pack.manifest.texture_count)
+                .expect("validated props");
+            PropsGpu {pipeline:make_with("vs_prop",false,false,&prop_buffers),
+                vertices:device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("prop meshes"),
+                    contents:bytemuck::cast_slice(&set.vertices),usage:wgpu::BufferUsages::VERTEX}),
+                instances:device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("prop instances"),
+                    contents:bytemuck::cast_slice(&set.instances),usage:wgpu::BufferUsages::VERTEX}),
+                meshes:set.meshes}
+        });
         let images=texture(device,pack.manifest.texture_count,9);
         let weights=texture(device,1,1);
         // Baked terrain shade (sun visibility, ambient occlusion); packs without
@@ -105,7 +129,7 @@ impl MapGpu {
         }
         let count=(bytes.len()/48) as u32;
         let vertices=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("source map triangles"),contents:&bytes,usage:wgpu::BufferUsages::VERTEX});
-        Some(Self {map,pipeline,sky,water,group,uniform,vertices,count,water_start,images,weights,shade,shade_size,uploaded:false})
+        Some(Self {map,pipeline,sky,water,group,uniform,vertices,count,water_start,images,weights,shade,shade_size,props,uploaded:false})
     }
 
     pub fn update(&mut self,queue:&wgpu::Queue,frame:&DrawFrame) {
@@ -137,6 +161,15 @@ impl MapGpu {
         pass.set_bind_group(0,&self.group,&[]);
         pass.set_pipeline(&self.sky);pass.draw(0..3,0..1);
         pass.set_pipeline(&self.pipeline);pass.set_vertex_buffer(0,self.vertices.slice(..));pass.draw(0..self.water_start,0..1);
+        if let Some(props)=&self.props {
+            pass.set_pipeline(&props.pipeline);
+            pass.set_vertex_buffer(0,props.vertices.slice(..));pass.set_vertex_buffer(1,props.instances.slice(..));
+            for m in &props.meshes {
+                if m.instance_count==0 {continue;}
+                pass.draw(m.first_vertex..m.first_vertex+m.vertex_count,m.first_instance..m.first_instance+m.instance_count);
+            }
+            pass.set_vertex_buffer(0,self.vertices.slice(..));
+        }
         pass.set_pipeline(&self.water);pass.draw(self.water_start..self.count,0..1);
     }
 }

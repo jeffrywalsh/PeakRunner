@@ -50,6 +50,39 @@ def check_pack(test, pack_dir):
     # Ground layer: the grass budget is spent, and never exceeded.
     test.assertGreaterEqual(p['ground_triangles'], props.GROUND_TRIS*.9)
     test.assertLessEqual(p['ground_triangles'], props.GROUND_TRIS+64)
+    check_instances(test, pack, m, protect, terrain)
+
+
+def check_instances(test, pack, m, protect, terrain):
+    """Render-only props travel as instances (props.Instancer, props.bin):
+    hashed, consistent with the manifest summary, on the ground, and nowhere a
+    protected zone or water forbids them."""
+    raw = (pack/'props.bin').read_bytes()
+    test.assertEqual(m['files']['props.bin'], hashlib.sha256(raw).hexdigest())
+    test.assertEqual(raw[:4], props.Instancer.MAGIC)
+    meshes, count, _ = (int(v) for v in np.frombuffer(raw[4:16], '<u4'))
+    table = np.frombuffer(raw[16:16+meshes*16], '<u4').reshape(-1, 4)
+    verts = int(table[:, 1].sum())
+    body = np.frombuffer(raw[16+meshes*16:], '<f4').reshape(-1, 8)
+    test.assertEqual(len(body), verts+count)
+    inst = body[verts:]
+    summary = m['props']['instanced']
+    test.assertEqual((int(meshes), int(count)), (summary['meshes'], summary['instances']))
+    tris = sum(int(t[1])//3*int(t[3]) for t in table)
+    test.assertEqual(tris, summary['triangles'])
+    # Nothing render-only is left baked into vertices.bin: baked props are solid.
+    test.assertEqual(m['props']['render_triangles'], m['props']['baked_triangles']+tris)
+    # Instances sit on the ground (sunk no deeper than their footprint allows),
+    # outside flags' and rings' protected space and off the map edge.
+    flags = m['flags']; cps = m.get('control_points', [])
+    for x, y, z, yaw, size, mesh, *_ in inst[::7]:
+        x, y, z = float(x), float(y), float(z)
+        test.assertTrue(props.EDGE-1 <= x <= 2048-props.EDGE+1 and props.EDGE-1 <= z <= 2048-props.EDGE+1, (x, z))
+        test.assertLessEqual(y, terrain.height(x, z)+1e-3, f'instance at {x},{z} would hover')
+        test.assertGreater(y, terrain.height(x, z)-6, f'instance at {x},{z} buried')
+        for f in flags: test.assertGreaterEqual(math.hypot(x-f[0], z-f[2]), props.FLAG_CLEAR-1, (x, z))
+        for c in cps: test.assertFalse(math.hypot(x-c['pos'][0], z-c['pos'][2]) < c.get('radius', 12)-1, (x, z))
+        test.assertTrue(0 < size <= 8 and 0 <= mesh < meshes, (size, mesh))
 
     # Shade map: present, hashed, right size, with real shadow and occlusion.
     shade = (pack/'shade.rg').read_bytes()

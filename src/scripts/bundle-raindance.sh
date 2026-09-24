@@ -18,7 +18,9 @@ cp assets/Info.plist "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleName PeakRunner Original' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName PeakRunner Original' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier dev.peakrunner.original-playtest' "$app/Contents/Info.plist"
-for file in map.json vertices.bin collision.bin height.bin weights.rgba textures.rgba ambient.f32 shade.rg; do
+for file in map.json vertices.bin collision.bin height.bin weights.rgba textures.rgba ambient.f32 shade.rg props.bin; do
+    # props.bin (instanced scenery) is optional; the manifest says whether it is needed.
+    [ "$file" = props.bin ] && [ ! -f "$pack/$file" ] && continue
     cp "$pack/$file" "$app/Contents/Resources/map/$file"
 done
 codesign --force --sign - --timestamp=none "$app/Contents/MacOS/peakrunner-bin"
