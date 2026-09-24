@@ -1,4 +1,4 @@
-# Original Raindance-inspired map and creator kit
+# Old Holler (formerly Raindance) and the original map kit
 
 This version uses **PeakRunner-authored procedural assets**, including the
 heightfield. It does not load, sample, trace, or convert Tribes installation
@@ -14,7 +14,7 @@ On macOS, the separate bundle is `PeakRunner-Original.app`:
 open PeakRunner-Original.app
 ```
 
-Choose **Raindance** and local play. The ordinary development client and match
+Choose **Old Holler** and local play. Its internal key stays `raindance`. The ordinary development client and match
 server also embed this original pack. The previously built regular app and the
 public server are not updated by editing this repository.
 
@@ -61,8 +61,11 @@ visual offsets cannot expose the other side of a ceiling or wall.
 Inventory currently services PeakRunner's existing three-weapon kit. It is not
 the Tribes armor/loadout purchase interface. Stations and defensive equipment
 can take enemy damage. Hold E near damaged friendly equipment to spend energy
-repairing it; restoring a generator restores its circuit. Destroyed equipment
-remains as a solid disabled chassis. State indicators show online/offline/ruined
+repairing it; a destroyed object comes back online only past half its hull,
+so a generator restores its circuit at 50%. Destroyed equipment remains as a
+solid disabled chassis; a wrecked generator smokes and sparks. Press Q to use
+your repair kit (one per life, refilled at inventory stations; see
+`docs/weapon-damage.md`). State indicators show online/offline/ruined
 status. Server snapshots replicate health, power and turret aim. Empty servers
 and round restarts restore equipment.
 
@@ -100,10 +103,10 @@ Authoring rules for this first format:
   deterministic variation, foliage budgets, visibility and water height.
 - Mesh recipes and material functions are ordinary Python functions; behaviors
   are Rust code in `crates/core/src/equipment.rs` and the authoritative simulation.
-- Custom packs currently occupy the Raindance map slot. Arbitrary map dimensions,
+- Custom packs currently occupy the `raindance` (Old Holler) map slot. Arbitrary map dimensions,
   an in-game editor, multiple custom-map slots and glTF importing are not present.
 
-The shipped Raindance pack is no longer the kit's own output: it is built by
+The shipped Old Holler pack is no longer the kit's own output: it is built by
 `scripts/build-raindance.py` (below), which uses this kit's terrain, scenery
 placement and field assets but the cleaned base. The kit build is kept as the
 reference for custom definitions and for `test-original-map.py`. Never mix files
@@ -148,6 +151,41 @@ Raindance cannot change another map. All four other packs rebuilt byte-identical
 ../research/local-assets/tools/venv/bin/python scripts/build-raindance.py [OUTPUT] [--no-bake]
 ../research/local-assets/tools/venv/bin/python scripts/test-raindance.py
 ```
+
+## Old Holler: rename and generator basements (September 23, 2026)
+
+Raindance is a Tribes map name, so the map is now shown as **Old Holler**. Only
+player-facing text changed: the `MapInfo` name, the manifest `name` and the docs.
+The key `raindance`, `MapId::Raindance`, the `build-raindance.py` and
+`raindance_*.py` files, rotation configs and the default/reset map all stay.
+Records of the published `.20260921.1` release still say Raindance, because
+that is what shipped.
+
+Each base (asset `raindance-base-v3`) moves its generator from the hall floor
+to a basement under it. Everything underground sits inside the hall's existing
+terrain cut, so the holes, heightfield, weights and scenery are still
+byte-identical to the kit build.
+
+- **Basement:** 22 × 30 m, floor 8 m below the hall floor, 6.8 m of headroom
+  over the 5.8 m generator, concrete liners and lit ceiling strips.
+- **Two ways in, exactly:**
+  - a 4 m stair (29°) down from the open atrium floor, railed at the top and
+    sealed underneath;
+  - a door in the basement's back wall, a short passage and landing, then a
+    3.6 m service stair (30°) that climbs 18 m along the rear strip under a
+    sloped, lit ceiling to a shed against the hall's back wall. The shed door
+    faces away from the hall, so no turret can see down it.
+- **Anti-turtling:** no spawns in the basement or the passage. The nearest hall
+  spawns are 15.6 m (straight line) from the atrium stair head.
+- **Routes** (`route_checks.py`, walking): hall 3 → 4 (the basement stair is a
+  new way up), flag roof 2, generator 1 → 2.
+
+Tests: `test-raindance.py` checks the basement floor, both stairs, the sealed
+stair underside, that nothing underground opens onto the empty cut, that the
+generators sit in cut cells, that no turret can see the basement, passage or
+service stair, and the route counts. The Rust tests
+`raindance_generators_are_in_basements_in_cut_cells` and the extended
+`raindance_turrets_cannot_see_into_the_halls` cover the same on the embedded pack.
 
 Human traversal and balance of the new ramp exits are not playtested.
 

@@ -1,6 +1,9 @@
-//! World-anchored HUD: hit bars over destructible equipment and name tags
-//! over players. Line-of-sight checks here are cosmetic: every position shown
-//! already arrives in snapshots, so hiding a tag behind a wall reveals nothing.
+//! World-anchored HUD: hit bars over destructible equipment, name tags and red
+//! arrows over players, and a long-range marker over each flag carrier.
+//! Line-of-sight checks here are cosmetic: every position shown already arrives
+//! in snapshots, so hiding a tag behind a wall reveals nothing. The carrier
+//! marker ignores terrain on purpose: the edge-of-screen flag bearing already
+//! gives every flag's position through walls.
 use egui::{Align2, Color32, FontId, Pos2, Rect, Stroke, Vec2};
 use glam::{Mat4, Vec3, Vec4};
 use peakrunner_core::equipment::{Kind, State};
@@ -9,6 +12,12 @@ use peakrunner_core::sim::{Player, World};
 pub const HIT_BAR_RANGE: f32 = 120.0;
 pub const TEAMMATE_TAG_RANGE: f32 = 150.0;
 pub const ENEMY_TAG_RANGE: f32 = 80.0;
+/// Red arrows over enemies reach further than their names, but still need a
+/// clear line of sight.
+pub const ENEMY_ARROW_RANGE: f32 = 250.0;
+/// Flag carriers are marked across any current map (the longest flag-to-flag
+/// distance is 816 m), through terrain.
+pub const CARRIER_MARKER_RANGE: f32 = 1500.0;
 /// Fraction of a range over which an overlay fades out.
 const FADE_BAND: f32 = 0.2;
 
@@ -48,6 +57,91 @@ pub fn name_tag(viewer: &Player, viewer_idx: usize, target: &Player, target_idx:
 }
 
 fn head(p: &Player) -> Vec3 { p.pos + Vec3::Y * 2.35 }
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Marker {
+    /// Carrying a flag: `flag` is that flag's team; `ally` is relative to the viewer.
+    Carrier { flag: peakrunner_core::sim::Team, ally: bool, alpha: f32 },
+    /// An enemy in range and in sight; `tag` is the name tag opacity (0 = no name).
+    Enemy { alpha: f32, tag: f32 },
+    Teammate { tag: f32 },
+}
+
+/// What to draw over player `i` and where, as seen from `eye`. Enemies need to
+/// be within ENEMY_ARROW_RANGE, on screen and in line of sight; a flag carrier
+/// only needs to be on screen and within CARRIER_MARKER_RANGE, and its marker
+/// replaces the arrow and name tag.
+pub fn visible_marker(world: &World, eye: Vec3, dir: Vec3, fov: f32, rect: Rect, i: usize) -> Option<(Marker, Pos2)> {
+    let viewer = world.players.get(world.player_id)?;
+    let p = world.players.get(i)?;
+    if i == world.player_id || !p.alive { return None; }
+    let top = head(p);
+    let distance = eye.distance(top);
+    if let Some(flag) = world.flags.iter().find(|f| f.carrier == Some(i)) {
+        let alpha = fade(distance, CARRIER_MARKER_RANGE);
+        if alpha <= 0.0 { return None; }
+        let at = project(eye, dir, fov, rect, top)?;
+        return Some((Marker::Carrier { flag: flag.team, ally: p.team == viewer.team, alpha }, at));
+    }
+    let tag = name_tag(viewer, world.player_id, p, i, eye).map_or(0.0, |t| t.1);
+    let marker = if p.team == viewer.team {
+        if tag <= 0.0 { return None; }
+        Marker::Teammate { tag }
+    } else {
+        let alpha = fade(distance, ENEMY_ARROW_RANGE);
+        if alpha <= 0.0 { return None; }
+        Marker::Enemy { alpha, tag }
+    };
+    let at = project(eye, dir, fov, rect, top)?;
+    if !world.sight_clear(eye, top) { return None; }
+    Some((marker, at))
+}
+
+fn team_color(team: peakrunner_core::sim::Team) -> Color32 {
+    if team == peakrunner_core::sim::Team::Ember { Color32::from_rgb(237, 91, 57) } else { Color32::from_rgb(54, 206, 226) }
+}
+
+/// A downward chevron whose tip sits at `tip`.
+fn chevron(painter: &egui::Painter, tip: Pos2, half: f32, fill: Color32, alpha: f32) {
+    let h = half * 1.25;
+    let pts = vec![tip, Pos2::new(tip.x + half, tip.y - h), Pos2::new(tip.x, tip.y - h * 0.55), Pos2::new(tip.x - half, tip.y - h)];
+    painter.add(egui::Shape::convex_polygon(vec![pts[0], pts[1], pts[2]], with_alpha(fill, alpha), Stroke::NONE));
+    painter.add(egui::Shape::convex_polygon(vec![pts[0], pts[2], pts[3]], with_alpha(fill, alpha), Stroke::NONE));
+    painter.add(egui::Shape::closed_line(pts, Stroke::new(1.2, with_alpha(Color32::BLACK, alpha * 0.85))));
+}
+
+fn outlined(painter: &egui::Painter, at: Pos2, text: &str, size: f32, color: Color32, alpha: f32) {
+    let font = FontId::proportional(size);
+    painter.text(at + Vec2::new(1.0, 1.0), Align2::CENTER_BOTTOM, text, font.clone(), with_alpha(Color32::BLACK, alpha * 0.85));
+    painter.text(at, Align2::CENTER_BOTTOM, text, font, with_alpha(color, alpha));
+}
+
+fn draw_player(painter: &egui::Painter, p: &Player, marker: Marker, at: Pos2, distance: f32) {
+    match marker {
+        Marker::Teammate { tag } => outlined(painter, at, &p.name, 14.0, TEAMMATE_NAME, tag),
+        Marker::Enemy { alpha, tag } => {
+            let half = (9.0 - distance * 0.014).clamp(5.5, 9.0);
+            let tip = at + Vec2::new(0.0, -2.0);
+            chevron(painter, tip, half, ENEMY_NAME, alpha);
+            if tag > 0.0 { outlined(painter, tip - Vec2::new(0.0, half * 1.25 + 3.0), &p.name, 14.0, ENEMY_NAME, tag.min(alpha)); }
+        }
+        Marker::Carrier { flag, ally, alpha } => {
+            let tip = at + Vec2::new(0.0, -2.0);
+            chevron(painter, tip, 14.0, team_color(flag), alpha);
+            // Pennant above the chevron, in the carried flag's colour.
+            let base = tip - Vec2::new(0.0, 22.0);
+            painter.line_segment([base, base - Vec2::new(0.0, 18.0)], Stroke::new(2.0, with_alpha(Color32::from_gray(230), alpha)));
+            painter.add(egui::Shape::convex_polygon(vec![base - Vec2::new(0.0, 18.0), base - Vec2::new(-13.0, 13.0), base - Vec2::new(0.0, 8.0)],
+                with_alpha(team_color(flag), alpha), Stroke::new(1.0, with_alpha(Color32::BLACK, alpha))));
+            let name_color = if ally { TEAMMATE_NAME } else { ENEMY_NAME };
+            let caption = if ally { "FLAG CARRIER" } else { "HAS YOUR FLAG" };
+            let label = base - Vec2::new(0.0, 21.0);
+            let detail = if distance > 60.0 { format!("{caption} · {distance:.0} m") } else { caption.to_string() };
+            outlined(painter, label, &detail, 12.0, Color32::from_gray(225), alpha);
+            outlined(painter, label - Vec2::new(0.0, 14.0), &p.name, 18.0, name_color, alpha);
+        }
+    }
+}
 
 /// Top of the kit model above its entity point (generator cap, sensor vane,
 /// turret head), so the ceiling probe starts clear of the model itself.
@@ -119,15 +213,13 @@ pub fn draw(ui: &egui::Ui, world: &World, state: &mut OverlayState, dt: f32) {
         let flash = state.flash.get(i).copied().unwrap_or(0.0);
         draw_bar(painter, at, width, d, s, alpha, flash, distance < 45.0);
     }
-    let Some(viewer) = world.players.get(world.player_id) else { return; };
-    for (i, p) in world.players.iter().enumerate() {
-        let Some((color, alpha)) = name_tag(viewer, world.player_id, p, i, eye) else { continue; };
-        let top = head(p);
-        let Some(at) = project(eye, dir, fov, rect, top) else { continue; };
-        if !world.sight_clear(eye, top) { continue; }
-        let font = FontId::proportional(14.0);
-        painter.text(at + Vec2::new(1.0, 1.0), Align2::CENTER_BOTTOM, &p.name, font.clone(), with_alpha(Color32::BLACK, alpha * 0.8));
-        painter.text(at, Align2::CENTER_BOTTOM, &p.name, font, with_alpha(color, alpha));
+    // Carriers last, so their larger marker draws on top.
+    let mut order: Vec<usize> = (0..world.players.len()).collect();
+    order.sort_by_key(|&i| world.flags.iter().any(|f| f.carrier == Some(i)));
+    for i in order {
+        let Some((marker, at)) = visible_marker(world, eye, dir, fov, rect, i) else { continue; };
+        let p = &world.players[i];
+        draw_player(painter, p, marker, at, eye.distance(head(p)));
     }
 }
 
@@ -254,6 +346,74 @@ mod tests {
                 assert!(!w.sight_clear(above, from_above), "{map:?} generator {}: bar {from_above} visible from above", d.id);
             }
         }
+    }
+
+
+    /// Viewer high in open sky over the middle of the map, looking at `target`.
+    fn sky_view(w: &mut World, me: usize, target: Vec3) -> (Vec3, Vec3, Rect) {
+        let ground = peakrunner_core::terrain::height_on(MapId::Raindance, 1024.0, 1024.0);
+        let eye = Vec3::new(1024.0, ground + 220.0, 1024.0);
+        w.players[me].pos = eye - Vec3::Y * 2.35;
+        (eye, (target - eye).normalize(), Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 800.0)))
+    }
+
+    #[test]
+    fn enemy_arrows_need_range_screen_and_sight() {
+        let (mut w, me, friend, foe) = players();
+        let ground = peakrunner_core::terrain::height_on(MapId::Raindance, 1024.0, 1024.0);
+        let place = |w: &mut World, i: usize, d: f32| { w.players[i].pos = Vec3::new(1024.0 + d, ground + 220.0, 1024.0) - Vec3::Y * 2.35; };
+        place(&mut w, foe, 200.0);
+        let target = w.players[foe].pos + Vec3::Y * 2.35;
+        let (eye, dir, rect) = sky_view(&mut w, me, target);
+        match visible_marker(&w, eye, dir, 70.0, rect, foe) {
+            Some((Marker::Enemy { alpha, tag }, _)) => { assert_eq!(alpha, 1.0); assert_eq!(tag, 0.0, "no name beyond {ENEMY_TAG_RANGE} m"); }
+            other => panic!("expected a red arrow at 200 m, got {other:?}"),
+        }
+        place(&mut w, foe, 40.0);
+        assert!(matches!(visible_marker(&w, eye, dir, 70.0, rect, foe), Some((Marker::Enemy { tag, .. }, _)) if tag == 1.0), "close enemies get arrow and name");
+        place(&mut w, foe, ENEMY_ARROW_RANGE + 5.0);
+        assert!(visible_marker(&w, eye, dir, 70.0, rect, foe).is_none(), "no arrow beyond {ENEMY_ARROW_RANGE} m");
+        place(&mut w, foe, 100.0);
+        assert!(visible_marker(&w, eye, -dir, 70.0, rect, foe).is_none(), "no arrow off screen");
+        w.players[foe].alive = false;
+        assert!(visible_marker(&w, eye, dir, 70.0, rect, foe).is_none(), "no arrow on the dead");
+        w.players[foe].alive = true;
+        // Inside the hill below the viewer: terrain blocks the sight line.
+        w.players[foe].pos = Vec3::new(1034.0, ground - 40.0, 1024.0);
+        let down = (w.players[foe].pos - eye).normalize();
+        assert!(visible_marker(&w, eye, down, 70.0, rect, foe).is_none(), "never through terrain");
+        assert!(visible_marker(&w, eye, dir, 70.0, rect, me).is_none(), "nothing over yourself");
+        place(&mut w, friend, 40.0);
+        assert!(matches!(visible_marker(&w, eye, dir, 70.0, rect, friend), Some((Marker::Teammate { .. }, _))), "teammates get a blue name, never a red arrow");
+        place(&mut w, friend, 200.0);
+        assert!(visible_marker(&w, eye, dir, 70.0, rect, friend).is_none(), "teammates have no arrow past their name range");
+    }
+
+    #[test]
+    fn flag_carriers_are_marked_far_and_through_terrain() {
+        let (mut w, me, friend, foe) = players();
+        let ground = peakrunner_core::terrain::height_on(MapId::Raindance, 1024.0, 1024.0);
+        let ours = w.flags.iter().position(|f| f.team == w.players[me].team).unwrap();
+        w.flags[ours].carrier = Some(foe);
+        // Buried in the hill, far below the viewer: no arrow could show, the carrier marker does.
+        w.players[foe].pos = Vec3::new(1034.0, ground - 40.0, 1024.0);
+        let target = w.players[foe].pos + Vec3::Y * 2.35;
+        let (eye, dir, rect) = sky_view(&mut w, me, target);
+        match visible_marker(&w, eye, dir, 70.0, rect, foe) {
+            Some((Marker::Carrier { flag, ally, alpha }, _)) => { assert_eq!(flag, w.players[me].team); assert!(!ally); assert_eq!(alpha, 1.0); }
+            other => panic!("expected the carrier marker through terrain, got {other:?}"),
+        }
+        assert!(visible_marker(&w, eye, -dir, 70.0, rect, foe).is_none(), "still only on screen");
+        // Far away: beyond any arrow or tag range, inside the carrier range.
+        w.players[foe].pos = eye + dir * 700.0;
+        assert!(matches!(visible_marker(&w, eye, dir, 70.0, rect, foe), Some((Marker::Carrier { .. }, _))));
+        w.players[foe].pos = eye + dir * (CARRIER_MARKER_RANGE + 10.0);
+        assert!(visible_marker(&w, eye, dir, 70.0, rect, foe).is_none());
+        // Our own carrier: the ally variant, carrying the enemy's flag.
+        let theirs = 1 - ours;
+        w.flags[theirs].carrier = Some(friend);
+        w.players[friend].pos = eye + dir * 300.0;
+        assert!(matches!(visible_marker(&w, eye, dir, 70.0, rect, friend), Some((Marker::Carrier { ally: true, flag, .. }, _)) if flag != w.players[me].team));
     }
 
     #[test]

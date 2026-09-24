@@ -67,26 +67,33 @@ pub fn profile(kind:Kind, weapon:TurretWeapon)->Option<TurretProfile> {
 
 /// Hull and generator-powered shield numbers per kind. Shields only exist on
 /// sensors and fixed turrets: generators are the thing attackers go for, and
-/// stations stay as they were. A shield soaks damage before the hull, refills
-/// after `shield_regen_delay` seconds without damage while its circuit is
-/// powered, and drops to zero the moment the circuit loses power.
+/// stations stay as they were. A shield soaks damage before the hull and
+/// regenerates continuously, even under fire, while its circuit is powered,
+/// faster than one player can deal damage: breaking it takes focus fire or the
+/// generator. It drops to zero the moment the circuit loses power.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Durability {
     pub hull: f32,
     pub shield_max: f32,
-    pub shield_regen_delay: f32,
-    /// Shield points per second once regeneration starts.
+    /// Shield points per second, applied every powered tick including while hit.
     pub shield_regen_rate: f32,
     /// Fraction of bullet (chaingun and bullet-turret) damage a shield takes;
     /// shields shrug off small arms, explosives hit them in full.
     pub shield_bullet_factor: f32,
 }
 
+/// Continuous shield regeneration. Above the best one-player sustained damage
+/// (grenades, about 86/s point blank), so a lone attacker cannot break it;
+/// two players focusing can. See docs/weapon-damage.md for the table.
+pub const SHIELD_REGEN: f32 = 110.;
+/// A destroyed object stays offline until repaired past this fraction of hull.
+pub const ONLINE_FRACTION: f32 = 0.5;
+
 pub fn durability(kind:Kind)->Durability {
-    let unshielded=|hull|Durability {hull,shield_max:0.,shield_regen_delay:0.,shield_regen_rate:0.,shield_bullet_factor:1.};
+    let unshielded=|hull|Durability {hull,shield_max:0.,shield_regen_rate:0.,shield_bullet_factor:1.};
     match kind {
-        Kind::Turret=>Durability {hull:250.,shield_max:450.,shield_regen_delay:5.,shield_regen_rate:60.,shield_bullet_factor:0.5},
-        Kind::Sensor=>Durability {hull:150.,shield_max:300.,shield_regen_delay:5.,shield_regen_rate:45.,shield_bullet_factor:0.5},
+        Kind::Turret=>Durability {hull:250.,shield_max:450.,shield_regen_rate:SHIELD_REGEN,shield_bullet_factor:0.5},
+        Kind::Sensor=>Durability {hull:150.,shield_max:300.,shield_regen_rate:SHIELD_REGEN,shield_bullet_factor:0.5},
         Kind::Generator=>unshielded(500.),
         Kind::Inventory|Kind::Repair=>unshielded(300.),
     }
@@ -157,20 +164,20 @@ pub struct State {
     pub aim: Vec3,
     pub contacts: u8,
     pub shield: f32,
-    /// Seconds since this object last took damage. Server-side regen timer;
-    /// not sent to clients, which never simulate equipment.
-    #[serde(skip, default)]
-    pub since_hit: f32,
+    /// Set when the hull reaches zero; cleared once repaired past
+    /// `ONLINE_FRACTION`. An offline object has no power and no shield.
+    #[serde(default)]
+    pub offline: bool,
 }
 
 impl State {
     pub fn new(d:&Definition)->Self {
-        State {health:d.max_health(),powered:true,cooldown:0.,aim:Vec3::NEG_Z,contacts:0,shield:d.max_shield(),since_hit:f32::INFINITY}
+        State {health:d.max_health(),powered:true,cooldown:0.,aim:Vec3::NEG_Z,contacts:0,shield:d.max_shield(),offline:false}
     }
     /// Damage soaks into the shield first, the overflow reaches the hull.
-    pub fn damage(&mut self, d:&Definition, amount:f32, bullet:bool) {
-        if !amount.is_finite() || amount<=0. || self.health<=0. {return;}
-        self.since_hit=0.;
+    /// Returns true when this hit destroyed the object.
+    pub fn damage(&mut self, d:&Definition, amount:f32, bullet:bool)->bool {
+        if !amount.is_finite() || amount<=0. || self.health<=0. {return false;}
         let factor=if bullet {durability(d.kind).shield_bullet_factor} else {1.};
         let mut rest=amount;
         if self.shield>0. && factor>0. {
@@ -178,16 +185,20 @@ impl State {
             self.shield-=absorbed;rest-=absorbed/factor;
         }
         self.health=(self.health-rest).max(0.);
-        if self.health<=0. {self.shield=0.;}
+        if self.health<=0. {self.shield=0.;self.offline=true;return true;}
+        false
     }
     /// Advance shield regeneration. Call after `power` for the tick.
     pub fn regen(&mut self, d:&Definition, dt:f32) {
         let spec=durability(d.kind);
-        self.since_hit+=dt;
         if !self.powered || self.health<=0. {self.shield=0.;return;}
-        if self.since_hit>=spec.shield_regen_delay {
-            self.shield=(self.shield+spec.shield_regen_rate*dt).min(spec.shield_max);
-        }
+        self.shield=(self.shield+spec.shield_regen_rate*dt).min(spec.shield_max);
+    }
+    /// Repair adds hull; a destroyed object comes back online only past
+    /// `ONLINE_FRACTION` of its hull.
+    pub fn repair(&mut self, d:&Definition, amount:f32) {
+        self.health=(self.health+amount).min(d.max_health());
+        if self.offline && self.health>=d.max_health()*ONLINE_FRACTION {self.offline=false;}
     }
 }
 
@@ -214,10 +225,11 @@ pub fn fresh(map:MapId)->Vec<State> {
     definitions(map).iter().map(State::new).collect()
 }
 pub fn power(defs:&[Definition],states:&mut [State]) {
-    let live: Vec<_>=defs.iter().zip(states.iter()).filter(|(d,s)|d.kind==Kind::Generator && s.health>0.)
+    let live: Vec<_>=defs.iter().zip(states.iter()).filter(|(d,s)|d.kind==Kind::Generator && s.health>0. && !s.offline)
         .map(|(d,_)|(d.team,d.circuit.as_str())).collect();
     for (d,s) in defs.iter().zip(states) {
-        s.powered=s.health>0. && (d.circuit=="always-on" || live.contains(&(d.team,d.circuit.as_str())));
+        if s.health<=0. {s.offline=true;}
+        s.powered=s.health>0. && !s.offline && (d.circuit=="always-on" || live.contains(&(d.team,d.circuit.as_str())));
         // Shields are projected by the generator: no power, no shield.
         if !s.powered {s.shield=0.;}
     }
@@ -228,10 +240,11 @@ pub fn service(d:&Definition,s:&mut State,p:&mut Player,using:bool,dt:f32) {
     // generator can be brought back online; no automatic hidden respawn.
     if using && s.health<d.max_health() && p.energy>0. {
         let spent=p.energy.min(12.*dt);
-        p.energy-=spent;s.health=(s.health+spent*4.).min(d.max_health());
+        p.energy-=spent;s.repair(d,spent*4.);
     } else if s.powered && s.health>0. && (d.kind==Kind::Repair || (d.kind==Kind::Inventory && using)) {
         p.health=(p.health+35.*dt).min(100.);
         p.energy=(p.energy+40.*dt).min(ENERGY_MAX);
+        if d.kind==Kind::Inventory {p.kits=p.kits.max(crate::sim::KITS_PER_LIFE);}
     }
 }
 
@@ -299,7 +312,7 @@ mod tests {
         let d=Definition{id:"station".into(),kind:Kind::Inventory,position:[0.;3],team:0,
             circuit:"always-on".into(),radius:1.5,weapon:TurretWeapon::Bullet};
         assert!(validate(&[d.clone()]).is_ok());
-        let mut states=vec![State{health:100.,powered:false,cooldown:0.,aim:Vec3::ZERO,contacts:0,shield:0.,since_hit:0.}];
+        let mut states=vec![State{health:100.,powered:false,cooldown:0.,aim:Vec3::ZERO,contacts:0,shield:0.,offline:false}];
         power(&[d.clone()],&mut states);assert!(states[0].powered);
         states[0].health=0.;power(&[d.clone()],&mut states);assert!(!states[0].powered);
         let mut invalid=d;invalid.circuit="missing-generator".into();assert!(validate(&[invalid]).is_err());
@@ -324,7 +337,10 @@ mod tests {
         let mut states:Vec<_>=defs.iter().map(|d|State::new(d)).collect();
         states[0].health=0.;power(&defs,&mut states);
         assert!(!states[0].powered && !states[1].powered && states[2].powered);
-        states[0].health=1.;power(&defs,&mut states);assert!(states[1].powered);
+        states[0].repair(&defs[0],1.);power(&defs,&mut states);
+        assert!(!states[1].powered,"a barely patched generator stays offline");
+        states[0].repair(&defs[0],defs[0].max_health()*ONLINE_FRACTION);power(&defs,&mut states);
+        assert!(states[1].powered);
     }
     fn def(id:&str,kind:Kind,circuit:&str)->Definition {
         Definition {id:id.into(),kind,team:0,circuit:circuit.into(),position:[0.;3],radius:2.,weapon:TurretWeapon::Bullet}
@@ -348,11 +364,14 @@ mod tests {
         let hp=s.health;s.damage(&d,5.,false);assert_eq!(s.health,hp,"destroyed objects take no more damage");
     }
     #[test]
-    fn shields_regen_only_after_the_delay_while_powered() {
+    fn shields_regenerate_continuously_even_while_hit_but_never_unpowered() {
         let d=def("t",Kind::Turret,"a");let spec=durability(d.kind);let mut s=State::new(&d);
         s.damage(&d,300.,false);let hit=s.shield;
-        for _ in 0..((spec.shield_regen_delay-0.5)*10.) as usize {s.regen(&d,0.1);}
-        assert_eq!(s.shield,hit,"no regen during the delay");
+        s.regen(&d,0.1);
+        assert!((s.shield-(hit+spec.shield_regen_rate*0.1)).abs()<1e-3,"regen starts at once, no delay");
+        // A hit every tick does not pause regeneration.
+        let before=s.shield;s.damage(&d,5.,false);s.regen(&d,0.1);
+        assert!((s.shield-(before-5.+spec.shield_regen_rate*0.1)).abs()<1e-3);
         for _ in 0..200 {s.regen(&d,0.1);}
         assert_eq!(s.shield,spec.shield_max,"regenerates to full while powered");
         s.damage(&d,300.,false);s.powered=false;
@@ -360,18 +379,42 @@ mod tests {
         assert_eq!(s.shield,0.,"an unpowered object has no shield and cannot regen");
     }
     #[test]
+    fn shield_regen_beats_one_player_and_loses_to_two() {
+        // Best sustained point-blank damage per player weapon against a shield.
+        let disc=crate::combat::DISC.max_damage/crate::sim::DISC_RELOAD;
+        let grenade=crate::combat::GRENADE.max_damage/crate::sim::weapon_reload(2);
+        let chaingun=8.*0.5/crate::sim::weapon_reload(1);
+        let best=disc.max(grenade).max(chaingun);
+        assert!(SHIELD_REGEN>best*1.2,"one player ({best:.1}/s) must not out-damage regen with margin");
+        assert!(2.*grenade>SHIELD_REGEN*1.3 && 2.*disc>SHIELD_REGEN*1.2,"a focused pair breaks it");
+    }
+    #[test]
     fn generator_loss_drops_shields_and_leaves_the_hull_exposed() {
         let defs=vec![def("g",Kind::Generator,"a"),def("t",Kind::Turret,"a"),def("s",Kind::Sensor,"a")];
         let mut states:Vec<_>=defs.iter().map(State::new).collect();
-        states[0].damage(&defs[0],1000.,false);assert_eq!(states[0].health,0.);
+        assert!(states[0].damage(&defs[0],1000.,false),"the killing blow reports destruction");
+        assert!(!states[0].damage(&defs[0],10.,false),"a wreck is not destroyed again");
         power(&defs,&mut states);
         assert!(!states[1].powered && !states[2].powered);
         assert_eq!((states[1].shield,states[2].shield),(0.,0.));
         states[1].damage(&defs[1],100.,false);assert_eq!(states[1].health,150.,"damage goes straight to the hull");
-        // Repairing the generator brings power back; the shield regrows after the delay.
-        states[0].health=1.;power(&defs,&mut states);
+        // A destroyed generator stays offline until repaired past half its hull.
+        states[0].repair(&defs[0],defs[0].max_health()*ONLINE_FRACTION-1.);power(&defs,&mut states);
+        assert!(states[0].offline && !states[1].powered,"still offline below the threshold");
+        states[0].repair(&defs[0],1.);power(&defs,&mut states);
+        assert!(!states[0].offline && states[1].powered,"back online at the threshold");
         for _ in 0..200 {for (d,s) in defs.iter().zip(&mut states) {s.regen(d,0.1);}}
-        assert!(states[1].powered && states[1].shield==durability(Kind::Turret).shield_max);
+        assert_eq!(states[1].shield,durability(Kind::Turret).shield_max);
+    }
+    #[test]
+    fn destroyed_turrets_also_need_half_hull_to_work_again() {
+        let defs=vec![def("g",Kind::Generator,"a"),def("t",Kind::Turret,"a")];
+        let mut states:Vec<_>=defs.iter().map(State::new).collect();
+        states[1].damage(&defs[1],10000.,false);power(&defs,&mut states);
+        states[1].repair(&defs[1],50.);power(&defs,&mut states);
+        assert!(!states[1].powered && states[1].health==50.);
+        states[1].repair(&defs[1],80.);power(&defs,&mut states);
+        assert!(states[1].powered);
     }
     #[test]
     fn always_on_equipment_keeps_a_regenerating_shield() {

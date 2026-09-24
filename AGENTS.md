@@ -39,8 +39,8 @@ The old checkout and legacy browser prototype remain at
 build, visual QA, tests, embed, commit). It lists the checks every map must pass.
 
 In source the rotation is five maps, all ORIGINAL and embedded in the binary,
-always listed, with no private packs: Raindance, Tower Complex
-(`broadside-clone` key), Cairnhold (`stonehenge-clone`), Frostline
+always listed, with no private packs: Old Holler (`raindance` key, formerly
+shown as Raindance), Tower Complex (`broadside-clone` key), Cairnhold (`stonehenge-clone`), Frostline
 (`snowblind-clone`) and Dustreach (`desert-of-death-clone`). The old clone keys
 stay so rotation configs keep working. Valley stays an internal fixture.
 Gameplay compatibility is `maps6` with the five map fingerprints and no
@@ -48,10 +48,13 @@ Gameplay compatibility is `maps6` with the five map fingerprints and no
 clients still run `0.1.0-private.20260921.1` with Skybreak and the four clone
 packs; switching needs a full matching client/server release.
 
-- **Raindance:** the first original map, cleaned with the map pipeline
-  (`build-raindance.py`): same layout and terrain, no z-fighting box faces,
-  hall ramps that now climb through roof openings, sealed ramp undersides,
-  8 spawn points per team, own materials and baked lighting. The kit
+- **Old Holler** (key `raindance`; renamed from Raindance, a Tribes name; only
+  the display name changed): the first original map, cleaned with the map
+  pipeline (`build-raindance.py`): same layout and terrain, no z-fighting box
+  faces, hall ramps that now climb through roof openings, sealed ramp
+  undersides, 8 spawn points per team, own materials and baked lighting, and a
+  generator basement under each hall with exactly two ways in (atrium stair,
+  service stair to a rear shed). The kit
   (`build-original-map.py`) keeps generating the shared starting textures
   that every other map paints over (`kit.base_pack()`); no map build reads
   another map's pack. See `docs/original-map-kit.md`.
@@ -530,6 +533,13 @@ were later removed from source; notes below that use them are history only.
   first surface between eye and viewmodel muzzle (wall-hugging shots used to spawn
   past thin walls). Turrets need clear muzzle-to-chest line of sight each tick;
   open aligned doorways are layout sight lines. See `docs/weapon-damage.md`.
+- Source-only `equipment5:…:kit1` compatibility: powered turret/sensor shields
+  regenerate continuously at 110/s (above one player's best sustained damage;
+  two focusing break them). Destroyed equipment stays `offline` until repaired
+  past 50% hull. Generators explode harmlessly (explosion kind 4). Repair kits
+  (Q, one per life, 60 armor over 2 s) are a server-validated intent. Splash
+  counts hits on an object's own mount column as reaching it. All numbers and
+  the time-to-break table are in `docs/weapon-damage.md`.
 - Public gameplay uses certificate-validated QUIC/UDP 7777. Never disable TLS
   verification or route gameplay through Cloudflare Tunnel to fix connectivity.
 - Release `.20260919.4` was the previous visual-only public client (armor and
@@ -569,7 +579,7 @@ Native visual QA uses `examples/launch_smoke.rs`, which must forward BOTH eframe
 `QA_CHAT=team`/`public` exercise a temporary local match. Inspect screenshots,
 not just exit codes. Do not kill a user's running game to run a test.
 
-Raindance build/test, from `src/` (numpy venv):
+Old Holler (key `raindance`) build/test, from `src/` (numpy venv):
 `../research/local-assets/tools/venv/bin/python scripts/build-raindance.py [OUTPUT] [--no-bake]`
 (default `assets/maps/raindance`, refuses overwrite) and `scripts/test-raindance.py`;
 `scripts/test-original-map.py` still checks the kit. Builds are byte-identical.

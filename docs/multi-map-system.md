@@ -2,8 +2,9 @@
 
 The six-map rotation is published. See
 [release record](release-20260921-1.md) and the six-map section in AGENTS.md.
-In source all four former clone slots now hold original maps embedded in the
-binary: Tower Complex (`broadside-clone`), Cairnhold (`stonehenge-clone`),
+In source the `raindance` slot is shown as **Old Holler** (formerly Raindance;
+the key stays for rotations), and all four former clone slots now hold original
+maps embedded in the binary: Tower Complex (`broadside-clone`), Cairnhold (`stonehenge-clone`),
 Frostline (`snowblind-clone`) and Dustreach (`desert-of-death-clone`). No
 private reference packs are loaded by any slot; compatibility is `maps6`. The
 published release still runs the old clones. See
@@ -79,7 +80,7 @@ mode/rotation discovery fields. Full live round-transition render/transport QA
 is still required before merge. No public deployment or new release yet.
 
 1. Replace the global optional `map_pack::PACK` with an immutable installed-pack
-   registry. Keep built-in Raindance available when another pack is installed.
+   registry. Keep built-in Old Holler (key `raindance`) available when another pack is installed.
    Decide a stable wire identity (never process-local catalog indices), and bound
    total loaded assets as well as each file. Keep private legacy reference imports
    separate from distributable original packs.

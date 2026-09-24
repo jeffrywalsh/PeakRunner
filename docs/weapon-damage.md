@@ -124,38 +124,74 @@ generator. Generators, inventory stations and repair pads have none: the
 generator is what attackers go for. Numbers live in
 `equipment::durability(kind)` (`crates/core/src/equipment.rs`):
 
-| Kind | Hull | Shield | Regen delay | Regen rate | Bullets vs. shield |
-| --- | --- | --- | --- | --- | --- |
-| Turret | 250 | 450 | 5 s | 60/s | 50% |
-| Sensor | 150 | 300 | 5 s | 45/s | 50% |
-| Generator | 500 | none | — | — | — |
-| Inventory / repair | 300 | none | — | — | — |
+| Kind | Hull | Shield | Regen | Bullets vs. shield |
+| --- | --- | --- | --- | --- |
+| Turret | 250 | 450 | 110/s, continuous | 50% |
+| Sensor | 150 | 300 | 110/s, continuous | 50% |
+| Generator | 500 | none | — | — |
+| Inventory / repair | 300 | none | — | — |
 
 - Damage hits the shield first; overflow reaches the hull. Shields take half
   of bullet damage (chaingun and bullet turrets), explosives in full.
-- A shield regrows only while its circuit is powered, the hull is above zero,
-  and `shield_regen_delay` has passed since the last hit.
+- A powered shield regenerates **continuously, including while it is being
+  hit** (`SHIELD_REGEN`, 110/s). That is above the best one-player sustained
+  damage, so a lone attacker cannot break it; two attackers focusing can, and so
+  can killing the generator.
 - When the generator goes down the circuit loses power: shields drop to zero
   at once, cannot regrow, and the equipment stops working. Its hull can then be
-  destroyed directly. Repairing the generator restores power, and shields regrow
-  after the delay.
+  destroyed directly.
+- **Destroyed stays offline.** Anything whose hull reaches zero (generators,
+  turrets, sensors, stations) stays offline until repaired past half its hull
+  (`ONLINE_FRACTION`, 0.5). The same rule for every kind keeps "repaired" meaning
+  one thing; a generator at 40% powers nothing. `offline` travels in snapshots.
+- **Generators explode.** The killing blow sets off a large fireball and boom
+  (explosion kind 4) that **damages nothing**. It travels as an ordinary
+  explosion (blast serial plus snapshot), so a replayed snapshot never plays it
+  twice. The wreck smokes and sparks while offline; the smoke thins once repair
+  starts. Both teams get a centred announcement: "Enemy generator destroyed" /
+  "Your generator is down", and "... back online" when a repair crosses the
+  threshold (a round reset to full hull is silent).
 - `always-on` circuits (maps without generators) count as permanently powered,
   so their equipment keeps a regenerating shield.
 - Repair is unchanged: holding E restores hull only, never shield.
-- All of this is server-authoritative. Snapshots carry `shield`; the regen timer
-  (`since_hit`) stays on the server.
+- All of this is server-authoritative.
 
-Effort to destroy, direct hits, no regen interruptions (disc 75.8, 1.05 s
-reload; grenade 72.7; chaingun 8 per bullet at 13.3 rounds/s):
+**Splash reaches equipment past its own mount.** Blasts need a clear line to
+the object's hit sphere, but the collision mesh does not tag which solid belongs
+to which object, and the turret mounts are solid. Grenades bursting on the floor
+beside a turret were blocked by the turret's own mount (0 of 16 sampled bursts
+landed on almost every turret). A hit inside the object's footprint column
+(hit radius + 1 m, down to 6 m below its centre) now counts as reaching it;
+walls farther out still block (`splash_reaches` in `sim.rs`, with tests on all
+five maps).
 
-| Target | Before | Now, powered | Now, generator down |
+Sustained fire against a powered shield, best case (every explosive point
+blank, every bullet hits; disc 75.8 per 1.05 s = 72/s, grenade 72.7 per 0.85 s
+= 86/s, chaingun 8 × 50% per 0.075 s = 53/s). Time until damage first gets
+through to the hull:
+
+| Target, weapon | 1 player | 2 players | 3 players |
 | --- | --- | --- | --- |
-| Turret | 4 discs / ~2.3 s chaingun | 10 discs (~10 s solo, ~5 s for a pair) / ~11 s chaingun | 4 discs |
-| Sensor | 2 discs / ~1.4 s chaingun | 6 discs / ~7 s chaingun | 2 discs |
-| Generator | 7 discs | 7 discs (unchanged) | — |
+| Turret, disc | never | 11.0 s | 3.9 s |
+| Turret, grenade | never | 6.4 s | 2.8 s |
+| Turret, chaingun | never | never | 9.0 s |
+| Sensor, disc | never | 6.8 s | 2.5 s |
+| Sensor, grenade | never | 3.8 s | 1.7 s |
+| Sensor, chaingun | never | never | 6.0 s |
 
-A regen delay of 5 s means one attacker who keeps up disc fire never lets a
-shield recover; an attacker who breaks off for 5 s loses progress at 60/s.
+After that the hull falls at the attackers' combined rate minus 110/s: two
+grenadiers finish a 250 hull turret in about 4 s more, two disc players in about
+7 s. Plasma is a turret-only weapon. With the generator down, a turret still
+takes 4 discs and a sensor 2. Regenerate the table with
+`cargo test -p peakrunner-core --lib print_time_to_break_table -- --ignored --nocapture`.
+
+**Repair kits.** Each player carries one kit per life (`KITS_PER_LIFE`).
+Pressing **Q** restores 60 armor over 2 s (`KIT_HEAL`, `KIT_SECONDS`), only when
+alive, holding a kit, not already healing and below full armor. Taking damage
+does not cancel the heal; death does. Inventory stations refill it. The client
+only sends the intent (`Command::kit`); the server spends the kit and heals, and
+prediction never does. The HUD shows the kit count and key beside the armor bar,
+and the remaining heal while it runs.
 
 **Hit bars.** The client draws a bar above every generator, turret and sensor
 within 120 m and in line of sight: a thin shield strip (pale violet) above a

@@ -1,6 +1,8 @@
 mod app;
 mod audio;
 mod flag_hud;
+mod flag_announce;
+mod generator_announce;
 mod world_overlay;
 mod qa_overrides;
 #[cfg(not(target_arch = "wasm32"))]

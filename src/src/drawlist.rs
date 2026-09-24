@@ -322,6 +322,19 @@ pub fn build_frame(world: &World, aspect: f32, dt: f32) -> DrawFrame {
             });
         } else if e.kind == 2 {
             flame_burst(&mut emit,e.pos,e.age,false);
+        } else if e.kind == 4 {
+            // Generator destruction: a tall fireball, rolling flame tongues and
+            // a bright core. Cosmetic; it damages nothing.
+            for (dx, dz) in [(0.0, 0.0), (1.6, 0.4), (-1.3, 1.1), (0.4, -1.5)] {
+                flame_burst(&mut emit, e.pos + Vec3::new(dx, 0.6 + t * 2.5, dz), e.age, false);
+            }
+            let r = e.max_r * (0.25 + t * 0.75);
+            emit.push(EmitDraw {mesh:MeshId::Sphere,
+                model:Mat4::from_translation(e.pos + Vec3::Y * t * 3.0) * Mat4::from_scale(Vec3::new(r, r * 0.8, r)),
+                color:[1.0, 0.48, 0.12, a * 0.8]});
+            emit.push(EmitDraw {mesh:MeshId::Sphere,
+                model:Mat4::from_translation(e.pos) * Mat4::from_scale(Vec3::splat(r * 0.35)),
+                color:[1.0, 0.92, 0.7, a]});
         } else {
             let r = e.max_r * (0.2 + t * 0.9);
             emit.push(EmitDraw {
@@ -348,6 +361,9 @@ pub fn build_frame(world: &World, aspect: f32, dt: f32) -> DrawFrame {
         if d.kind==peakrunner_core::equipment::Kind::Turret {
             push_turret_head(&mut lit,&mut emit,d,s);
         }
+        if d.kind==peakrunner_core::equipment::Kind::Generator && (s.health<=0. || s.offline) {
+            push_generator_wreck(&mut emit,d.pos(),d.radius,world.time,s.health<=0.);
+        }
     }
     let viewmodel = viewmodel_draws(world);
 
@@ -372,6 +388,37 @@ pub fn build_frame(world: &World, aspect: f32, dt: f32) -> DrawFrame {
 }
 
 /// Fly edge-first, like the chambered round, with spin around the disc normal.
+/// A wrecked generator smoulders: low smoke curling off its shell and
+/// flickering sparks spitting from its sides. While it is being repaired back
+/// past half hull the smoke thins and the sparks stop. Everything hugs the
+/// outside of the casing (hit radius) and stays low, so it reads in basements;
+/// positions are a deterministic function of time.
+fn push_generator_wreck(emit:&mut Vec<EmitDraw>,base:Vec3,radius:f32,time:f32,destroyed:bool) {
+    let puffs=if destroyed {10} else {5};
+    for k in 0..puffs {
+        let phase=(time*0.4+k as f32/puffs as f32).fract();
+        let a=k as f32*2.39996+time*0.15;
+        let out=radius*0.8+phase*1.4;
+        let pos=base+Vec3::new(a.cos()*out,0.6+phase*3.0,a.sin()*out);
+        emit.push(EmitDraw {mesh:MeshId::Sphere,
+            model:Mat4::from_translation(pos)*Mat4::from_scale(Vec3::splat(0.3+phase*0.8)),
+            color:[0.07,0.065,0.06,0.5*(1.-phase)]});
+    }
+    if !destroyed {return;}
+    for k in 0..18 {
+        let seed=k as f32*12.9898+(time*14.).floor()*78.233;
+        let flick=(seed.sin()*43758.547).fract();
+        if flick<0.4 {continue;}
+        let a=(seed*0.37).sin()*std::f32::consts::TAU;
+        // Sparks spit outward and fall; each lives a fraction of a flicker.
+        let fall=(time*14.).fract();
+        let pos=base+Vec3::new(a.cos()*(radius+0.2+fall*0.6),0.5+flick*3.2-fall*0.8,a.sin()*(radius+0.2+fall*0.6));
+        emit.push(EmitDraw {mesh:MeshId::Sphere,
+            model:Mat4::from_translation(pos)*Mat4::from_scale(Vec3::splat(0.045+flick*0.04)),
+            color:[1.0,0.62+flick*0.3,0.18,1.0]});
+    }
+}
+
 fn flame_burst(emit:&mut Vec<EmitDraw>,pos:Vec3,age:f32,blue:bool) {
     let t=(age/0.55).clamp(0.,1.);let fade=(1.-t).powi(2);
     let extent=if blue {2.2} else {3.2};

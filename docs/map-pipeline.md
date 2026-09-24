@@ -118,7 +118,7 @@ Design checklist (each item has bitten us once):
 
 ## 4. Look at it before wiring
 
-Before a map is embedded, preview it in the Raindance slot. There are no
+Before a map is embedded, preview it in the `raindance` (Old Holler) slot. There are no
 private-pack slots any more; `PEAKRUNNER_MAP_PACK` loads any pack there through
 the same validating `MapPack::load`, with no manifest patching:
 

@@ -232,7 +232,7 @@ impl Online {
                 move_x: if active { input.move_x } else { 0.0 }, move_z: if active { input.move_z } else { 0.0 },
                 yaw: p.yaw.rem_euclid(std::f32::consts::TAU), pitch: p.pitch,
                 jump: active && input.jump, jet: active && input.jet, fire: active && input.fire,
-                interact:active && input.interact, weapon: input.weapon };
+                interact:active && input.interact, kit:active && input.kit, weapon: input.weapon };
             if self.pending.len() >= 120 || !session.send_input(command) { return false; }
             self.pending.push_back((command, Instant::now()));
             if matches!(self.phase, Phase::Playing | Phase::Waiting) { world.predict_command(command); }

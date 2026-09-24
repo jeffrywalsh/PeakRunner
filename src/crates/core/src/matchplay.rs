@@ -17,6 +17,8 @@ pub struct Command {
     pub fire: bool,
     #[serde(default)]
     pub interact: bool,
+    #[serde(default)]
+    pub kit: bool,
     pub weapon: u8,
 }
 
@@ -29,7 +31,7 @@ impl Command {
     }
     fn input(self) -> Input {
         Input { move_x: self.move_x, move_z: self.move_z, jump: self.jump,
-            jet: self.jet, fire: self.fire, interact:self.interact, weapon: self.weapon, ..Input::default() }
+            jet: self.jet, fire: self.fire, interact:self.interact, kit:self.kit, weapon: self.weapon, ..Input::default() }
     }
 }
 

@@ -45,6 +45,39 @@ QA_LOCAL=1 QA_SCOREBOARD=1 QA_CAPTURE_PATH=screenshots/ping-flag-hud.png cargo r
 
 This creates an ephemeral loopback match and closes only its own QA window.
 
+## Enemy arrows, carrier markers and flag announcements (source only, not deployed)
+
+Code: `src/src/world_overlay.rs` (markers) and `src/src/flag_announce.rs`
+(announcements). Client-only presentation built from snapshot fields the server
+owns (player positions, teams, names, flag carriers, score); no wire change and
+no compatibility marker change.
+
+- **Red arrow over enemies.** A downward chevron in the enemy name-tag red, over
+  every living enemy within `ENEMY_ARROW_RANGE` (250 m) that is on screen AND in
+  line of sight (the same map/terrain ray as name tags). Never drawn through
+  terrain or walls. It shrinks from 18 px wide close up to 11 px far out and fades
+  over the last 20% of range. Enemies within 80 m also show their red name above
+  it. Teammates never get an arrow: only their blue name within 150 m.
+- **Flag carrier marker.** Replaces the arrow and name tag on a carrier: a larger
+  chevron and pennant in the carried flag's team colour, the carrier's name (blue
+  for your team, red for the enemy), and "FLAG CARRIER" or "HAS YOUR FLAG" with
+  the distance beyond 60 m. It shows out to `CARRIER_MARKER_RANGE` (1500 m, past
+  every map's flag distance) on screen, **through terrain**: the edge-of-screen
+  flag bearing already reveals every flag's position, so this adds no information.
+- **Centred announcements.** Large pale text with a dark outline, a quarter of the
+  way down the screen, for 3 s with a 0.6 s fade: "Budster has the enemy flag",
+  "Echo has your flag", "You have the enemy flag", "… dropped …", "… captured …",
+  "Your flag was returned", "The enemy flag was returned". Wording is relative to
+  the viewer. They queue: up to 3 wait (the oldest waiting one drops on overflow)
+  and, while others wait, the one on screen yields after 1.2 s. They come from
+  diffing flag carriers, flag-at-home and score between frames, so a replayed
+  snapshot announces nothing and a score reset (new round) rebaselines silently.
+  The simulation no longer writes its own flag text into the top HUD line;
+  VICTORY/DEFEAT still appear there.
+- QA: a trailing `*` on a `QA_PLAYERS` name hands that stand-in the enemy flag
+  after `QA_CARRY_AT` seconds (default 6), so the real announcement path fires
+  before the 8 s capture. Captures: `research/screenshots/markers-*.png`.
+
 ## Published revision: 20260919.3
 
 - FOV stays at 76 degrees through 20 m/s. A smoothstep speed curve widens it

@@ -60,6 +60,10 @@ pub const VM_MUZZLE_BOLT: Vec3 = Vec3::new(0.0, 0.02, -0.59);
 pub(crate) const BOLT_SPEED: f32 = 420.0;
 /// Collision radius of player discs, bolts and grenades against map geometry.
 const SHOT_RADIUS: f32 = 0.12;
+/// Repair kits per life, the armor one restores, and how long it takes.
+pub const KITS_PER_LIFE: u8 = 1;
+pub const KIT_HEAL: f32 = 60.0;
+pub const KIT_SECONDS: f32 = 2.0;
 pub fn weapon_reload(kind: u8) -> f32 {
     match kind { 0 => DISC_RELOAD, 1 => 0.075, _ => 0.85 }
 }
@@ -108,6 +112,8 @@ pub struct Input {
     pub jet: bool,
     pub fire: bool,
     pub interact: bool,
+    /// Use a repair kit (Q). An intent: the server decides whether it applies.
+    pub kit: bool,
     pub weapon: u8,
     pub look_stick_x: f32,
     pub look_stick_y: f32,
@@ -125,6 +131,7 @@ impl Default for Input {
             jet: false,
             fire: false,
             interact: false,
+            kit: false,
             weapon: 0,
             look_stick_x: 0.0,
             look_stick_y: 0.0,
@@ -160,6 +167,12 @@ pub struct Player {
     pub jetting: bool,
     pub cooldown: f32,
     pub weapon: u8,
+    /// Repair kits carried; refilled on respawn and at inventory stations.
+    #[serde(default)]
+    pub kits: u8,
+    /// Armor still to restore from a kit in use.
+    #[serde(default)]
+    pub kit_heal: f32,
     bot_role: BotRole,
     bot_goal: Vec3,
     bot_think: f32,
@@ -599,9 +612,32 @@ impl World {
         self.think_bots(dt);
         self.step_players(dt);
         self.step_discs(dt);
+        self.step_kits(dt);
         self.step_equipment(dt);
         self.step_flags(dt);
         self.step_explosions(dt);
+    }
+
+    /// Server-side repair kits: a use intent starts a heal when the player is
+    /// alive, has a kit and is not already healing. Taking damage does not
+    /// cancel it; death does.
+    fn step_kits(&mut self, dt:f32) {
+        if self.predicting {return;}
+        for i in 0..self.players.len() {
+            let wants=if self.network_inputs.is_empty() {i==self.player_id && self.input.kit}
+                else {self.network_inputs.get(i).is_some_and(|c|c.kit)};
+            let p=&mut self.players[i];
+            if !p.alive {p.kit_heal=0.;continue;}
+            if wants && p.kits>0 && p.kit_heal<=0. && p.health<100. {
+                p.kits-=1;p.kit_heal=KIT_HEAL;
+                if i==self.player_id {self.events.push_str("kit,");}
+            }
+            if p.kit_heal>0. {
+                let step=(KIT_HEAL/KIT_SECONDS*dt).min(p.kit_heal);
+                p.kit_heal-=step;p.health=(p.health+step).min(100.);
+                if p.health>=100. {p.kit_heal=0.;}
+            }
+        }
     }
 
     fn step_equipment(&mut self, dt:f32) {
@@ -1196,7 +1232,9 @@ impl World {
         }
         self.discs = keep;
         let defs=crate::equipment::definitions(self.map);
-        for idx in equipment_hits {self.equipment[idx].damage(&defs[idx],8.,true);}
+        for idx in equipment_hits {
+            if self.equipment[idx].damage(&defs[idx],8.,true) {self.equipment_destroyed(&defs[idx]);}
+        }
         for (idx, owner) in bullet_hits {
             if !self.players[idx].alive { continue; }
             self.players[idx].health -= 8.0;
@@ -1230,15 +1268,17 @@ impl World {
         });
         self.spatial_sounds.push(("boom", pos));
         let dmg_core = if kind == 0 { 52.0 } else if kind==3 {43.} else { 68.0 };
+        let mut wrecked=Vec::new();
         for (d,s) in crate::equipment::definitions(self.map).iter().zip(&mut self.equipment) {
             if d.team as usize==team.idx() || s.health<=0. {continue;}
             let delta=d.pos()-pos;let distance=(delta.length()-d.radius).max(0.);
             if distance>max_r {continue;}
             let end=d.pos()-delta.normalize_or_zero()*d.radius.min(delta.length());
-            if obstacle_hit(self.map,&self.pillars,pos,end,0.).is_some_and(|t|t<0.995) {continue;}
+            if !splash_reaches(self.map,&self.pillars,pos,end,d) {continue;}
             let damage=profile.map_or((dmg_core+12.)*(1.-distance/max_r),|p|p.damage(distance));
-            s.damage(d,damage,false);
+            if s.damage(d,damage,false) {wrecked.push(d.clone());}
         }
+        for d in wrecked {self.equipment_destroyed(&d);}
         let mut killed_by_player = false;
         let pid = self.player_id;
         for i in 0..self.players.len() {
@@ -1326,6 +1366,7 @@ impl World {
             self.players[k].frags += 1;
         }
         self.players[i].health = 0.0;
+        self.players[i].kit_heal = 0.0;
         self.players[i].respawn = 3.4;
         self.players[i].jetting = false;
         self.players[i].skiing = false;
@@ -1371,6 +1412,8 @@ impl World {
         p.health = 100.0;
         p.energy = ENERGY_MAX;
         p.alive = true;
+        p.kits = KITS_PER_LIFE;
+        p.kit_heal = 0.0;
         p.carrying = None;
         p.yaw = yaw;
         p.pitch = 0.0;
@@ -1391,14 +1434,7 @@ impl World {
         f.carrier = None;
         f.pos = Vec3::new(pos.x, y, pos.z);
         f.drop_timer = 14.0;
-        self.msg(
-            if team == self.players[self.player_id].team {
-                "YOUR FLAG DROPPED"
-            } else {
-                "ENEMY FLAG DROPPED"
-            },
-            2.0,
-        );
+        // Flag text is announced by the client from flag state (flag_announce.rs).
         self.push_event("drop");
     }
 
@@ -1441,9 +1477,6 @@ impl World {
                 let at_home = self.flags[own].pos.distance(self.flags[own].home) < 2.5;
                 if !at_home && pos.distance(self.flags[own].pos) < 2.4 {
                     self.return_flag(own);
-                    if i == self.player_id {
-                        self.msg("FLAG RETURNED", 2.0);
-                    }
                 }
             }
 
@@ -1454,13 +1487,6 @@ impl World {
                     self.flags[enemy].drop_timer = 0.0;
                     self.players[i].carrying = Some(self.flags[enemy].team);
                     self.push_event("flag");
-                    if i == self.player_id {
-                        self.msg("YOU HAVE THE FLAG — GET HOME", 3.0);
-                    } else if self.players[i].team != self.players[self.player_id].team {
-                        self.msg("YOUR FLAG HAS BEEN TAKEN", 3.0);
-                    } else {
-                        self.msg("ALLY HAS THEIR FLAG", 2.0);
-                    }
                 }
             }
 
@@ -1492,13 +1518,6 @@ impl World {
         self.score[team.idx()] += 1;
         self.push_event(if team == self.players[self.player_id].team { "capture_win" } else { "capture_loss" });
         self.trauma = 0.55;
-        if i == self.player_id {
-            self.msg("CAPTURE", 3.2);
-        } else if team == self.players[self.player_id].team {
-            self.msg("ALLY CAPTURED THE FLAG", 3.0);
-        } else {
-            self.msg("ENEMY CAPTURED YOUR FLAG", 3.0);
-        }
         if self.score[team.idx()] >= CAPTURES {
             self.state = MatchState::Ended;
             self.msg(
@@ -1511,6 +1530,16 @@ impl World {
             );
             self.push_event("end");
         }
+    }
+
+    /// A generator's destruction is a visible, audible blast that hurts no one.
+    /// It travels as an ordinary explosion (serial plus snapshot), so clients
+    /// replaying a snapshot never see it twice.
+    fn equipment_destroyed(&mut self, d:&crate::equipment::Definition) {
+        if d.kind!=crate::equipment::Kind::Generator {return;}
+        self.blast_serial+=1;
+        self.explosions.push(Explosion {pos:d.pos()+Vec3::Y*2.,age:0.,max_r:GENERATOR_BLAST_RADIUS,kind:4});
+        self.spatial_sounds.push(("boom",d.pos()));
     }
 
     fn step_explosions(&mut self, dt: f32) {
@@ -1606,6 +1635,8 @@ impl World {
         let jet = p.map(|x| if x.jetting { 1 } else { 0 }).unwrap_or(0);
         let alive = p.map(|x| if x.alive { 1 } else { 0 }).unwrap_or(0);
         let cd = p.map(|x| x.cooldown).unwrap_or(0.0);
+        let kits = p.map(|x| x.kits).unwrap_or(0);
+        let kit_heal = p.map(|x| x.kit_heal).unwrap_or(0.0);
         let own_flag_home = self.flags.get(team).map(|f| {
             if f.carrier.is_none() && f.pos.distance(f.home) < 3.0 {
                 1
@@ -1652,7 +1683,7 @@ impl World {
         }
         let msg = self.equipment_prompt().unwrap_or_else(||self.message.clone()).replace('"', "");
         format!(
-            "{{\"health\":{:.1},\"energy\":{:.1},\"speed\":{:.1},\"yaw\":{:.4},\"pitch\":{:.4},\"px\":{:.2},\"py\":{:.2},\"pz\":{:.2},\"ember\":{},\"glacier\":{},\"time\":{:.1},\"state\":{},\"weapon\":{},\"flag\":{},\"ownFlag\":{},\"hit\":{:.2},\"flash\":{:.2},\"msg\":\"{}\",\"kills\":{},\"deaths\":{},\"winner\":{},\"team\":{},\"onGround\":{},\"ski\":{},\"jet\":{},\"alive\":{},\"cd\":{:.2},\"events\":\"{}\",\"blips\":\"{}\",\"mapSize\":{:.0}}}",
+            "{{\"health\":{:.1},\"energy\":{:.1},\"speed\":{:.1},\"yaw\":{:.4},\"pitch\":{:.4},\"px\":{:.2},\"py\":{:.2},\"pz\":{:.2},\"ember\":{},\"glacier\":{},\"time\":{:.1},\"state\":{},\"weapon\":{},\"flag\":{},\"ownFlag\":{},\"hit\":{:.2},\"flash\":{:.2},\"msg\":\"{}\",\"kills\":{},\"deaths\":{},\"winner\":{},\"team\":{},\"onGround\":{},\"ski\":{},\"jet\":{},\"alive\":{},\"cd\":{:.2},\"events\":\"{}\",\"blips\":\"{}\",\"mapSize\":{:.0},\"kits\":{},\"kitHeal\":{:.1}}}",
             health,
             energy,
             speed,
@@ -1682,7 +1713,9 @@ impl World {
             cd,
             self.events,
             blips,
-            self.map_size()
+            self.map_size(),
+            kits,
+            kit_heal
         )
     }
 }
@@ -2935,8 +2968,10 @@ mod equipment_tests {
         w.equipment[i].health=0.;w.players[0].team=Team::Ember;
         w.players[0].pos=pos+Vec3::X*3.5;w.input.interact=true;
         let energy=w.players[0].energy;
-        w.step_equipment(STEP);assert!(w.equipment[i].health>0.);assert!(w.equipment[i].powered);
+        w.step_equipment(STEP);assert!(w.equipment[i].health>0.);assert!(!w.equipment[i].powered,"offline until half repaired");
         assert!(w.players[0].energy<energy);
+        for _ in 0..600 {w.players[0].energy=ENERGY_MAX;w.step_equipment(STEP);if w.equipment[i].powered {break;}}
+        assert!(w.equipment[i].powered && w.equipment[i].health>=defs[i].max_health()*equipment::ONLINE_FRACTION);
     }
     #[test]
     fn equipment_snapshots_and_empty_server_reset() {
@@ -2993,6 +3028,26 @@ mod equipment_tests {
         assert!(!w.discs.iter().any(|d|d.team==Team::Ember));
     }
 }
+
+/// Visual size of a generator's destruction blast (kind 4). Cosmetic only.
+pub const GENERATOR_BLAST_RADIUS: f32 = 11.;
+
+/// Splash reaches equipment when nothing but the equipment's own mount lies
+/// between the blast and the object. The collision mesh does not tag which
+/// solid belongs to which object, so a hit inside the object's footprint column
+/// (its mount, pedestal or housing) counts as reaching it. Walls farther out
+/// still block the blast.
+fn splash_reaches(map:MapId,pillars:&[Pillar],blast:Vec3,end:Vec3,d:&crate::equipment::Definition)->bool {
+    let Some(t)=obstacle_hit(map,pillars,blast,end,0.) else {return true};
+    if t>=0.995 {return true;}
+    let hit=blast.lerp(end,t);let c=d.pos();
+    let horizontal=Vec3::new(hit.x-c.x,0.,hit.z-c.z).length();
+    horizontal<=d.radius+EQUIPMENT_MOUNT_MARGIN && hit.y<=c.y+d.radius && hit.y>=c.y-EQUIPMENT_MOUNT_DEPTH
+}
+/// How far an equipment mount extends beyond the object's hit radius, and how
+/// far below its centre, for `splash_reaches`.
+const EQUIPMENT_MOUNT_MARGIN: f32 = 1.0;
+const EQUIPMENT_MOUNT_DEPTH: f32 = 6.0;
 
 fn player_blast_distance(blast:Vec3,player:Vec3)->f32 {
     let spine=Vec3::new(player.x,blast.y.clamp(player.y,player.y+EYE),player.z);
@@ -3112,6 +3167,8 @@ fn make_player(team: Team, bot: bool, pos: Vec3, yaw: f32, role: BotRole) -> Pla
 
         cooldown: 0.0,
         weapon: 0,
+        kits: KITS_PER_LIFE,
+        kit_heal: 0.0,
         bot_role: role,
         bot_goal: pos,
         bot_think: 0.0,
@@ -3396,9 +3453,10 @@ mod line_of_sight_tests {
             seen.len(),&seen[..seen.len().min(8)]);
     }
 
-    /// Same rule for Raindance's basement halls. The roof turrets sit beside
-    /// the ramp openings and the atrium; the roof must still hide every hall
-    /// floor point from them (and from the lookout towers).
+    /// Same rule for Old Holler's (key `raindance`) sunken halls and the
+    /// generator basements beneath them. The roof turrets sit beside the ramp
+    /// openings and the atrium; nothing may show them a hall floor, basement
+    /// or service-passage point (nor may the lookout towers).
     #[test]
     fn raindance_turrets_cannot_see_into_the_halls() {
         let map=MapId::Raindance;
@@ -3406,15 +3464,17 @@ mod line_of_sight_tests {
         let defs=equipment::definitions(map);
         let to_world=|team:u8,lx:f32,y:f32,lz:f32| if team==0 {
             Vec3::new(1160.-lx,112.+y,480.-lz)} else {Vec3::new(800.+lx,112.+y,1400.+lz)};
+        // (x0, x1, z0, z1, floor above the base origin): hall, basement, passage.
+        let rooms:&[(f32,f32,f32,f32,f32)]=&[(-29.,29.,-25.,25.,-10.),(-10.5,10.5,-5.5,23.5,-18.),(-4.5,-1.5,25.3,31.3,-18.)];
         let (mut sampled,mut seen)=(0,Vec::new());
         for d in defs.iter().filter(|d|matches!(d.kind,Kind::Turret)) {
             let profile=equipment::profile(d.kind,d.weapon).unwrap();
-            for team in [0u8,1] {
-                let mut lx=-29.; while lx<=29. { let mut lz=-25.; while lz<=25. {
-                    let probe=to_world(team,lx,-8.5,lz);
+            for team in [0u8,1] { for &(x0,x1,z0,z1,level) in rooms {
+                let mut lx=x0; while lx<=x1 { let mut lz=z0; while lz<=z1 {
+                    let probe=to_world(team,lx,level+1.5,lz);
                     if let Some((fy,_))=pack.floor(probe) {
                         let pos=Vec3::new(probe.x,fy+1.2,probe.z);
-                        if (fy-102.).abs()<0.05 && pack.body_sweep(pos,pos+Vec3::Y*0.01).is_none() {
+                        if (fy-(112.+level)).abs()<0.05 && pack.body_sweep(pos,pos+Vec3::Y*0.01).is_none() {
                             sampled+=1;
                             let enemy=equipment::Candidate {index:0,team:1-d.team,pos,vel:Vec3::ZERO};
                             if let Some(a)=equipment::acquire_target(d.pos(),d.radius,d.team,&profile,true,[enemy],
@@ -3424,10 +3484,10 @@ mod line_of_sight_tests {
                         }
                     }
                 lz+=1.5;} lx+=1.5;}
-            }
+            }}
         }
-        assert!(sampled>3000,"too few hall samples ({sampled})");
-        assert!(seen.is_empty(),"{} hall points visible to turrets, e.g. {:?}",seen.len(),&seen[..seen.len().min(8)]);
+        assert!(sampled>3500,"too few hall and basement samples ({sampled})");
+        assert!(seen.is_empty(),"{} hall or basement points visible to turrets, e.g. {:?}",seen.len(),&seen[..seen.len().min(8)]);
     }
 
     /// Same rule for Frostline and Dustreach, over the rooms their Python
@@ -3778,5 +3838,221 @@ mod collision_budget_timing {
             println!("{map:?}: {} collision tris, tick avg {:.1} us worst {:.1} us over {ticks} ticks ({} players), query avg {:.2} us ({hits} hits)",
                 pack.triangle_count(), total / ticks as f64 * 1e6, worst * 1e6, world.players.len(), per_query * 1e6);
         }
+    }
+}
+
+
+#[cfg(test)]
+mod shield_and_kit_tests {
+    use super::*;
+    use crate::equipment::{self,Kind};
+    const MAPS:[MapId;5]=[MapId::Raindance,MapId::BroadsideClone,MapId::StonehengeClone,MapId::SnowblindClone,MapId::DesertOfDeathClone];
+
+    fn world(map:MapId)->World {
+        let mut w=World::new();w.set_map(map);w.start_rift(true);w.players.truncate(1);
+        w.players[0].team=Team::Glacier;w.players[0].pos=Vec3::new(1.,-500.,1.);w
+    }
+    fn first(map:MapId,kind:Kind)->usize {
+        equipment::definitions(map).iter().position(|d|d.team==0 && d.kind==kind).unwrap()
+    }
+
+    #[test]
+    fn floor_grenades_and_discs_reach_shielded_equipment_past_their_mounts() {
+        for map in MAPS {
+            for (i,d) in equipment::definitions(map).iter().enumerate()
+                .filter(|(_,d)|d.team==0 && matches!(d.kind,Kind::Turret|Kind::Sensor)) {
+                let c=d.pos();let mut tried=0;
+                for k in 0..8 {
+                    let a=k as f32/8.*std::f32::consts::TAU;
+                    let probe=Vec3::new(c.x+a.cos()*3.,c.y+4.,c.z+a.sin()*3.);
+                    let Some((fy,_))=crate::map_pack::on(map).and_then(|pk|pk.floor(probe)) else {continue};
+                    // Only open floor below the object: a deck over it rightly blocks.
+                    if fy>=c.y || c.y-fy>6. {continue;}
+                    tried+=1;
+                    let mut w=world(map);let before=w.equipment[i].shield;
+                    w.explode(Vec3::new(probe.x,fy+0.1,probe.z),MAX_PLAYERS,2,Team::Glacier);
+                    assert!(w.equipment[i].shield<before,"{map:?} {}: floor grenade at {a:.2} rad missed",d.id);
+                }
+                let _=tried;
+                let mut w=world(map);let from=c+Vec3::new(0.,3.,25.);
+                if obstacle_hit(map,&[],from,c,0.).is_some_and(|t|t<0.9) {continue;}
+                let before=w.equipment[i].shield;
+                w.discs.push(Disc{pos:from,vel:(c-from).normalize()*DISC_SPEED,team:Team::Glacier,owner:MAX_PLAYERS,life:5.,kind:0,spin:0.});
+                for _ in 0..60 {w.step_discs(STEP);}
+                assert!(w.equipment[i].shield<before,"{map:?} {}: an aimed disc missed",d.id);
+            }
+        }
+    }
+
+    #[test]
+    fn walls_beyond_the_mount_still_stop_splash() {
+        let mut blocked=0;
+        for map in MAPS {
+            for (i,d) in equipment::definitions(map).iter().enumerate().filter(|(_,d)|d.team==0 && d.kind==Kind::Turret) {
+                let c=d.pos();
+                for k in 0..16 {
+                    let a=k as f32/16.*std::f32::consts::TAU;
+                    for r in [5.,8.,11.] {
+                        let probe=Vec3::new(c.x+a.cos()*r,c.y+3.,c.z+a.sin()*r);
+                        let Some((fy,_))=crate::map_pack::on(map).and_then(|pk|pk.floor(probe)) else {continue};
+                        let blast=Vec3::new(probe.x,fy+0.1,probe.z);
+                        let delta=c-blast;let end=c-delta.normalize_or_zero()*d.radius.min(delta.length());
+                        let Some(t)=obstacle_hit(map,&[],blast,end,0.) else {continue};
+                        let hit=blast.lerp(end,t);
+                        if Vec3::new(hit.x-c.x,0.,hit.z-c.z).length()<=d.radius+EQUIPMENT_MOUNT_MARGIN+0.3 {continue;}
+                        let mut w=world(map);let (sh,hp)=(w.equipment[i].shield,w.equipment[i].health);
+                        w.explode(blast,MAX_PLAYERS,2,Team::Glacier);
+                        assert_eq!((w.equipment[i].shield,w.equipment[i].health),(sh,hp),"{map:?} {}: splash crossed a wall",d.id);
+                        blocked+=1;
+                    }
+                }
+            }
+        }
+        assert!(blocked>20,"the wall check must actually sample walls ({blocked})");
+    }
+
+    /// Every attacker fires at max rate with the best possible result: every
+    /// explosive lands point blank for its full damage, every bullet hits.
+    /// Returns the seconds until damage first gets through the shield to the
+    /// hull, or None if the shield holds for `secs`.
+    fn sustained(map:MapId,kind:Kind,weapon:u8,attackers:usize,secs:f32)->Option<f32> {
+        let mut w=world(map);let i=first(map,kind);let d=equipment::definitions(map)[i].clone();
+        let blast=crate::combat::player_weapon_blast(weapon).map(|b|b.max_damage);
+        let reload=weapon_reload(weapon);
+        let mut next:Vec<f32>=(0..attackers).map(|k|k as f32*reload/attackers as f32).collect();
+        let mut t=0.;
+        while t<secs {
+            for n in &mut next {
+                while *n<=t {
+                    // Isolated from splash on neighbours such as the generator.
+                    match blast {Some(dmg)=>{w.equipment[i].damage(&d,dmg,false);}
+                        None=>{w.equipment[i].damage(&d,8.,true);}}
+                    *n+=reload;
+                }
+            }
+            w.step_equipment(STEP);
+            assert!(w.equipment[i].powered,"the attacked object keeps its generator");
+            // Broken means damage gets past the shield to the hull.
+            if w.equipment[i].health<d.max_health() {return Some(t);}
+            t+=STEP;
+        }
+        None
+    }
+
+    #[test]
+    fn one_attacker_with_any_weapon_never_breaks_a_powered_shield() {
+        for kind in [Kind::Turret,Kind::Sensor] {
+            for weapon in [0u8,1,2] {
+                assert_eq!(sustained(MapId::Raindance,kind,weapon,1,60.),None,"{kind:?} broke under solo weapon {weapon}");
+            }
+        }
+    }
+
+    #[test]
+    fn focused_explosive_fire_breaks_shields_and_regen_keeps_running() {
+        for kind in [Kind::Turret,Kind::Sensor] {
+            for weapon in [0u8,2] {
+                let t=sustained(MapId::Raindance,kind,weapon,2,30.);
+                assert!(t.is_some_and(|t|t<20.),"{kind:?} held against two attackers with weapon {weapon}: {t:?}");
+            }
+            assert_eq!(sustained(MapId::Raindance,kind,1,2,60.),None,"two chainguns alone do not break it");
+            assert!(sustained(MapId::Raindance,kind,1,3,60.).is_some(),"three chainguns do");
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn print_time_to_break_table() {
+        for kind in [Kind::Turret,Kind::Sensor] {
+            for (weapon,name) in [(0u8,"disc"),(2,"grenade"),(1,"chaingun")] {
+                let row:Vec<String>=(1..=3).map(|n|sustained(MapId::Raindance,kind,weapon,n,120.)
+                    .map_or("never".into(),|t|format!("{t:.1}s"))).collect();
+                println!("{kind:?} {name}: 1p {} · 2p {} · 3p {}",row[0],row[1],row[2]);
+            }
+        }
+    }
+
+    #[test]
+    fn destroying_a_generator_explodes_once_harmlessly_and_replays_nothing() {
+        let mut w=world(MapId::Raindance);let g=first(MapId::Raindance,Kind::Generator);
+        let d=equipment::definitions(w.map)[g].clone();
+        w.players[0].team=Team::Ember;w.players[0].pos=d.pos()+Vec3::X*(d.radius+1.);w.players[0].health=100.;
+        w.equipment[g].health=1.;let serial=w.blast_serial;
+        w.equipment[g].damage(&d,0.5,true);
+        assert!(w.explosions.iter().all(|e|e.kind!=4),"no blast before the hull is gone");
+        let hits=|w:&World|w.explosions.iter().filter(|e|e.kind==4).count();
+        // Destroy it through the normal bullet path.
+        w.discs.push(Disc{pos:d.pos()+Vec3::Z*6.,vel:-Vec3::Z*BOLT_SPEED,team:Team::Glacier,owner:MAX_PLAYERS,life:1.,kind:1,spin:0.});
+        for _ in 0..4 {w.step_discs(STEP);}
+        assert!(w.equipment[g].health<=0. && w.equipment[g].offline);
+        assert_eq!((hits(&w),w.blast_serial),(1,serial+1),"one generator blast");
+        assert_eq!(w.players[0].health,100.,"the blast hurts no one");
+        // A wreck cannot be destroyed again.
+        w.explode(d.pos()+Vec3::X*(d.radius+0.1),MAX_PLAYERS,0,Team::Glacier);
+        assert_eq!(w.explosions.iter().filter(|e|e.kind==4).count(),1);
+        // Snapshot replay leaves the serial and the blast list as they were.
+        let mut m=Match::new(MapId::Raindance);m.world.equipment=w.equipment.clone();
+        m.world.explosions=w.explosions.clone();m.world.blast_serial=w.blast_serial;
+        let snap=m.snapshot();let mut client=World::new();client.set_map(MapId::Raindance);
+        for _ in 0..2 {client.apply_snapshot(&snap,0);}
+        assert_eq!((client.blast_serial,client.explosions.iter().filter(|e|e.kind==4).count()),(w.blast_serial,1));
+    }
+
+    #[test]
+    fn a_wrecked_generator_needs_half_hull_before_power_returns() {
+        let mut w=world(MapId::Raindance);let defs=equipment::definitions(w.map);
+        let g=first(MapId::Raindance,Kind::Generator);let t=first(MapId::Raindance,Kind::Turret);
+        w.equipment[g].damage(&defs[g],10000.,false);w.step_equipment(STEP);
+        assert!(!w.equipment[t].powered && w.equipment[t].shield==0.);
+        w.equipment[g].repair(&defs[g],defs[g].max_health()*0.4);w.step_equipment(STEP);
+        assert!(!w.equipment[t].powered,"40% is not enough");
+        w.equipment[g].repair(&defs[g],defs[g].max_health()*0.1);w.step_equipment(STEP);
+        assert!(w.equipment[t].powered && w.equipment[t].shield>0.,"50% brings the circuit and shields back");
+    }
+
+    #[test]
+    fn repair_kits_heal_once_per_life_and_refill_at_inventory() {
+        let mut w=world(MapId::Raindance);
+        w.players[0].team=Team::Ember;w.players[0].pos=Vec3::new(1000.,300.,1000.);
+        assert_eq!(w.players[0].kits,KITS_PER_LIFE);
+        w.players[0].health=100.;w.input.kit=true;w.step_kits(STEP);
+        assert_eq!(w.players[0].kits,1,"a full-armor player keeps the kit");
+        w.players[0].health=30.;w.step_kits(STEP);
+        assert_eq!(w.players[0].kits,0);assert!(w.players[0].kit_heal>0.);
+        let mut t=STEP;
+        while t<1.0 {w.step_kits(STEP);t+=STEP;}
+        w.players[0].health-=10.;// taking damage does not cancel the heal
+        while t<KIT_SECONDS+0.2 {w.step_kits(STEP);t+=STEP;}
+        assert!((w.players[0].health-80.).abs()<0.6,"60 armor over two seconds, minus the hit: {}",w.players[0].health);
+        assert_eq!(w.players[0].kit_heal,0.);
+        let before=w.players[0].health;w.step_kits(STEP);
+        assert_eq!(w.players[0].health,before,"no kit, no heal");
+        // Refill at a powered inventory station.
+        let defs=equipment::definitions(w.map);let s=first(MapId::Raindance,Kind::Inventory);
+        let mut p=w.players[0].clone();p.team=Team::Ember;p.health=100.;p.pos=defs[s].pos();
+        equipment::service(&defs[s],&mut w.equipment[s],&mut p,true,STEP);
+        assert_eq!(p.kits,KITS_PER_LIFE);
+        // Death cancels an active heal; respawn restores the kit.
+        w.players[0].kits=1;w.players[0].health=50.;w.step_kits(STEP);
+        w.kill(0,None,"Fall");assert_eq!(w.players[0].kit_heal,0.);
+        w.players[0].kits=0;w.respawn(0);assert_eq!(w.players[0].kits,KITS_PER_LIFE);
+    }
+
+    #[test]
+    fn prediction_never_spends_kits_and_network_intent_is_validated() {
+        let mut m=Match::new(MapId::Raindance);let Some(a)=m.join(3,"medic") else {panic!()};
+        m.world.players[a].health=40.;
+        let mut commands=vec![None;m.world.players.len()];
+        for seq in 1..=((KIT_SECONDS/STEP) as u64+6) {
+            commands[a]=Some(Command{seq,kit:true,..Default::default()});m.step(&commands);
+        }
+        let p=&m.world.players[a];
+        assert!(p.kits==0 && p.health>95.,"the server spends one kit and heals: {} hp, {} kits",p.health,p.kits);
+        // A client predicting the same intent never touches its kit count or armor.
+        let mut client=World::new();client.set_map(MapId::Raindance);
+        assert!(client.apply_snapshot(&m.snapshot(),3));
+        let me=client.player_id;client.players[me].kits=1;client.players[me].health=40.;
+        client.predict_command(Command{seq:999,kit:true,..Default::default()});
+        assert_eq!((client.players[me].kits,client.players[me].health),(1,40.));
     }
 }

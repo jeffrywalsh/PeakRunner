@@ -1,15 +1,16 @@
 # PeakRunner native playtest
 
-Original Raindance, Tower Complex, Cairnhold, Frostline and Dustreach map
+Original Old Holler, Tower Complex, Cairnhold, Frostline and Dustreach map
 assets are embedded in the standalone executable. No Tribes install or separate asset download is needed.
 Version .20260921.1 requires a matching server and map collection; older
 .20260919.4 clients and servers are incompatible. This release adds saved Find
 match preferences (never passwords) and server-selected CTF map rotation.
 All five rotation maps are original: Tower Complex, Cairnhold, Frostline and
 Dustreach replace the four earlier reference layouts, and Skybreak Bastions is
-removed. Raindance keeps its layout but is cleaned up: no flickering
-overlapping surfaces, hall ramps that reach the roof, 8 spawn points per team,
-new materials and baked lighting. No separate private map packs ship. Map traversal and balance still need human playtesting. Approved
+removed. Raindance is renamed Old Holler and keeps its layout but is cleaned
+up: no flickering overlapping surfaces, hall ramps that reach the roof, 8 spawn
+points per team, new materials and baked lighting, and a generator basement
+under each hall reached by an atrium stair or a service stair from outside. No separate private map packs ship. Map traversal and balance still need human playtesting. Approved
 movement constants are unchanged.
 
 - macOS: Apple Silicon only. Extract the ZIP and open PeakRunner.app. The bundle
