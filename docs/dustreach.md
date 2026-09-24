@@ -136,8 +136,67 @@ Ascend's maps is copied. All dimensions are local to a base, mirrored for blue.
   (`dustreach_underground_and_storehouse_routes_are_walkable`). Another checks
   both generators stand in cut cells, 2 m below the ground.
 
+## Sewer: a culvert across the whole map
+
+A user-requested cross-map tunnel (`scripts/assets/dustreach_sewer.py`). Our
+Ascend research advised against tunnels between bases, so this one is built
+for counterplay: open mouths outside each citadel that defenders and turrets
+can cover, and a slower crossing than the surface. World coordinates; blue is
+the 180-degree rotation of red.
+
+- **Culvert:** one 8 m cell wide wall to wall, 5.5 m clear inside, sandstone
+  block walls, lamp strips and stone ribs every 16 m, a dark drainage channel.
+  The red leg runs straight along x 1072-1080 from the red mouth (z 648) to a
+  cross hall under the Sun Gate (x 968-1080, z 1016-1032, 16 m deep); the blue
+  leg leaves the hall's west end. It never passes under a citadel, cistern,
+  tunnel or storehouse (12 m clearance, tested).
+- **Floor:** 8.5 m under the dunes (headroom plus at least 3 m of cover) with a
+  10° grade limit, 16° for the last 32 m into each mouth, so it rolls from
+  about 127 m at the portals down to 105 m under the basin and back to 127 m in
+  the hall.
+- **Mouths:** an open trench, x 1072-1080, z 584-648, behind the red citadel's
+  back-left corner, 16 m east of the watch tower. The portal is 54 m from the
+  red flag; the trench climbs about 18 m to the ground (at most 21°), with walls
+  up to 13 m deep at the portal.
+- **Midfield shafts:** an open 8 m drop shaft in each leg at the dune dip
+  (red x 1072-1080, z 936-944), about 9 m deep, 99 m from the gate, 283 m from
+  its own flag.
+- **Flank shafts:** one per base, on the landing-pad side, at the end of a
+  branch culvert east along z 680-688 (red shaft x 1152-1160). About 15 m
+  deep; 134 m from its own flag, 96 m past the watch tower and 32 m past the
+  pad. The other flank would need a branch across the citadel's front or under
+  it, so there is only one.
+- **Openings:** each shaft has a flush stone kerb, a grate leaf thrown open
+  beside it, iron rungs (decorative; there are no ladders) and four short lit
+  posts at its corners. Players drop in and jet out.
+- **Terrain:** nothing is re-shaped. 156 cells are cut; the 136 covered ones get
+  a roof that copies the terrain exactly, so the dunes look and collide as
+  before. Trench and shaft walls rise to the terrain edge on the grid lines.
+
+Checks: Python `SewerTests` (symmetry, clearance from base rooms, grades and
+cover, the roof is the terrain, body-band walk mouth to mouth and to both
+flank shafts, walls up to the ground at every opening, no turret sees into
+the covered culvert, no spawns in it, collision budget). Rust:
+`dustreach_sewer_is_seamless_and_open_mouth_to_mouth`,
+`dustreach_sewer_leg_skis_mouth_to_hall` (a skier entering at 30 m/s reaches
+the hall at 15 m/s; at 16 m/s, at 8 m/s), `dustreach_sewer_shafts_and_mouths_jet_out`
+(real jet movement out of every shaft and both mouths), and the ignored
+`dustreach_surface_versus_sewer_crossing_time` probe. With one simple
+ski-and-jet driver, mouth top to mouth top took 44.5 s over the dunes and
+114.7 s through the sewer. A skilled player would close some of that gap, but
+not the two right-angle turns and the climbs out.
+
+Counts: 1,632 collision triangles for the sewer (272 of them the roof), 9,836
+for the whole map; lightmap pages 13 → 20. The release timing probe moved
+Dustreach's average tick from 108 to 120 µs (worst 253 → 327 µs). Walking
+entries to the flag court (2), keep hall (3) and generator room (2) are
+unchanged.
+
 ## Known gaps
 
+- The sewer is untested by people: whether it becomes the default way in, how
+  hard the mouths are to hold, and whether the drop shafts feel fair. Bots don't
+  use it.
 - Distant dunes now fade into a warm haze: `sky.fogColor` 0.80 0.69 0.52.
 - Kit sensor, inventory and generator models are shared; turrets now use the
   kit's mount plus the client's runtime head.

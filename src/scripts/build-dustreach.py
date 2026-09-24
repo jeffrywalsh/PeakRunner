@@ -22,6 +22,7 @@ import numpy as np
 from assets import dustreach_citadel
 from assets import dustreach_gate
 from assets import dustreach_materials
+from assets import dustreach_sewer
 from assets import dustreach_terrain
 from assets import pack_writer
 from assets import structure_kit
@@ -97,9 +98,11 @@ def terrain_sites(definition):
 
 def holes(definition):
     """Terrain cells cut under the underground level (cistern, tunnel, tower
-    room): sorted cell indices. Every rect must lie on the 8 m grid; every
-    cell lies under the terrace or the tower, so the ground at the cut's edge
-    keeps the flat site height and nothing needs pinning."""
+    room) and for the cross-map sewer: sorted cell indices. Every base rect
+    must lie on the 8 m grid and under the terrace or the tower, so the ground
+    at the cut's edge keeps the flat site height. Covered sewer cells are
+    roofed by an exact copy of the terrain (dustreach_sewer.lid); its trench
+    and shafts are open, walled up to the ground on the grid lines."""
     step = dustreach_terrain.STEP
     cells = set()
     for base in definition['bases']:
@@ -111,7 +114,9 @@ def holes(definition):
             for iz in range(round(wz0/step), round(wz1/step)):
                 for ix in range(round(wx0/step), round(wx1/step)):
                     cells.add((ix, iz))
-    return sorted(iz*256+ix for ix, iz in cells)
+    sewer = set(dustreach_sewer.all_cells())
+    if cells & sewer: raise ValueError('the sewer must not cut into a base')
+    return sorted(iz*256+ix for ix, iz in cells | sewer)
 
 
 def terrain_grid(definition):
@@ -187,6 +192,16 @@ def build(output, bake=True):
     mesh = kit.Mesh(); mesh.lamps = []
     flags, spawns, spawn_points, instances, base_triangles = build_structures(definition, mesh)
     grid = terrain_grid(definition)
+    before = len(mesh.collision)//9
+    sewer, sewer_lamps = dustreach_sewer.build(mesh, grid)
+    mesh.lamps.extend(sewer_lamps)
+    lid_render, lid_collision = dustreach_sewer.lid(grid)
+    sewer_triangles = len(mesh.collision)//9-before+len(lid_collision)//9
+    instances.append(dict(asset=dustreach_sewer.ASSET_ID, position=list(sewer['centre']), yaw=0,
+                          anchors={k: list(v) for k, v in sewer.items()}))
+    # The sewer's roof collides like the ground it replaces. It is appended
+    # after baking (below) so it keeps the terrain shading path.
+    mesh.collision.extend(lid_collision)
     heights = bytearray(struct.pack('<65536H', *[round(float(v)*32) for v in grid.ravel()]))
     weights = dustreach_terrain.weights(grid).tobytes()
     if sys.byteorder != 'little': mesh.vertices.byteswap(); mesh.collision.byteswap()
@@ -200,6 +215,7 @@ def build(output, bake=True):
     lightmap = None
     if bake:
         vertices, textures, count, lightmap = pack_writer.bake_lightmaps(vertices, textures, count, mesh.lamps, kit)
+    vertices += np.asarray(lid_render, '<f4').tobytes()
     files = {'height.bin': bytes(heights), 'vertices.bin': vertices,
              'collision.bin': mesh.collision.tobytes(), 'weights.rgba': bytes(weights),
              'textures.rgba': bytes(textures), 'ambient.f32': wind(definition['seed'])}
@@ -213,6 +229,7 @@ def build(output, bake=True):
         sky={'visibleDistance': '2600', 'fogDistance': '1500', 'fogColor': '0.80 0.69 0.52'},
         asset_sha256=pack_writer.source_hash(dustreach_citadel.__file__),
         gate_asset_sha256=pack_writer.source_hash(dustreach_gate.__file__),
+        sewer_asset_sha256=pack_writer.source_hash(dustreach_sewer.__file__),
         structure_kit_sha256=pack_writer.source_hash(structure_kit.__file__),
         terrain_source_sha256=pack_writer.source_hash(dustreach_terrain.__file__),
         material_source_sha256=pack_writer.source_hash(dustreach_materials.__file__),
@@ -222,9 +239,10 @@ def build(output, bake=True):
         definition_sha256=pack_writer.source_hash(ROOT/'maps/dustreach.json'))
     pack_writer.write_pack(output, files, manifest)
     print(f'Built {definition["name"]}: {len(mesh.collision)//9} solid triangles '
-          f'({base_triangles//2} per citadel, {len(mesh.collision)//9-base_triangles} gate and ruins), '
+          f'({base_triangles//2} per citadel, {len(mesh.collision)//9-base_triangles-sewer_triangles} gate and ruins, '
+          f'{sewer_triangles} sewer), '
           f'{len(manifest["holes"])} terrain holes, '
-          f'{len(mesh.vertices)//36} render triangles'
+          f'{len(mesh.vertices)//36+len(lid_render)//36} render triangles'
           + (f', {lightmap["pages"]} lightmap pages' if lightmap else ', unbaked'))
 
 

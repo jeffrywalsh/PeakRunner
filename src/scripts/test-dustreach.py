@@ -16,6 +16,7 @@ from assets import budgets
 from assets import dustreach_citadel as base
 from assets import dustreach_gate as gate
 from assets import dustreach_materials
+from assets import dustreach_sewer as sewer
 from assets import dustreach_terrain
 
 HERE = Path(__file__).parent
@@ -388,7 +389,7 @@ class DustreachTests(unittest.TestCase):
         spec, _, soup, grid = self.whole_map()
         cells = build.holes(spec)
         per_base = sum((x1-x0)*(z1-z0)/64 for x0, x1, z0, z1 in base.HOLES.values())
-        self.assertEqual(len(cells), 2*per_base, 'hole rects overlap or leave the grid')
+        self.assertEqual(len(cells), 2*per_base+len(sewer.all_cells()), 'hole rects overlap or leave the grid')
         for b in spec['bases']:
             oy = b['position'][1]
             m = kit.Mesh(); m.origin = tuple(b['position']); m.yaw = math.radians(b['yaw'])
@@ -581,6 +582,180 @@ class DustreachTests(unittest.TestCase):
                 digests.append({f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in out.iterdir()})
             self.assertEqual(digests[0], digests[1])
             self.assertEqual(len(digests[0]), 7)
+
+class SewerTests(unittest.TestCase):
+    """The cross-map sewer (assets/dustreach_sewer.py): a covered culvert
+    from one team's rear to the other's, open at two trench mouths, two
+    midfield shafts and two flank shafts."""
+    @classmethod
+    def setUpClass(cls):
+        spec, mesh, _, grid = DustreachTests.whole_map()
+        cls.spec, cls.grid = spec, grid
+        cls.p = sewer.plan(grid)
+        m = kit.Mesh(); m.lamps = []
+        cls.anchors, cls.lamps = sewer.build(m, grid)
+        cls.sewer_mesh = m
+        cls.lid_render, cls.lid_collision = sewer.lid(grid)
+        cls.soup = Soup(list(mesh.collision)+list(m.collision)+cls.lid_collision)
+        cls.structures = mesh
+
+    def floor(self, x, z):
+        """Expected floor at a world point on the culvert's centre lanes."""
+        p = self.p
+        rx, rz = (2048-x, 2048-z) if z > 1024 else (x, z)
+        if sewer.BRANCH_IZ*8 <= rz <= sewer.BRANCH_IZ*8+8 and rx > 1080:
+            return float(np.interp(rx, p['branch_x'], p['branch']))
+        if rz < sewer.LEG_Z[0]: return sewer.trench_floor(p, rx, rz)
+        if rz >= sewer.LEG_Z[1]: return p['hall']
+        return float(np.interp(rz, p['leg_z'], p['leg']))
+
+    def test_cells_are_symmetric_and_clear_of_every_base_room(self):
+        cells = sewer.all_cells()
+        for c, kind in cells.items():
+            self.assertEqual(cells.get(sewer.mirror(c)), kind, c)
+        base_cells = set(build.holes(self.spec))-set(sewer.holes())
+        self.assertEqual(len(build.holes(self.spec)), len(base_cells)+len(cells))
+        # At least 12 m from the terrace, tower, storehouse, cistern and tunnel.
+        rects = [(-base.TX, base.TX, base.TZ0, base.TZ1), base.TOWER, base.STORE, *base.HOLES.values()]
+        for b in self.spec['bases']:
+            for x0, x1, z0, z1 in rects:
+                (ax, az), (bx, bz) = build.to_world(b, x0, z0), build.to_world(b, x1, z1)
+                wx0, wx1, wz0, wz1 = min(ax, bx), max(ax, bx), min(az, bz), max(az, bz)
+                for ix, iz in cells:
+                    cx0, cx1, cz0, cz1 = ix*8, ix*8+8, iz*8, iz*8+8
+                    gap = math.hypot(max(wx0-cx1, cx0-wx1, 0), max(wz0-cz1, cz0-wz1, 0))
+                    self.assertGreaterEqual(gap, 12.0, ((ix, iz), (x0, x1, z0, z1)))
+
+    def test_floor_grades_and_cover(self):
+        p = self.p
+        sewer.check_cover(p)
+        leg = np.degrees(np.arctan(np.abs(np.diff(p['leg']))/8))
+        self.assertLessEqual(leg[sewer.PORTAL_CELLS:].max(), 10+1e-9)
+        self.assertLessEqual(leg.max(), 16+1e-9)
+        self.assertLessEqual(np.degrees(np.arctan(np.abs(np.diff(p['branch']))/8)).max(), 10+1e-9)
+        for x in (1072, 1076, 1080):
+            t = [sewer.trench_floor(p, x, z) for z in np.arange(sewer.TRENCH_Z[0], sewer.TRENCH_Z[1]+.1, 2.0)]
+            self.assertLess(np.degrees(np.arctan(np.abs(np.diff(t))/2)).max(), 22, x)
+        # Level cells: the junction, both shafts and the hall.
+        j = int((sewer.BRANCH_IZ*8-sewer.LEG_Z[0])//8); m = int((sewer.MID_IZ*8-sewer.LEG_Z[0])//8)
+        self.assertEqual(p['leg'][j], p['leg'][j+1]); self.assertEqual(p['leg'][j], p['branch'][0])
+        self.assertEqual(p['leg'][m], p['leg'][m+1]); self.assertEqual(p['branch'][-1], p['branch'][-2])
+        self.assertEqual(p['leg'][-1], p['hall'])
+
+    def test_roof_copies_the_terrain_exactly(self):
+        q = sewer.quantize(self.grid)
+        col = np.array(self.lid_collision).reshape(-1, 3)
+        self.assertEqual(len(col), 6*len(sewer.roofed_cells()))
+        for x, y, z in col:
+            self.assertEqual(y, q[int(round(z/8)), int(round(x/8))])
+        render = np.array(self.lid_render).reshape(-1, 12)
+        self.assertTrue(np.all(render[:, 11] == -2.0), 'the roof renders as terrain')
+        roof = Soup(self.lid_collision)
+        for ix, iz in sewer.roofed_cells():
+            for fx, fz in ((.25, .3), (.6, .7)):
+                x, z = (ix+fx)*8, (iz+fz)*8
+                t, _ = roof.hits((x, 400, z), (0, -1, 0))
+                self.assertAlmostEqual(400-t[0], sewer.surface(q, x, z), places=3)
+
+    def route(self):
+        """Centre lane from the red trench top to the blue trench top, 2 m steps."""
+        p, pts = self.p, []
+        for z in np.arange(586, 1018, 2.0): pts.append((1076.0, z))
+        for x in np.arange(1076, 970, -2.0): pts.append((x, 1024.0))
+        for z in np.arange(1030, 1462.1, 2.0): pts.append((972.0, z))
+        return pts
+
+    def assert_lane_clear(self, xz, name):
+        """A body-wide band at knee, chest and head height is clear between
+        every pair of lane points, each over a floor where expected."""
+        pts = []
+        for x, z in xz:
+            e = self.floor(x, z)
+            t, ny = self.soup.hits((x, e+2.0, z), (0, -1, 0))
+            self.assertTrue(len(t), (name, x, z, 'no floor'))
+            # The trench floor is straight between 8 m corners under its curve.
+            self.assertAlmostEqual(e+2.0-t[0], e, delta=.25 if min(z, 2048-z) < sewer.LEG_Z[0] else .02, msg=(name, x, z))
+            e = e+2.0-t[0]
+            pts.append(np.array((x, e, z)))
+        for a, b in zip(pts, pts[1:]):
+            d = b-a; side = np.cross(d/np.linalg.norm(d), (0, 1, 0))
+            for h in (.45, 1.2, 2.2):
+                for off in (-.45, 0, .45):
+                    s = a+(0, h, 0)+side*off; e = b+(0, h, 0)+side*off
+                    self.assertEqual(self.soup.first(s, e-s, 1.0), np.inf, (name, a, b, h, off))
+
+    def test_culvert_is_walkable_mouth_to_mouth_and_to_both_flank_shafts(self):
+        self.assert_lane_clear(self.route(), 'main')
+        for side in (1, -1):
+            xs = np.arange(1076, 1157, 2.0)
+            lane = [(x, 684.0) for x in xs] if side > 0 else [(2048-x, 2048-684.0) for x in xs]
+            self.assert_lane_clear(lane, f'branch {side}')
+
+    def test_open_cells_have_walls_up_to_the_ground_and_covered_cells_a_roof(self):
+        q = sewer.quantize(self.grid); cells = sewer.all_cells()
+        for (ix, iz), kind in cells.items():
+            x0, z0 = ix*8, iz*8
+            fc = self.floor(x0+4, z0+4)
+            if kind not in sewer.OPEN:
+                self.assertAlmostEqual(self.soup.first((x0+4, fc+.5, z0+4), (0, 1, 0)), sewer.HEAD-.5, delta=.6)
+                continue
+            self.assertEqual(self.soup.first((x0+4, fc+.5, z0+4), (0, 1, 0)), np.inf, ((ix, iz), 'open to the sky'))
+            for (dx, dz), (ex, ez) in (((-1, 0), (x0, None)), ((1, 0), (x0+8, None)), ((0, -1), (None, z0)), ((0, 1), (None, z0+8))):
+                n = cells.get((ix+dx, iz+dz))
+                if n is not None and n in sewer.OPEN: continue
+                for u in np.arange(.4, 7.61, 1.2):
+                    x = ex if ex is not None else x0+u
+                    z = ez if ez is not None else z0+u
+                    top = sewer.edge(q, x, z)
+                    fl = self.floor(x-dx*.5, z-dz*.5)
+                    low = fl+sewer.HEAD+.3 if n is not None else fl+.3
+                    for y in np.arange(low, top-.3, 1.0):
+                        o = (x-dx*.4, y, z-dz*.4)
+                        self.assertLess(self.soup.first(o, (dx, 0, dz), 1.0), .6, ((ix, iz), kind, x, z, y, 'seam'))
+
+    def test_no_turret_can_see_into_the_covered_culvert_and_no_one_spawns_there(self):
+        targets = []
+        for ix, iz in sewer.roofed_cells():
+            for fx, fz in ((.25, .25), (.75, .25), (.25, .75), (.75, .75)):
+                x, z = (ix+fx)*8, (iz+fz)*8
+                targets.append((x, self.floor(x, z)+LIFT+.8, z))
+        targets = np.array(targets)
+        turrets = [e for e in self.structures.entities if e['kind'] == 'turret']
+        for e in turrets:
+            p = np.array(e['position']); d = targets-p; dist = np.linalg.norm(d, axis=1)
+            near = dist < 150
+            if not near.any(): continue
+            starts = p+d[near]/dist[near, None]*(e['radius']+.6)
+            clear = ~self.soup.blocked_many(starts, targets[near])
+            self.assertEqual(int(clear.sum()), 0, (e['id'], targets[near][clear][:5]))
+        import json
+        pack = json.loads((HERE.parent/'assets/maps/dustreach/map.json').read_text())
+        for team in pack['spawn_points']:
+            for x, y, z, _ in team:
+                self.assertNotIn((int(x//8), int(z//8)), sewer.all_cells(), (x, z))
+
+    def test_openings_sit_where_the_design_says(self):
+        a = self.anchors
+        red_flag = np.array(build.to_world(self.spec['bases'][0], *base.FLAG))
+        self.assertLess(np.hypot(*(np.array(a['mouth_red'])[[0, 2]]-red_flag)), 60)
+        for name in ('shaft_mid_red', 'shaft_flank_red'):
+            depth = sewer.surface(self.p['q'], a[name][0], a[name][2])-a[name][1]
+            self.assertTrue(6 < depth < 20, (name, depth))
+        # The flank shaft is well out on the flank: past the landing pad and
+        # 90 m or more from the citadel's walls.
+        fx, _, fz = a['shaft_flank_red']
+        self.assertGreater(fx-4-build.to_world(self.spec['bases'][0], base.TOWER[0], 0)[0], 90)
+        for name in a:
+            if name.endswith('_red'):
+                r, b = np.array(a[name]), np.array(a[name.replace('_red', '_blue')])
+                self.assertTrue(np.allclose(r[[0, 2]]+b[[0, 2]], 2048) and r[1] == b[1], name)
+
+    def test_geometry_fits_its_budget_without_degenerate_triangles(self):
+        tris = np.array(self.sewer_mesh.collision).reshape(-1, 3, 3)
+        area = np.linalg.norm(np.cross(tris[:, 1]-tris[:, 0], tris[:, 2]-tris[:, 0]), axis=1)
+        self.assertGreater(area.min(), 1e-6)
+        self.assertLess(len(tris)+len(self.lid_collision)//9, 2000)
+
 
 class SpawnForwardClearance(unittest.TestCase):
     """Every committed spawn faces open floor: a clear body-width view for
