@@ -97,13 +97,18 @@ compatibility change, and no gameplay change.
   short transient. Oscillators are band-limited (polyBLEP saws), filters are
   zero-delay state-variable filters, envelopes rise and fall smoothly, and a
   gentle tanh saturation glues the layers. Flag and match cues are warm
-  detuned-saw stings an octave lower instead of bells. Measured change, spectral
-  centroid before → after: shield hit 1559 → 291 Hz, ski 7971 → 438 Hz, jet
-  3254 → 180 Hz, repair kit 1913 → 286 Hz; tails now 0.3–3.3 s. Tests keep the
-  weight (minimum energy below 150 Hz per cue) and forbid aliasing buzz (under 1%
-  above 12 kHz for tonal sounds).
+  detuned-saw stings an octave lower instead of bells. The weight and envelope
+  targets were calibrated privately against reference game audio kept in ignored
+  `research/audio-reference/` (study only: nothing from it is copied, resampled
+  or mixed into what ships). That pass pulled an over-muddy first attempt back
+  up: weight comes from 150–500 Hz body, not pure sub. Spectral centroid,
+  original → now: disc fire 176 → 460 Hz, near explosion 1390 → 350 Hz, jet
+  3254 → 152 Hz, ski 7971 → 2715 Hz, chaingun 1386 → 992 Hz. The disc idle sits
+  at ~300 Hz with a 10 Hz throb; the generator hum pulses at 12 Hz. Tests keep
+  the weight (minimum share below 150 Hz per cue, below 500 Hz for the hums) and
+  forbid aliasing buzz (under 1% above 12 kHz for tonal sounds).
 - **Held-weapon idle hums.** The weapon in your hands hums quietly: the disc
-  launcher a deep throbbing electric hum (55 Hz with a 3 Hz throb) with a
+  launcher a throbbing electric hum (around 300 Hz, pulsing 10 times a second) with a
   spinning whir inside it, the chaingun a low motor tick, the grenade launcher a
   mechanical settle. Only your own weapon; ducked to 30% while it fires; the
   mixer crossfades on a switch.
