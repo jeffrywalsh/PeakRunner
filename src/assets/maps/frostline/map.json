@@ -18,9 +18,9 @@
     "position": "-384 -160 54",
     "scale": "720 150 1"
   },
-  "texture_count": 35,
+  "texture_count": 36,
   "lightmap": {
-    "pages": 15,
+    "pages": 16,
     "first_layer": 20,
     "texel_m": 0.5,
     "sun": [
@@ -28,7 +28,7 @@
       0.57735,
       -0.57735
     ],
-    "lamps": 190,
+    "lamps": 208,
     "baker_sha256": "66d1c04a0581f283b62d4a01a9229abd22fbd18a738474c8c5c148db84800fed"
   },
   "version": 1,
@@ -261,7 +261,7 @@
       "kind": "generator",
       "position": [
         1024.0,
-        228.5,
+        228.0,
         621.5
       ],
       "team": 0,
@@ -393,7 +393,7 @@
       "kind": "generator",
       "position": [
         1024.0,
-        228.5,
+        228.0,
         1426.5
       ],
       "team": 1,
@@ -523,7 +523,7 @@
   ],
   "instances": [
     {
-      "asset": "frostline-station-v3",
+      "asset": "frostline-station-v4",
       "team": 0,
       "position": [
         1024,
@@ -549,14 +549,14 @@
             642.0
           ],
           [
-            1032.25,
+            1033.0,
             233.0,
             610.0
           ],
           [
             1004.0,
             230.0,
-            615.25
+            614.2
           ],
           [
             996.0,
@@ -581,7 +581,7 @@
         ],
         "generator": [
           1024.0,
-          226.0,
+          225.5,
           621.5
         ],
         "gen_entrances": [
@@ -592,13 +592,13 @@
           ],
           [
             1016.6,
-            226.0,
+            225.5,
             628.0
           ]
         ],
         "basement": [
           1024.0,
-          226.0,
+          225.5,
           627.0
         ],
         "annex": [
@@ -641,7 +641,7 @@
       }
     },
     {
-      "asset": "frostline-station-v3",
+      "asset": "frostline-station-v4",
       "team": 1,
       "position": [
         1024,
@@ -667,14 +667,14 @@
             1406.0
           ],
           [
-            1015.75,
+            1015.0,
             233.0,
             1438.0
           ],
           [
             1044.0,
             230.0,
-            1432.75
+            1433.8
           ],
           [
             1052.0,
@@ -699,7 +699,7 @@
         ],
         "generator": [
           1024.0,
-          226.0,
+          225.5,
           1426.5
         ],
         "gen_entrances": [
@@ -710,13 +710,13 @@
           ],
           [
             1031.4,
-            226.0,
+            225.5,
             1420.0
           ]
         ],
         "basement": [
           1024.0,
-          226.0,
+          225.5,
           1421.0
         ],
         "annex": [
@@ -759,7 +759,7 @@
       }
     },
     {
-      "asset": "frostline-beacon-v1",
+      "asset": "frostline-beacon-v2",
       "position": [
         1024,
         262,
@@ -774,6 +774,16 @@
         "perch": [
           1024.0,
           274.4,
+          1024.0
+        ],
+        "point": [
+          1024.0,
+          262,
+          1024.0
+        ],
+        "point_beacon": [
+          1024.0,
+          279.5,
           1024.0
         ],
         "windbreaks": [
@@ -801,7 +811,49 @@
       }
     },
     {
-      "asset": "frostline-cavern-v1",
+      "asset": "cnh-tower-v1",
+      "id": "west-col",
+      "position": [
+        896,
+        286.03125,
+        1024
+      ],
+      "anchors": {
+        "point": [
+          896.0,
+          286.03125,
+          1024.0
+        ],
+        "beacon": [
+          896.0,
+          303.53125,
+          1024.0
+        ]
+      }
+    },
+    {
+      "asset": "cnh-tower-v1",
+      "id": "east-col",
+      "position": [
+        1152,
+        286.03125,
+        1024
+      ],
+      "anchors": {
+        "point": [
+          1152.0,
+          286.03125,
+          1024.0
+        ],
+        "beacon": [
+          1152.0,
+          303.53125,
+          1024.0
+        ]
+      }
+    },
+    {
+      "asset": "frostline-cavern-v2",
       "position": [
         1024.0,
         214.0,
@@ -829,26 +881,110 @@
   ],
   "ambient_emitters": [],
   "sky": {
-    "visibleDistance": "700",
-    "fogDistance": "220",
+    "visibleDistance": "900",
+    "fogDistance": "180",
     "fogColor": "0.84 0.87 0.90"
   },
-  "trees": 112,
-  "asset_sha256": "cee350fd38c533aef602e995ad45d4a31c2e5e80eb8118ad6d33d3965e247144",
-  "beacon_asset_sha256": "f7ba9c7d254d498c48b95ee5a343a67a3f059f399235b31478f4096a1a532bdb",
-  "cavern_asset_sha256": "88dbc804447a9b2b4f2d6d71c0c0ef485ef92de209f0338bb1247f2a12a68b99",
+  "trees": 110,
+  "control_points": [
+    {
+      "id": "beacon",
+      "name": "Beacon",
+      "pos": [
+        1024,
+        262,
+        1024
+      ],
+      "radius": 12.0,
+      "ctf_active": true,
+      "drain": {
+        "radius": 60,
+        "rate": 10
+      }
+    },
+    {
+      "id": "west-col",
+      "name": "West Col",
+      "pos": [
+        896,
+        286.03125,
+        1024
+      ],
+      "radius": 12.0,
+      "ctf_active": false
+    },
+    {
+      "id": "east-col",
+      "name": "East Col",
+      "pos": [
+        1152,
+        286.03125,
+        1024
+      ],
+      "radius": 12.0,
+      "ctf_active": false
+    }
+  ],
+  "look": {
+    "sun_color": [
+      0.92,
+      0.95,
+      1.0
+    ],
+    "sun_disc": 0.45,
+    "exposure": 1.0,
+    "ambient_sky": [
+      0.66,
+      0.72,
+      0.8
+    ],
+    "ambient_ground": [
+      0.7,
+      0.72,
+      0.75
+    ],
+    "height_fog": {
+      "density": 0.006,
+      "base": 205.0,
+      "falloff": 35.0
+    },
+    "sky": {
+      "zenith": [
+        0.5,
+        0.6,
+        0.72
+      ],
+      "horizon": [
+        0.84,
+        0.87,
+        0.9
+      ],
+      "cloud_cover": 0.72,
+      "cloud_color": [
+        0.9,
+        0.92,
+        0.95
+      ],
+      "cloud_scale": 1.2,
+      "sun_size": 0.03
+    }
+  },
+  "cnh_asset_sha256": "d290ddbbce96db68f5ade56c380baaa96636ec48d3e3e655ebdc7fbdbfef67b3",
+  "asset_sha256": "ed1b45e00637abdb2583396d467d10f2264242cca75bc43edc01ca822825ded7",
+  "beacon_asset_sha256": "fb5c67d62ea3ed8a09c6d1ba6d0d5f127b3d3ddffb43d4244333aad3c2bd825e",
+  "cavern_asset_sha256": "95cad40d6568701f5cff1bba615329811861aec8de7aa5b07ebcaf43cbd0c397",
   "flora_source_sha256": "da7ef02fa1d6faeb5ea080f449a071a5c028ecd584b10c2c8bd8d76207b07a24",
   "structure_kit_sha256": "0636249d6eb133db27977b895a48d7d50ce7b8882ec8ba8fd0a63908b5f04630",
   "terrain_source_sha256": "91de260a2a775c8db3e4e531a36d4bb6565800c3b0ad209372995fb0f80819a2",
   "material_source_sha256": "ca1f77aa4db5b1f372ad9441c69067c5e126fea39746c1fe12aafae7a2cc7562",
   "provenance": "PeakRunner original Frostline geometry, original procedural terrain, flora, material kit and synthesized wind; no extracted assets or external height data",
-  "definition_sha256": "a8aeda4054e273f30a278be8e3ce57b1a0d183019ea8f67fb00475f3f1373b23",
+  "definition_sha256": "d63c1080bc333b65e7cb9f8112e77eeb420df45da98f1203f547c3a7a1bac38c",
   "files": {
-    "height.bin": "b1d668748e49590be6d94fd4b8097cb180736f8997288831a62ebe09cf4ca43e",
-    "vertices.bin": "0a30c3385e4152eb7b89ad8132b3cef0435266fad810a8fbda34cc84a90fb75d",
-    "collision.bin": "7daa6cc4ee4d907a3e98b5336272fba5c91ba0c93b3eb02ccdf7d997122730e0",
-    "weights.rgba": "b42d3391479f4bba7040b25bd28c439eae69913ea1817bccafe853e26b0835ae",
-    "textures.rgba": "11f1cd8c54fdd93ea5edb91b2803b81f2a9cc55bbd49d16577f5a3418b50cca2",
+    "height.bin": "23b57c76dfd11f842274ab7d8aa0c81db2d0cb6ed69d54515655aa9f8d2f32ec",
+    "vertices.bin": "e4da64fc04b7b741f3a0e3d539f2abd1509c885b34aaa40d4fa4fc1f4321cb2a",
+    "collision.bin": "0d9b5b9231faf063b96fc31dd001e8f28a87c0e115b83a0fa78af6d5df4ee141",
+    "weights.rgba": "1106aee845e4744a02cfe9197eccdaeec56c4a7b8c48d8f0a66dd266c64acc80",
+    "textures.rgba": "81836b8b7c9d46df73072264f7aaeacec478943a87d7df63d5aa524ea8216ab9",
     "ambient.f32": "249173b29122b2fdc3b5605dd94bc708a7c210eec2c6a0e4895e5a8f55630cd8"
   }
 }

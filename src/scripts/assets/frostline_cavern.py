@@ -36,7 +36,8 @@ import numpy as np
 
 from assets.structure_kit import Builder
 
-ASSET_ID = 'frostline-cavern-v1'
+ASSET_ID = 'frostline-cavern-v2'
+SNOW_CAP, WALL_CAP, CORNICE = 5.0, 3.0, 1.0   # snow band heights (m) and cornice overhang
 STEP = 8.0
 CX = 1024.0                 # axis and centre
 CUT_X = (1008.0, 1040.0)    # cut cells across the axis (4 cells)
@@ -147,7 +148,12 @@ def _half(mesh, q):
         for x in (x0, x1):
             fa, fb = _trench_floor(q, x, za), _trench_floor(q, x, zb)
             ta, tb = edge(q, x, za), edge(q, x, zb)
-            _quad(mesh, (x, fa, za), (x, fb, zb), (x, tb, zb), (x, ta, za), GRANITE, back=out[x])
+            # Granite below a snow band at the top, so the cut reads as a
+            # snow-capped bank rather than a bare grey slab from afar.
+            sa, sb = max(fa, ta-WALL_CAP), max(fb, tb-WALL_CAP)
+            _quad(mesh, (x, fa, za), (x, fb, zb), (x, sb, zb), (x, sa, za), GRANITE, back=out[x])
+            if ta-sa > .05 or tb-sb > .05:
+                _quad(mesh, (x, sa, za), (x, sb, zb), (x, tb, zb), (x, ta, za), FLOOR, back=out[x])
     # Portal face: granite from the floor (beside the opening) or the vault
     # (over it) up to the terrain edge on the z = 976 grid row.
     xs = sorted(set(grid_xs) | {CX+dx for dx in _vault_xs()})
@@ -155,9 +161,17 @@ def _half(mesh, q):
         over_opening = abs((xa+xb)/2-CX) < HALF_W
         def bottom(x):
             return FLOOR_MOUTH+vault(x-CX) if over_opening else FLOOR_MOUTH
+        ta, tb = edge(q, xa, z_portal), edge(q, xb, z_portal)
+        sa, sb = max(bottom(xa), ta-SNOW_CAP), max(bottom(xb), tb-SNOW_CAP)
         _quad(mesh, (xa, bottom(xa), z_portal), (xb, bottom(xb), z_portal),
-              (xb, edge(q, xb, z_portal), z_portal), (xa, edge(q, xa, z_portal), z_portal), GRANITE,
-              back=(0.0, -1.0, BACK))
+              (xb, sb, z_portal), (xa, sa, z_portal), GRANITE, back=(0.0, -1.0, BACK))
+        if ta-sa > .05 or tb-sb > .05:
+            _quad(mesh, (xa, sa, z_portal), (xb, sb, z_portal), (xb, tb, z_portal), (xa, ta, z_portal), FLOOR,
+                  back=(0.0, -1.0, BACK))
+        # Snow cornice: a render-only lip drooping out over the face's top edge.
+        lip = [(xa, ta, z_portal), (xb, tb, z_portal), (xb, tb-.4, z_portal-CORNICE), (xa, ta-.4, z_portal-CORNICE)]
+        mesh.quad(*lip, FLOOR, False)
+        mesh.quad(*lip[::-1], FLOOR, False)
     # Cavern: floor, ice walls and vault, sampled every 8 m along z.
     cz = [z_portal+i*STEP for i in range(int(PORTAL_D/STEP)+1)]
     vx = [CX+dx for dx in _vault_xs()]

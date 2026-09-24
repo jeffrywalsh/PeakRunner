@@ -38,22 +38,32 @@ import math
 
 from assets.structure_kit import Builder
 
-ASSET_ID = 'cairnhold-base-v3'
+ASSET_ID = 'cairnhold-base-v4'
 
-# Bunker: footprint, walls, storey.
+# Bunker: footprint, walls, storey. Doorways are 6 m wide and run to the 6 m
+# ceiling, so skiers and jetters fly straight through them (no lintel).
 BX, BZ0, BZ1 = 16, -20, 20
 WALL = .8
 CEIL, ROOF = 6, 7
-DOOR, DOOR_TOP = (-2.5, 2.5), 4.5
-PART_A, PART_A_DOORS = (4.0, 4.4), [(-11, -7), (7, 11)]
-PART_B, PART_B_DOOR = (12.0, 12.4), (-2, 2)
-BACK_DOOR = (2, 6)
+DOOR, DOOR_TOP = (-3.0, 3.0), 6.0
+PART_A, PART_A_DOORS = (4.0, 4.4), [(-12, -6), (6, 12)]
+PART_B, PART_B_DOOR = (12.0, 12.4), (-3, 3)
+BACK_DOOR = (1, 7)
+# v4 hall: behind the entry vestibule (under the facade) the hall rises to a
+# 13 m ceiling as a two-level room. A 4 m gallery runs round its sides and
+# back at the level of the hillside outside (ROOF), and a 6 x 6 m doorway in
+# each side wall opens from the gallery straight onto that ground, so the hall
+# is entered from both levels.
+HALL_Z = (-13.0, PART_A[1])       # the tall part: facade back face to partition A
+HALL_CEIL, HALL_ROOF = 13.0, 14.0
+GALLERY_Y, GALLERY_W, GALLERY_THICK = float(ROOF), 4.0, .6
+GALLERY_DOOR = (-7.0, -1.0)       # z span of each side wall's gallery doorway
 # Facade: a stepped front block rising from the roof over the front 7 m, a
 # gatehouse projecting 2 m around a recessed portal, and stone wing blocks
 # retaining the hillside on either side.
 FRONT_Z1 = -13.0                 # back face of the raised front block
 GATE_X, GATE_Z = 6.0, -22.0      # gatehouse half-width and projecting face
-PORTAL, PORTAL_TOP = (-3.7, 3.7), 6.2
+PORTAL, PORTAL_TOP = (-4.2, 4.2), 7.6
 TIERS = ((0.0, GATE_X, 17.0), (GATE_X, 11.0, 14.0), (11.0, BX, 11.5))   # |x| from, to, top
 WING_X, WING_Z1 = 24.0, -12.0    # wing blocks: |x| BX..WING_X, z BZ0..WING_Z1, top ROOF
 ROOF_TURRET = (0, TIERS[0][2], -17.0)
@@ -69,6 +79,7 @@ LIGHT_SLOTS = (28, 40, 52, 64)
 HX0, HX1, HZ0, HZ1 = -8, 16, 76, 100
 HUT_FLOOR, HUT_CEIL, HUT_ROOF, HUT_RING = 22.0, 28.0, 29.0, 27.5
 HUT_DOOR = (1, 7)
+HUT_DOOR_TOP = 5.5
 HATCH = (10, HX1-WALL, HZ0+4, HZ0+16)             # hut roof opening, inside the tower
 RAMP = (10, HX1-WALL, HZ0+22, HZ0+4)             # hut ramp: x0, x1, low end z, high end z
 # Flag tower on the hut's east half. Interior route: hut ramp -> tower floor
@@ -100,7 +111,7 @@ SPAWN_LIFT = 1.2       # player centre above the floor (support-ray convention)
 # in: a stair from the east side of the hall, and the sally-port tunnel, which
 # runs east and then south under the hillside to an exit house at the foot of
 # the plasma battery's ramp. No spawn is in the hall, the vault or the tunnel.
-VAULT_FLOOR, VAULT_CEIL = -6.0, -1.0       # floor top; underside of the hall floor slab
+VAULT_FLOOR, VAULT_CEIL = -7.5, -1.0       # floor top; underside of the hall floor slab (6.5 m)
 VAULT = (3.2, 15.2, -9.8, 12.0)            # interior x0, x1, z0, z1
 # The generator stands in a well 2.2 m below the vault floor: the kit model is
 # 5.8 m tall and its hit bar hangs 3.9 m over its centre, so it needs ~7 m.
@@ -109,24 +120,29 @@ PIT = (3.2, 10.4, 3.4, 12.0)               # well interior x0, x1, z0, z1
 PIT_RAMP = (3.2, 10.4, -0.6, 3.4)          # x0, x1, z at the vault floor, z at the well floor
 VAULT_GEN = (6.8, PIT_FLOOR, 7.7)
 VAULT_PIERS = ((7.0, -6.5), (7.0, -3.0))
-STAIR = (11.2, 15.2, -9.0, 1.7)            # x0, x1, z at the hall floor (head), z at the vault floor (foot)
-HALL_HOLE = (11.2, 15.2, -9.0, -2.0)       # railed opening in the hall floor over the stair
-TUN_H = 4.5                                # tunnel headroom
+STAIR = (11.2, 15.2, -9.5, 4.5)            # x0, x1, z at the hall floor (head), z at the vault floor (foot); 28 degrees
+HALL_HOLE = (11.2, 15.2, -9.5, -2.0)       # railed opening in the hall floor over the stair
+TUN_H = 6.5                                # tunnel headroom (v4: was 4.5)
 TUN_DOOR = (4.8, 11.2)                     # vault's east door onto the tunnel (z span)
+# Two skylight light wells (drop-in grates) along the east leg: open shafts
+# from the hillside down into the tunnel (x spans). They lead into the
+# tunnel, not the vault, so the vault keeps exactly two ways in.
+SKYLIGHTS = ((48.0, 52.0), (64.0, 68.0))
 # Tunnel cells: east leg along +X (z 4..12), then south along -Z (x 80..88),
 # ending in the exit house cell. Local x is on the 8 m grid, local z 4 m off it.
 T_EAST = (16.0, 88.0, 4.0, 12.0)
 T_SOUTH = (80.0, 88.0, -36.0, 4.0)
 T_EXIT = (80.0, 88.0, -44.0, -36.0)
 EXIT_GROUND = 8.0                          # the battery bench
-EXIT_DOOR = (-43.0, -39.6)                 # z span of the door in the exit house's east wall
+EXIT_DOOR = (-43.0, -37.4)                 # z span of the door in the exit house's east wall
 # Floor and lid (roof top, flush with the ground where the ground is higher)
-# heights at the cell boundaries; linear between them.
-T_EAST_FLOOR = ((16.0, VAULT_FLOOR), (17.0, VAULT_FLOOR), (41.0, 3.0), (88.0, 3.0))
-T_EAST_LID = ((16.0, 7.0), (24.0, 7.0), (32.0, 7.5), (40.0, 10.0), (48.0, 12.0), (56.0, 12.5),
+# heights at the cell boundaries; linear between them. Each lid clears the
+# tunnel's ceiling slab (floor + TUN_H + 0.5) by its own 0.5 m thickness.
+T_EAST_FLOOR = ((16.0, VAULT_FLOOR), (17.0, VAULT_FLOOR), (45.0, 3.0), (88.0, 3.0))   # 20.6 degree climb
+T_EAST_LID = ((16.0, 7.0), (24.0, 7.0), (32.0, 7.5), (40.0, 10.6), (48.0, 12.0), (56.0, 12.5),
               (64.0, 14.0), (72.0, 16.5), (80.0, 19.0), (88.0, 19.0))
 T_SOUTH_FLOOR = ((-44.0, EXIT_GROUND), (-36.0, EXIT_GROUND), (-20.0, 3.0), (4.0, 3.0))
-T_SOUTH_LID = ((-36.0, 13.5), (-28.0, 12.0), (-20.0, 12.8), (-12.0, 14.5), (-4.0, 16.5), (4.0, 19.0))
+T_SOUTH_LID = ((-36.0, 15.5), (-28.0, 13.2), (-20.0, 12.8), (-12.0, 14.5), (-4.0, 16.5), (4.0, 19.0))
 EXIT_ROOF = EXIT_GROUND+TUN_H+1.0
 
 HOLES = {'bunker': (-BX, BX, BZ0, BZ1), 'trench': (TX0, TX1, TZ0, TZ1), 'hut': (HX0, HX1, HZ0, HZ1),
@@ -289,29 +305,60 @@ def build(mesh, team, circuit):
     hx0, hx1, hz0, hz1 = HALL_HOLE
     for x0, x1, z0, z1 in [(-ix, hx0, iz0, iz1), (hx0, ix, iz0, hz0), (hx0, ix, hz1, iz1)]:
         slab(x0, x1, z0, z1, 0, DECK)
-    slab(-BX, BX, BZ0, BZ1, ROOF, HULL)
+    # Roof: the vestibule under the facade and the back rooms at ROOF; the
+    # tall hall between them under its own raised roof.
+    hz_a, hz_b = HALL_Z
+    slab(-BX, BX, BZ0, hz_a, ROOF, HULL)
+    slab(-BX, BX, hz_b, BZ1, ROOF, HULL)
+    slab(-BX, BX, hz_a, hz_b, HALL_ROOF, HULL)
     wall(-BX, -ix, BZ0, BZ1, -4, CEIL, HULL)
     # East wall: full height above the vault door; below it, down to the vault
     # floor either side of the door.
     door_top = VAULT_FLOOR+TUN_H
     wall(ix, BX, BZ0, BZ1, door_top, CEIL, HULL)
     for z0, z1 in ((BZ0, TUN_DOOR[0]), (TUN_DOOR[1], BZ1)): wall(ix, BX, z0, z1, VAULT_FLOOR-1, door_top, HULL)
+    # The tall hall's side walls, each with a gallery-level doorway onto the
+    # hillside, and its back wall over partition A.
+    ga, gb = GALLERY_DOOR
+    for x0, x1 in ((-BX, -ix), (ix, BX)):
+        wall(x0, x1, hz_a, ga, CEIL, HALL_CEIL, HULL)
+        wall(x0, x1, gb, hz_b, CEIL, HALL_CEIL, HULL)
+        wall(x0, x1, ga, gb, CEIL, GALLERY_Y, HULL)
+    wall(-ix, ix, *PART_A, CEIL, HALL_CEIL, HULL)
     for x0, x1 in [(-ix, DOOR[0]), (DOOR[1], ix)]: wall(x0, x1, BZ0, iz0, -4, CEIL, HULL)
-    wall(DOOR[0], DOOR[1], BZ0, iz0, DOOR_TOP, CEIL, HULL)
+    if DOOR_TOP < CEIL: wall(DOOR[0], DOOR[1], BZ0, iz0, DOOR_TOP, CEIL, HULL)
     wall(DOOR[0], DOOR[1], BZ0, iz0, -4, 0, HULL)
     for x0, x1 in [(-ix, BACK_DOOR[0]), (BACK_DOOR[1], ix)]: wall(x0, x1, iz1, BZ1, -4, CEIL, HULL)
-    wall(*BACK_DOOR, iz1, BZ1, DOOR_TOP, CEIL, HULL)
+    if DOOR_TOP < CEIL: wall(*BACK_DOOR, iz1, BZ1, DOOR_TOP, CEIL, HULL)
     wall(*BACK_DOOR, iz1, BZ1, -4, 0, HULL)
 
-    # The two interior partitions.
+    # The two interior partitions (doorways run to the ceiling).
     def partition(z0, z1, doors):
         u = -ix
         for d0, d1 in doors+[(ix, ix)]:
             if d0 > u: wall(u, d0, z0, z1, 0, CEIL, HULL)
-            if d1 > d0: wall(d0, d1, z0, z1, DOOR_TOP, CEIL, HULL)
+            if d1 > d0 and DOOR_TOP < CEIL: wall(d0, d1, z0, z1, DOOR_TOP, CEIL, HULL)
             u = d1
     partition(*PART_A, PART_A_DOORS)
     partition(*PART_B, [PART_B_DOOR])
+
+    # Gallery: a 4 m walkway round the tall hall's sides and back at hillside
+    # level, reached from the gallery doorways or by jetting up from the floor.
+    gx = ix-GALLERY_W
+    gback = PART_A[0]-GALLERY_W
+    for x0, x1, z0, z1 in ((-ix, -gx, hz_a, PART_A[0]), (gx, ix, hz_a, PART_A[0]), (-gx, gx, gback, PART_A[0])):
+        slab(x0, x1, z0, z1, GALLERY_Y, DECK, thick=GALLERY_THICK)
+    for x0, x1, z0, z1 in ((-gx-.08, -gx+.08, hz_a, gback+.08), (gx-.08, gx+.08, hz_a, gback+.08),
+                           (-gx, gx, gback-.08, gback+.08)):       # render-only rail and kick band
+        wall(x0, x1, z0, z1, GALLERY_Y+.95, GALLERY_Y+1.05, BRONZE, False)
+        wall(x0, x1, z0, z1, GALLERY_Y+.01, GALLERY_Y+.2, METAL, False)
+    for s in (-1, 1):
+        # Bronze surround on the outside of each gallery doorway, and a lamp.
+        b.face_box('x', s*BX, s, ga-.4, ga, GALLERY_Y, HALL_CEIL, .14, METAL)
+        b.face_box('x', s*BX, s, gb, gb+.4, GALLERY_Y, HALL_CEIL, .14, METAL)
+        b.lamp((s*(ix-1.5), GALLERY_Y+4.5, (ga+gb)/2), .6)
+    b.ceiling_strip('x', (hz_a+gback)/2, -gx+1, gx-1, HALL_CEIL, .9)
+    b.ceiling_strip('x', hz_a+3.0, -gx+1, gx-1, HALL_CEIL, .9)
 
     # Interior dressing: liners, baseboards, cornices, team stripe.
     b.dress('z', iz0, 1, _runs_without(-ix, ix, [DOOR]), 0, CEIL)
@@ -326,14 +373,14 @@ def build(mesh, team, circuit):
     for z, doors in [(PART_A[0], PART_A_DOORS), (PART_B[0], [PART_B_DOOR]),
                      (iz1, [BACK_DOOR]), (iz0, [DOOR])]:
         for d0, d1 in doors:
-            for into in (1, -1):
-                b.face_box('z', z, into, d0-.3, d0, 0, DOOR_TOP, .12, METAL)
-                b.face_box('z', z, into, d1, d1+.3, 0, DOOR_TOP, .12, METAL)
-                b.face_box('z', z, into, d0-.3, d1+.3, DOOR_TOP, DOOR_TOP+.3, .12, METAL)
+            for into in (1, -1):      # jambs stand 2 cm off the reveal planes
+                b.face_box('z', z, into, d0-.3, d0-.02, 0, DOOR_TOP-.02, .12, METAL)
+                b.face_box('z', z, into, d1+.02, d1+.3, 0, DOOR_TOP-.02, .12, METAL)
+                if DOOR_TOP < CEIL: b.face_box('z', z, into, d0-.3, d1+.3, DOOR_TOP-.3, DOOR_TOP, .12, METAL)
 
-    # Ceiling lights: entry, hall, inventory room, generator room.
+    # Ceiling lights: entry vestibule, the tall hall (above), inventory room,
+    # back room.
     b.ceiling_strip('x', iz0+2.0, -ix+1, ix-1, CEIL, .5)
-    for x in (-6, 6): b.ceiling_strip('z', x, iz0+4.0, PART_A[0]-1, CEIL, .7)
     b.ceiling_strip('x', (PART_A[1]+PART_B[0])/2, -ix+2, ix-2, CEIL, .7)
     b.ceiling_strip('x', (PART_B[1]+iz1)/2, -ix+2, ix-2, CEIL, .7)
 
@@ -355,14 +402,16 @@ def build(mesh, team, circuit):
     P = PIT_FLOOR
     px0, px1, pz0, _ = PIT
     rz_top = PIT_RAMP[2]
-    slab(vx0-WALL, BX, vz0-WALL, rz_top, F, DECK)                  # vault floor south of the well
-    slab(px1+WALL, BX, rz_top, vz1+WALL, F, DECK)                  # walkway along the east side
-    wall(px1, px1+WALL, rz_top, vz1+WALL, P-1, F, HULL)            # the well's east wall, flush with the floor
-    slab(vx0-WALL, px1, pz0, vz1+WALL, P, DECK)                    # well floor
+    # Floors stop at the walls' inner faces, and the walls reach deeper than
+    # the floor slabs, so no two bottom faces share a plane.
+    slab(vx0, ix, vz0, rz_top, F, DECK)                            # vault floor south of the well
+    slab(px1+WALL, ix, STAIR[3], vz1, F, DECK)                     # walkway along the east side, from the stair foot
+    wall(px1, px1+WALL, rz_top, vz1, P-1.5, F, HULL)               # the well's east wall, flush with the floor
+    slab(vx0, px1, pz0, vz1, P, DECK)                              # well floor
     mesh.ramp((px0+px1)/2, px1-px0, rz_top, pz0, F, P, BRONZE)     # ramp down into the well
-    wall(vx0-WALL, vx0, vz0-WALL, vz1+WALL, P-1, C, HULL)
-    wall(vx0, vx1, vz0-WALL, vz0, F-1, C, HULL)
-    wall(vx0, vx1, vz1, vz1+WALL, P-1, C, HULL)
+    wall(vx0-WALL, vx0, vz0-WALL, vz1+WALL, P-1.5, C, HULL)
+    wall(vx0, vx1, vz0-WALL, vz0, F-1.5, C, HULL)
+    wall(vx0, vx1, vz1, vz1+WALL, P-1.5, C, HULL)
     # Stair from the hall down the east side, closed beneath its open edge,
     # railed round its opening in the hall floor.
     s0, s1, sz_head, sz_foot = STAIR
@@ -386,7 +435,7 @@ def build(mesh, team, circuit):
     b.dress('x', vx0, 1, [(pz0, vz1)], P, F, pilasters=False)
     b.dress('z', vz1, -1, [(vx0, px1)], P, F, pilasters=False)
     b.dress('x', px1, -1, [(pz0, vz1)], P, F, pilasters=False)
-    b.face_box('x', px1, -1, pz0, vz1, F-.08, F+.02, .3, BRONZE)       # bronze lip on the well's edge
+    b.face_box('x', px1, -1, pz0+.03, vz1-.03, F-.08, F+.02, .3, BRONZE)   # bronze lip on the well's edge
     b.lamp((gx, F-.5, gz), .7)
     # Squat stone piers with bronze collars, and bronze ribs across the vault.
     for x, z in VAULT_PIERS:
@@ -402,9 +451,7 @@ def build(mesh, team, circuit):
     for x in (5.0, 9.4): b.ceiling_strip('z', x, vz0+1.5, vz1-1.5, C, .7)
     for into, z in ((-1, TUN_DOOR[0]), (-1, TUN_DOOR[1])):
         b.face_box('x', vx1, into, z-.3 if z == TUN_DOOR[0] else z, z if z == TUN_DOOR[0] else z+.3,
-                   F, door_top, .12, METAL)
-    b.face_box('x', vx1, -1, TUN_DOOR[0]-.3, TUN_DOOR[1]+.3, door_top, door_top+.3, .14, METAL)
-    b.face_box('x', vx1, -1, TUN_DOOR[0]+.5, TUN_DOOR[1]-.5, door_top+.45, door_top+.7, .06, accent)
+                   F, door_top-.02, .12, METAL)
 
     # --- Sally port: vault -> east under the hillside -> south to the battery
     def blk(x0, x1, z0, z1, yb, yt, mat, solid=True):
@@ -421,16 +468,31 @@ def build(mesh, team, circuit):
     sf = lambda x, z: south_floor(z); sl = lambda x, z: south_lid(z)
     def breaks(points, lo, hi):
         return sorted({lo, hi} | {u for u, _ in points if lo < u < hi})
-    xs = breaks(T_EAST_FLOOR+T_EAST_LID, ex0, ex1)
+    xs = sorted(set(breaks(T_EAST_FLOOR+T_EAST_LID, ex0, ex1)) | {u for s in SKYLIGHTS for u in s})
+    def in_skylight(a, c_): return any(s0 <= a and c_ <= s1 for s0, s1 in SKYLIGHTS)
     for a, c_ in zip(xs, xs[1:]):
         inner = min(c_, qx1-w)
+        well = in_skylight(a, c_)
+        # Under a skylight the side walls rise to the lid top, so the shaft's
+        # rim is flush with the hillside; elsewhere the lid caps them.
+        wall_top = el if well else (lambda x, z: el(x, z)-.5)
         if inner > a:   # floor and ceiling inside the walls
             blk(a, inner, ez0+w, ez1-w, lambda x, z: ef(x, z)-1, ef, DECK)
-            blk(a, inner, ez0+w, ez1-w, lambda x, z: ef(x, z)+TUN_H, lambda x, z: ef(x, z)+TUN_H+.5, HULL)
-        blk(a, c_, ez1-w, ez1, lambda x, z: ef(x, z)-1, lambda x, z: el(x, z)-.5, HULL)          # north wall
-        if a < qx0+w: blk(a, min(c_, qx0+w), ez0, ez0+w, lambda x, z: ef(x, z)-1, lambda x, z: el(x, z)-.5, HULL)
-        blk(a, c_, ez0, ez1, lambda x, z: el(x, z)-.5, el, HULL)                                 # lid
+            if not well:
+                blk(a, inner, ez0+w, ez1-w, lambda x, z: ef(x, z)+TUN_H, lambda x, z: ef(x, z)+TUN_H+.5, HULL)
+        blk(a, c_, ez1-w, ez1, lambda x, z: ef(x, z)-1, wall_top, HULL)                         # north wall
+        if a < qx0+w: blk(a, min(c_, qx0+w), ez0, ez0+w, lambda x, z: ef(x, z)-1, wall_top, HULL)
+        if not well: blk(a, c_, ez0, ez1, lambda x, z: el(x, z)-.5, el, HULL)                   # lid
     blk(ex1-w, ex1, ez0, ez1-w, lambda x, z: ef(x, z)-1, lambda x, z: el(x, z)-.5, HULL)         # corner's east wall
+    # Skylight wells: end walls close the void between the tunnel ceiling and
+    # the lid; a render-only bronze grate rim and bars mark the drop-in.
+    for s0, s1 in SKYLIGHTS:
+        for x0_, x1_ in ((s0-.5, s0), (s1, s1+.5)):
+            blk(x0_, x1_, ez0+w, ez1-w, lambda x, z: ef(x, z)+TUN_H, el, HULL)
+        top = min(east_lid(s0), east_lid(s1))
+        for z in (ez0+w+1.6, (ez0+ez1)/2, ez1-w-1.6):
+            wall(s0, s1, z-.06, z+.06, top+.02, top+.1, BRONZE, False)
+        b.lamp(((s0+s1)/2, east_floor(s0)+TUN_H-.5, (ez0+ez1)/2), .9)
     zs = breaks(T_SOUTH_FLOOR+T_SOUTH_LID, qz0, qz1)
     for a, c_ in zip(zs, zs[1:]):
         top = ez0+w if c_ >= qz1 else c_     # the last piece meets the east leg's floor
@@ -464,8 +526,7 @@ def build(mesh, team, circuit):
     for z in (-42.0, -38.0):
         b.ceiling_strip('x', z, ox0+1.5, ox1-1.5, g+TUN_H, .6)
     for z in EXIT_DOOR:
-        b.face_box('x', ox1, 1, z-.3 if z == EXIT_DOOR[0] else z, z if z == EXIT_DOOR[0] else z+.3, g, g+TUN_H, .12, METAL)
-    b.face_box('x', ox1, 1, EXIT_DOOR[0]-.3, EXIT_DOOR[1]+.3, g+TUN_H, g+TUN_H+.35, .14, METAL)
+        b.face_box('x', ox1, 1, z-.3 if z == EXIT_DOOR[0] else z, z if z == EXIT_DOOR[0] else z+.3, g, g+TUN_H-.02, .12, METAL)
     b.face_box('x', ox1, 1, oz0, oz1, roof-.5, roof-.1, .16, METAL)
     b.lamp((ox1+2.0, g+3.8, sum(EXIT_DOOR)/2), .5)
 
@@ -481,6 +542,10 @@ def build(mesh, team, circuit):
     # Stepped tiers either side, flush with the front wall.
     for u0, u1, top in TIERS[1:]:
         for s in (-1, 1): wall(s*u0, s*u1, BZ0, FRONT_Z1, ROOF, top, HULL)
+    # Behind the low outer tiers the tall hall's front wall rises to its roof.
+    for s in (-1, 1):
+        u0, u1, top = TIERS[2]
+        if top < HALL_ROOF: wall(s*u0, s*u1, FRONT_Z1-.8, FRONT_Z1, top, HALL_ROOF, HULL)
     # Wing blocks retain the hillside either side of the facade.
     for s in (-1, 1): wall(s*BX, s*WING_X, BZ0, WING_Z1, -.5, ROOF, HULL)
     # Buttresses mark each step and the corners.
@@ -504,6 +569,7 @@ def build(mesh, team, circuit):
     b.face_box('z', GATE_Z, -1, -GATE_X, p0, -.1, .5, .15, METAL)
     b.face_box('z', GATE_Z, -1, p1, GATE_X, -.1, .5, .15, METAL)
     for u0, u1, top in TIERS[1:]:
+        if u0 == TIERS[2][0]: u0, u1 = u0+1.4, u1-1.4     # runs between the outer tier's buttresses
         for s in (-1, 1):
             a, c = sorted((s*u0, s*u1))
             b.face_box('z', BZ0, -1, a, c, top-1.1, top-.6, .2, METAL)
@@ -519,11 +585,11 @@ def build(mesh, team, circuit):
     fz = BZ0
     wall(DOOR[0]-.5, DOOR[0], fz-.25, fz, 0, DOOR_TOP+.5, METAL, False)
     wall(DOOR[1], DOOR[1]+.5, fz-.25, fz, 0, DOOR_TOP+.5, METAL, False)
-    wall(DOOR[0]-.5, DOOR[1]+.5, fz-.25, fz, DOOR_TOP, DOOR_TOP+.5, METAL, False)
+    wall(DOOR[0]-.5, DOOR[1]+.5, fz-.25, fz, DOOR_TOP+.02, DOOR_TOP+.5, METAL, False)
     # Banner wall: a tall team banner with the cairn emblem over the portal,
     # and banners on the middle tiers.
     gz = GATE_Z-.05
-    mesh.quad((-2.6, 7.4, gz), (-2.6, 15.4, gz), (2.6, 15.4, gz), (2.6, 7.4, gz), accent, False)
+    mesh.quad((-2.6, 8.2, gz), (-2.6, 15.6, gz), (2.6, 15.6, gz), (2.6, 8.2, gz), accent, False)
     y = 11.2
     for w, h in [(2.6, .8), (2.0, .68), (1.4, .58)]:    # a cairn of three stacked stones
         mesh.quad((-w/2, y, gz-.02), (-w/2, y+h, gz-.02), (w/2, y+h, gz-.02), (w/2, y, gz-.02), GLOW, False)
@@ -531,7 +597,7 @@ def build(mesh, team, circuit):
     b.lamp((0, 11, GATE_Z-2.5), .8)
     for s in (-1, 1):
         a, c = sorted((s*7.2, s*9.8))
-        mesh.quad((a, 1.5, fz-.05), (a, 12.2, fz-.05), (c, 12.2, fz-.05), (c, 1.5, fz-.05), accent, False)
+        mesh.quad((a, .1, fz-.05), (a, 12.2, fz-.05), (c, 12.2, fz-.05), (c, .1, fz-.05), accent, False)   # floor-length
         b.lamp((s*8.5, 7, fz-2.5), .5)
     for x in (p0-1.15, p1+1.15):        # sconces on the jamb faces
         wall(x-.2, x+.2, GATE_Z-.4, GATE_Z, 3.2, 3.5, METAL, False)
@@ -558,6 +624,7 @@ def build(mesh, team, circuit):
         p = x+into*.03
         quad = [(p, 0, TZ0), (p, TRENCH_RISE, TZ1), (p, ceil1, TZ1), (p, ceil0, TZ0)]
         mesh.quad(*(quad if into < 0 else quad[::-1]), INTERIOR, False)
+        p = x+into*.05                                  # the stripe sits proud of the liner
         stripe = [(p, .75, TZ0), (p, TRENCH_RISE+.75, TZ1), (p, TRENCH_RISE+1, TZ1), (p, 1, TZ0)]
         mesh.quad(*(stripe if into < 0 else stripe[::-1]), accent, False)
     for z in range(TZ0+4, TZ1, 8):
@@ -581,7 +648,7 @@ def build(mesh, team, circuit):
     for x0, x1 in [(HX0, hx0), (hx1, HX1)]: wall(x0, x1, HZ0, HZ1, HUT_FLOOR-5, HUT_CEIL, HULL)
     wall(hx0, hx1, hz1, HZ1, HUT_FLOOR-5, HUT_CEIL, HULL)
     for x0, x1 in [(hx0, HUT_DOOR[0]), (HUT_DOOR[1], hx1)]: wall(x0, x1, HZ0, hz0, HUT_FLOOR-5, HUT_CEIL, HULL)
-    wall(*HUT_DOOR, HZ0, hz0, HUT_FLOOR+DOOR_TOP, HUT_CEIL, HULL)
+    wall(*HUT_DOOR, HZ0, hz0, HUT_FLOOR+HUT_DOOR_TOP, HUT_CEIL, HULL)
     wall(*HUT_DOOR, HZ0, hz0, HUT_FLOOR-5, HUT_FLOOR, HULL)
     h0, h1, hz_a, hz_b = HATCH
     for x0, x1, z0, z1 in [(HX0, h0, HZ0, HZ1), (h0, HX1, HZ0, hz_a), (h0, HX1, hz_b, HZ1), (h1, HX1, hz_a, hz_b)]:
@@ -647,7 +714,7 @@ def build(mesh, team, circuit):
                                (2.6, 4.0, tz0-1.2, tz0, HUT_RING-.5), (14.1, 15.5, tz0-1.2, tz0, HUT_RING-.5),
                                (4.3, 5.7, tz1, tz1+1.2, HUT_ROOF), (12.3, 13.7, tz1, tz1+1.2, HUT_ROOF)]:
         wall(x0, x1, z0, z1, y0, 37.5, HULL)
-        wall(x0-.06, x1+.06, z0-.06, z1+.06, 37.1, 37.5, METAL, False)
+        wall(x0-.06, x1+.06, z0-.06, z1+.06, 36.9, 37.3, METAL, False)   # band below the cap, not flush with it
     for axis, plane, into, u0, u1 in [('x', tx0, -1, tz0, tz1), ('x', tx1, 1, tz0, tz1),
                                        ('z', tz0, -1, tx0, tx1), ('z', tz1, 1, tx0, tx1)]:
         b.face_box(axis, plane, into, u0, u1, 35.8, 36.2, .14, METAL)
@@ -664,20 +731,13 @@ def build(mesh, team, circuit):
         y += h+.16
     b.lamp((9, 34, tz0-3), .7)
 
-    # Platform: parapet and merlons, gap on the west edge for the bridge.
+    # Platform (v4): fully open. No parapet or merlons, so the flag can be
+    # taken from any edge at speed; only a render-only bronze edge band.
     top = TOWER_TOP
     pt = .5
-    wall(tx0, tx1, tz0, tz0+pt, top, top+PARAPET, HULL)
-    wall(tx0, tx1, tz1-pt, tz1, top, top+PARAPET, HULL)
-    wall(tx0, tx0+pt, BRIDGE[3]+.5, tz1-pt, top, top+PARAPET, HULL)
-    wall(tx1-pt, tx1, tz0+pt, tz1-pt, top, top+PARAPET, HULL)
-    ym = top+PARAPET
-    for a, c in _merlon_spans(tx0+1.2, tx1-.2):
-        wall(a, c, tz0, tz0+pt, ym, ym+MERLON, HULL); wall(a, c, tz1-pt, tz1, ym, ym+MERLON, HULL)
-    for a, c in _merlon_spans(BRIDGE[3]+1.5, tz1-1.2):
-        wall(tx0, tx0+pt, a, c, ym, ym+MERLON, HULL)
-    for a, c in _merlon_spans(tz0+1.2, tz1-1.2):
-        wall(tx1-pt, tx1, a, c, ym, ym+MERLON, HULL)
+    for axis, plane, into, u0, u1 in [('x', tx0, -1, tz0, tz1), ('x', tx1, 1, tz0, tz1),
+                                       ('z', tz0, -1, tx0, tx1), ('z', tz1, 1, tx0, tx1)]:
+        b.face_box(axis, plane, into, u0, u1, top-.35, top-.05, .1, BRONZE)
     # Flag plinth: exposed on top of the tower.
     fx, fz_ = FLAG
     b.prism(fx, fz_, 1.8, 1.5, top, top+PLINTH, 12, METAL)
@@ -708,8 +768,8 @@ def build(mesh, team, circuit):
     wall(bx0, bx0+pt, bz0, bz1, top, top+PARAPET, HULL)
     wall(bx0+pt, bx1, bz0, bz0+pt, top, top+PARAPET, HULL)
     wall(xb, bx1, bz1-pt, bz1, top, top+PARAPET, HULL)
-    for z in (zg-4, (zg+zt)/2, zt+3):     # bronze lamp posts along the ramp's outer edge
-        y = exterior_ramp_y(z)
+    for z in (zg+1.5, (zg+zt)/2, zt+3):   # bronze lamp posts: at the ramp foot, then along its outer edge
+        y = HUT_RING if z > zg else exterior_ramp_y(z)
         b.prism(xa+.25, z, .1, .1, y, y+1.3, 6, METAL, solid=False)
         b.prism(xa+.25, z, .18, .18, y+1.3, y+1.5, 8, GLOW, solid=False)
         b.lamp((xa+.6, y+1.5, z), .4)

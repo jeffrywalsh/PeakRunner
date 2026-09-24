@@ -236,3 +236,59 @@ entries onto the flag deck. Baffles remain at the basement's tunnel door
 and the now open-ended rear hall exposed spawns on the command deck and in the
 rear hall, so all five station spawns now stand in the front hall, near the
 front wall or down its sides, where no line through an opening reaches them.
+
+## Capture & Hold, flag access and look pass (station v4)
+
+Supersedes earlier door, basement, sky and fog numbers above.
+
+- **Centre point, active in CTF.** The shared C&H tower (`cnh_tower.py`)
+  stands on the beacon's origin: its pylon rises inside the lattice legs, so
+  the 12.4 m perch is now a ring round it (the `Beacon` point, 12 m ring at
+  (1024, 262, 1024)). It flips after 10 s with only one team inside, and while
+  held its **drain field** (60 m, 10 energy/s, horizontal distance) saps the
+  holder's enemies only. 60 m covers the ridge crossing, both cavern portals
+  (48 m) and the whole cavern beneath; the trench ends (60–80 m) and the
+  valleys stay clear, so attackers reach the field's edge with a full tank.
+  A render-only **drain emitter** round the perch (four lit projector heads
+  angled at the field and a halo under the lantern) reads as the thing
+  draining you.
+- **Flank points (Capture & Hold only):** `West Col` (896, ~286, 1024) and
+  `East Col` (1152, ~286, 1024), mirrored through the centre, each 420 m from
+  both flags, on shelves levelled 16 m round the ring and kept clear of pines.
+- **Doors:** front, rear and east doors are 6 m wide and 5.5 m tall (the porch
+  widened to match). The hall partition has two 6 m doorways.
+- **Two-level void:** a 10 x 10 m opening in the command deck in front of the
+  flag joins the hall and the deck into one space; enter it from either level
+  or jet straight up from the hall to the flag. The roof hatch now sits over
+  the void, so dropping in lands in the hall or on the deck edge.
+- **Basement:** floor lowered to 6.5 m clear. Its stair and the shed's exit
+  stair are now about 28–29° (the engine counts ground as steep only past 35°).
+  The generator room keeps exactly two entrances.
+- **Cover:** the hall's crates are 0.8 m thick instead of 1.8–2.6 m.
+- **Flag routes** (`route_checks.flag_routes`, walking plus jet hops): 13 per
+  flag, up from 6 (6 entries; either ramp or a jet up the void to the flag).
+  `test-frostline.py` holds at least 10.
+- **Flicker:** the hall floor ran out to the walls' outer faces, so its edges
+  shared a plane with the wall faces (the dark line on the station waist
+  band); it now stops at the inner faces. Two decorative legs under the front
+  deck capped exactly in its walking surface; they stop at its underside.
+  40 pairs before, 0 in Frostline's own geometry after. Three 0.04 m² pairs
+  remain on the shared kit turret mount (team band flush on its collar), owned
+  by `build-original-map.py`. `test-frostline.py` checks for any others.
+- **Hovering edges:** no solid wall hovers on Frostline. The audit's examples
+  were render-only bands and the kit turret on the emplacement's top cap.
+- **Cave mouths:** the audit's "floating grey prism" was the red cavern
+  portal: a bare granite face that read as a block in the whiteout. The top
+  5 m of each portal face and the top 3 m of the trench walls are now snow,
+  with a snow cornice over the portal lip.
+- **Look:** a cold procedural overcast sky (`look.sky`), pale cool sun with a
+  small dim disc (direction unchanged: lightmaps are baked with the shared
+  fixed sun, so a truly low sun needs a bake change), cool ambient, and height
+  fog pooling below 205 m in the valleys. Fog runs 180–900 m so the beacon
+  ridge reads from both shelves.
+
+Counts: 2,362 collision triangles per base, 376 for the beacon and centre
+tower, 432 for both Col towers, 560 cavern; 8,072 total, 23,354 render,
+16 lightmap pages. Screenshots: `research/screenshots/frostline-pass-*.png`.
+Not playtested: the drain radius and the void's effect on flag defence need a
+human match; bots don't use the void or the points' drain tactics.

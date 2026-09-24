@@ -6,5 +6,10 @@
     {"team": 0, "position": [1024, 233, 624], "yaw": 180},
     {"team": 1, "position": [1024, 233, 1424], "yaw": 0}
   ],
-  "beacon": {"position": [1024, 262, 1024]}
+  "beacon": {"position": [1024, 262, 1024]},
+  "control_points": [
+    {"id": "beacon", "name": "Beacon", "centre": true, "ctf_active": true, "drain": {"radius": 60, "rate": 10}},
+    {"id": "west-col", "name": "West Col", "x": 896, "z": 1024},
+    {"id": "east-col", "name": "East Col", "x": 1152, "z": 1024}
+  ]
 }

@@ -28,5 +28,71 @@
       240,
       1024
     ]
+  },
+  "control_points": [
+    {
+      "id": "ring",
+      "name": "The Ring",
+      "x": 1024,
+      "z": 1024,
+      "on_ring": true
+    },
+    {
+      "id": "west-cairn",
+      "name": "West Cairn",
+      "x": 900,
+      "z": 1010
+    },
+    {
+      "id": "east-cairn",
+      "name": "East Cairn",
+      "x": 1148,
+      "z": 1038
+    }
+  ],
+  "fog_color": "0.78 0.71 0.60",
+  "look": {
+    "sun_color": [
+      1.0,
+      0.9,
+      0.74
+    ],
+    "sun_disc": 0.9,
+    "exposure": 1.08,
+    "ambient_sky": [
+      0.6,
+      0.6,
+      0.66
+    ],
+    "ambient_ground": [
+      0.5,
+      0.45,
+      0.38
+    ],
+    "height_fog": {
+      "density": 0.003,
+      "base": 190,
+      "falloff": 28
+    },
+    "sky": {
+      "zenith": [
+        0.2,
+        0.27,
+        0.44
+      ],
+      "horizon": [
+        0.82,
+        0.73,
+        0.6
+      ],
+      "cloud_cover": 0.5,
+      "cloud_color": [
+        0.97,
+        0.86,
+        0.7
+      ],
+      "cloud_scale": 1.6,
+      "sun_size": 0.03
+    }
   }
 }

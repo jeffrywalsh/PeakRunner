@@ -1,8 +1,10 @@
 """The Ring: Cairnhold's neutral landmark on the central mesa.
 
 Eight angular gunmetal pylons with lit bronze seams stand around a raised
-octagonal dais with a ramp on each axis. It is high ground and cover only; no
-neutral mechanic is attached. Original geometry.
+octagonal dais with a ramp on each axis. The dais is Cairnhold's central
+Capture & Hold point (v2): the shared C&H tower (assets/cnh_tower.py) stands
+at its centre in place of the old brazier stone, and its 12 m capture ring is
+the dais itself. Original geometry.
 
 Built at the caller's origin (the dais base, Y=0) with no rotation; the ramps
 run along the map axes and the pylons stand between them, so the layout is
@@ -12,7 +14,7 @@ import math
 
 from assets.structure_kit import Builder
 
-ASSET_ID = 'cairnhold-ring-v1'
+ASSET_ID = 'cairnhold-ring-v2'
 
 DAIS_R, DAIS_H = 12.0, 1.4
 RAMP_LEN, RAMP_W = 8.0, 5.0
@@ -28,13 +30,11 @@ def build(mesh):
     b = Builder(mesh, METAL, metal=METAL, glow=GLOW)
     phase = math.pi/8                 # flat dais faces on the axes
     b.prism(0, 0, DAIS_R+1.2, DAIS_R, -1.5, DAIS_H, 8, STONE, phase=phase)
-    # Bronze inlay rings and a central brazier stone (low cover).
+    # Bronze inlay rings; the C&H tower stands at the centre (built by the
+    # map script), so the dais carries no central stone of its own.
     for r in (9.5, 5.5):
         b.prism(0, 0, r, r, DAIS_H+.005, DAIS_H+.02, 16, BRONZE, solid=False)
         b.prism(0, 0, r-.35, r-.35, DAIS_H+.02, DAIS_H+.03, 16, DECK, solid=False)
-    b.prism(0, 0, 1.9, 1.6, DAIS_H, DAIS_H+1.0, 8, STONE, phase=phase)
-    b.prism(0, 0, 1.2, 1.2, DAIS_H+1.0, DAIS_H+1.06, 12, GLOW, solid=False)
-    b.lamp((0, DAIS_H+2.2, 0), .9)
     # Four ramps, one per axis, from the ground up to the dais edge.
     apothem = DAIS_R*math.cos(phase)
     saved = mesh.yaw

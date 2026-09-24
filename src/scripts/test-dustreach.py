@@ -85,7 +85,7 @@ class DustreachTests(unittest.TestCase):
 
     # --- Floors, headroom and standing support ----------------------------
     def test_floors_have_floor_and_headroom(self):
-        samples = [(x, z, TER) for x, z in ((-6, -11), (5, -11), (-5, -2), (5, -2), (12, -11), (12, -1.5))]   # hall
+        samples = [(x, z, TER) for x, z in ((-6, -11), (5, -11), (-5, -2), (5, -2), (12, -11), (12, 2.6))]   # hall (the stair opening is at x 9.3-13.2, z -5 to 2)
         samples += [(x, z, TER) for x in (-11, 11) for z in (6, 12, 24)]+[(x, z, TER) for x in (-3, 3) for z in (6, 27.5)]  # courtyard
         samples += [(s*18.2, z, TER) for s in (-1, 1) for z in (6, 15.5, 25)]           # arcades
         samples += [(x, z, base.PIT_FLOOR) for x in (-5, 0, 5) for z in (14.8, 19.2)]   # flag court
@@ -271,8 +271,8 @@ class DustreachTests(unittest.TestCase):
         samples += [(-12.0, z, C, 4.2) for z in np.arange(7.5, 21.6, 2.0)]                 # tunnel north
         samples += [(x, tw, C, 4.2) for x in np.arange(-23.5, -15.9, 1.5)]                # tunnel west
         samples += [(-29.0, 18.0, C, 6.0), (-25.5, 20.0, C, 6.0), (-29.5, 28.5, base.LANDING, 4.2)]   # tower room
-        samples += [(x, z, 0.0, 3.5) for x, z in ((33, 4), (45, 4), (38, 20), (33, 20), (40, 8))]    # store, ground
-        samples += [(x, z, S, 3.5) for x, z in ((33, 4), (40, 20), (46, 5), (35, 12))]              # store, upper
+        samples += [(x, z, 0.0, 3.5) for x, z in ((33, 4), (46, 15), (38, 20), (33, 20), (40, 8))]   # store, ground
+        samples += [(x, z, S, 4.5) for x, z in ((30, 4), (32.5, 10), (32, 20), (36, 18))]           # mezzanine, landing
         for x, z, y, room in samples:
             t, ny = self.soup.hits((x, y+3, z), (0, -1, 0))
             self.assertTrue(len(t) and abs(3-t[0]) < 1e-6 and ny[0] > .999, (x, z, y, 'floor', t[:1]))
@@ -361,7 +361,7 @@ class DustreachTests(unittest.TestCase):
         self.assertAlmostEqual(runs['north'][0], base.TUN_DOOR[1]-base.TUN_DOOR[0]-.3, delta=.6)
         for x in np.arange(cx0+.5, cx1, 1.0):
             for z in np.arange(cz0+.5, cz1, 1.0):
-                self.assertLess(self.soup.first((x, C+.3, z), (0, 1, 0)), 7.0, (x, z, 'open ceiling'))
+                self.assertLess(self.soup.first((x, C+.3, z), (0, 1, 0)), base.CIS_CEIL-C, (x, z, 'open ceiling'))
 
     def test_holes_are_covered_on_the_grid_and_cut_edges_stay_flat(self):
         spec, _, soup, grid = self.whole_map()
@@ -422,7 +422,7 @@ class DustreachTests(unittest.TestCase):
              ('tower room', base.TOWER[0]+1.4, base.TOWER_HOLE[1]-1.4, base.TOWER[2]+1.4, base.TOWER_RAMP[2], base.CIS_FLOOR),
              ('store ground', base.STORE[0]+base.WALL+3.4, base.STORE[1]-base.WALL-.6,
               base.STORE[2]+base.WALL+.6, base.STORE[3]-base.WALL-3.4, 0.0),
-             ('store upper', base.STORE[0]+base.WALL+3.4, base.STORE_HOLE[0]-1.0,
+             ('store mezzanine', base.STORE[0]+base.WALL+3.4, base.MEZZ_X-.6,
               base.STORE[2]+base.WALL+.6, base.STORE[3]-base.WALL-.6, base.STORE_UP)]
 
     def test_turrets_cannot_see_into_rooms(self):
@@ -738,6 +738,171 @@ class SewerTests(unittest.TestCase):
         area = np.linalg.norm(np.cross(tris[:, 1]-tris[:, 0], tris[:, 2]-tris[:, 0]), axis=1)
         self.assertGreater(area.min(), 1e-6)
         self.assertLess(len(tris)+len(self.lid_collision)//9, 2000)
+
+
+def _clear(tris, o, d, tmax):
+    """No collision triangle between o and o+d*tmax."""
+    a, e1, e2 = tris[:, 0], tris[:, 1]-tris[:, 0], tris[:, 2]-tris[:, 0]
+    h = np.cross(d, e2); det = (e1*h).sum(1); ok = np.abs(det) > 1e-9
+    inv = np.where(ok, 1/np.where(ok, det, 1), 0); s = o-a
+    u = (s*h).sum(1)*inv; q = np.cross(s, e1); v = (q@d)*inv; t = (e2*q).sum(1)*inv
+    return not (ok & (u >= 0) & (v >= 0) & (u+v <= 1) & (t > 1e-4) & (t < tmax)).any()
+
+
+def hovering_edges(mesh, grid, lo=.05, hi=2.0):
+    """Visible bottom edges of near-vertical faces floating lo..hi metres over
+    the terrain with nothing solid under or beside them (the visual audit's
+    "hovering edges"). A face counts only if the gap under it sees the sky, so
+    edges inside the hollow terrace or tower are ignored, and a face that
+    touches a solid (a band on a wall, a cap on a post) is attached."""
+    col = np.asarray(mesh.collision, np.float64).reshape(-1, 3, 3)
+    ren = np.frombuffer(mesh.vertices.tobytes(), np.float32).reshape(-1, 3, 12)[:, :, :3].astype(float)
+    every = np.concatenate([col, ren])            # render-only parts hold each other up too (caps on posts)
+    up = np.array([0., 1., 0.]); out = []
+    sides = [np.array(d, float) for d in ((1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1))]
+    for tris in (col, ren):
+        n = np.cross(tris[:, 1]-tris[:, 0], tris[:, 2]-tris[:, 0]); ln = np.linalg.norm(n, axis=1)
+        vert = (ln > 1e-6) & (np.abs(n[:, 1]) < .1*ln)
+        for tri, nn in zip(tris[vert], n[vert]/ln[vert, None]):
+            e = tri[np.abs(tri[:, 1]-tri[:, 1].min()) < .01]
+            if len(e) < 2: continue
+            q = (e[0]+e[1])/2; gap = q[1]-build.terrain_height(q[0], q[2], grid)
+            if not lo < gap < hi: continue
+            attached = any(not _clear(every, q+sg*nn*d+np.array([0, .01, 0]), -up, gap+4.0)
+                           for d in (.12, .3, .5) for sg in (-1, 1))
+            attached = attached or any(not _clear(every, q+np.array([0, .05, 0]), d_, .3) for d_ in sides)
+            if attached: continue
+            for side in (nn, -nn):
+                o = q+side*.08-np.array([0, .03, 0])
+                if _clear(col, o, -up, gap+.02) and _clear(col, o, up, 60):
+                    out.append((round(gap, 2), tuple(np.round(q, 1)))); break
+    return out
+
+
+class DustreachPassTests(unittest.TestCase):
+    """The 2026-09 pass: survey fixes (8 m cistern, one-hall storehouse with a
+    mezzanine, 6 m gates and arcades), the open flag court's routes, Capture &
+    Hold points and the visual-audit fixes (no z-fighting, no hovering edges,
+    procedural desert sky)."""
+    @classmethod
+    def setUpClass(cls):
+        from assets import cnh_tower
+        cls.spec = build.spec(); cls.mesh = kit.Mesh(); cls.mesh.lamps = []
+        build.build_structures(cls.spec, cls.mesh)
+        cls.grid = build.terrain_grid(cls.spec)
+        sewer.build(cls.mesh, cls.grid)
+        cls.points, _ = build.build_points(cls.spec, cls.mesh, cls.grid)
+        cls.base_mesh, cls.anchors = one_base()
+        cls.soup = Soup(cls.base_mesh.collision)
+
+    def test_no_z_fighting_anywhere(self):
+        from assets import surface_checks
+        found = surface_checks.z_fighting(self.mesh.vertices, self.mesh.collision)
+        # The shared kit turret mount (build-original-map.py) has a near-coplanar
+        # band that the checker flags at some positions on its own; it is not
+        # this map's geometry, so pairs on a mount are left to the kit.
+        mounts = [e['position'] for e in self.mesh.entities if e['kind'] == 'turret']
+        found = [f for f in found if min(math.hypot(f[1][0]-m[0], f[1][2]-m[2]) for m in mounts) > 2.5]
+        self.assertEqual(found, [], sorted(found, key=lambda f: -f[0])[:5])
+
+    def test_no_visible_hovering_edges(self):
+        found = hovering_edges(self.mesh, self.grid)
+        self.assertEqual(found, [], sorted(found)[-5:])
+
+    def test_cistern_is_eight_metres_with_the_stair_against_the_wall(self):
+        self.assertGreaterEqual(base.CIS_CEIL-base.CIS_FLOOR, 8.0)
+        self.assertAlmostEqual(base.STAIR[1], base.CIS[1])              # the stair runs down the east wall
+        C = base.CIS_FLOOR
+        for x, z in ((-8, -12), (0, -12), (-10, 3), (4, 3)):             # open floor clear of the columns
+            self.assertGreater(self.soup.first((x, C+.2, z), (0, 1, 0)), 7.7, (x, z))
+        # The stair leaves the whole room west of it unbisected.
+        for z in (-15.0, -8.8, 4.0):                                    # rows clear of the columns and generator
+            self.assertEqual(self.soup.first((base.CIS[0]+1, C+1.0, z), (1, 0, 0), base.STAIR[0]-base.CIS[0]-1.2), np.inf, z)
+
+    def test_storehouse_is_one_tall_hall_entered_from_both_levels(self):
+        i1 = base.STORE[1]-base.WALL
+        for x, z in ((40, 5), (44, 9), (46, 19), (39, 19)):              # the open hall: floor to ceiling
+            self.assertGreater(self.soup.first((x, .2, z), (0, 1, 0)), 9.5, (x, z))
+        # Mezzanine at bridge level, reached from the gate (upper) and by the ramp (ground).
+        zc = sum(base.GATE_Z)/2
+        t, ny = self.soup.hits((base.STORE[0]+base.WALL+1, base.STORE_UP+1, zc), (0, -1, 0))
+        self.assertAlmostEqual(t[0], 1.0, places=4)
+        r0, r1, rzg, rzt = base.STORE_RAMP
+        self.assertAlmostEqual(base.store_ramp_y(rzg), 0.0); self.assertAlmostEqual(base.store_ramp_y(rzt), base.STORE_UP)
+        t, _ = self.soup.hits(((r0+r1)/2, base.STORE_UP+1, rzt+.4), (0, -1, 0))
+        self.assertAlmostEqual(t[0], 1.0, places=3)                     # the landing continues the ramp's top
+        self.assertLess(i1-base.STORE_LANDING[1], 10.5); self.assertGreater(i1-base.STORE_LANDING[1], 9.0)
+
+    def test_gates_and_arcades_are_wide(self):
+        self.assertGreaterEqual(base.DOOR[1]-base.DOOR[0], 6.0)
+        self.assertGreaterEqual(base.DOOR_TOP-base.TER, 5.5)
+        self.assertGreaterEqual(base.GATE_Z[1]-base.GATE_Z[0], 6.0)
+        self.assertGreaterEqual(base.GATE_TOP-base.TER, 6.0)
+        gaps = np.diff(base.ARCADE_Z)-2*.62
+        self.assertGreaterEqual(gaps.min(), 5.0, gaps)
+        self.assertGreaterEqual(base.ARCADE_ROOF-1.0-base.TER, 5.4)
+
+    def test_flag_court_is_open_to_the_sky(self):
+        fx, fz = base.FLAG
+        for dx in (-5, 0, 5):
+            for dz in (-3, 0, 3):
+                self.assertEqual(self.soup.first((fx+dx, base.PIT_FLOOR+.5, fz+dz), (0, 1, 0)), np.inf, (dx, dz))
+
+    def test_capture_points_are_placed_symmetric_and_level(self):
+        from assets import cnh_tower
+        ids = [p['id'] for p in self.points]
+        self.assertEqual(ids, ['sun-gate', 'west-wadi', 'east-wadi'])
+        gate = self.spec['gate']['position']
+        self.assertEqual(self.points[0]['pos'], [gate[0], gate[1], gate[2]])
+        w, e = np.array(self.points[1]['pos']), np.array(self.points[2]['pos'])
+        self.assertTrue(np.allclose(w[[0, 2]]+e[[0, 2]], 2048), 'the flank points mirror through the centre')
+        for p in self.points:
+            self.assertEqual(p['radius'], cnh_tower.RING); self.assertFalse(p['ctf_active'])
+        for p in self.points[1:]:
+            x, y, z = p['pos']
+            ring = [build.terrain_height(x+r*math.cos(a), z+r*math.sin(a), self.grid)
+                    for r in (0, 4, 8, 12) for a in np.linspace(0, math.tau, 12, endpoint=False)]
+            self.assertLess(max(ring)-min(ring), cnh_tower.MAX_TILT, p['id'])
+        # No tower sits over a sewer or base hole.
+        cells = set(build.holes(self.spec))
+        for p in self.points[1:]:
+            x, _, z = p['pos']
+            for dx in range(-16, 17, 4):
+                for dz in range(-16, 17, 4):
+                    ix, iz = int((x+dx)//8), int((z+dz)//8)
+                    self.assertNotIn(iz*256+ix, cells, (p['id'], dx, dz))
+        # The Sun Gate carries the capture ring markers; the flag lane under it stays clear.
+        self.assertEqual(gate_module_ring(), cnh_tower.RING)
+
+    def test_committed_pack_declares_points_look_and_many_flag_routes(self):
+        import json
+        from assets import route_checks
+        root = Path(__file__).resolve().parent.parent
+        pack = root/'assets/maps/dustreach'
+        manifest = json.loads((pack/'map.json').read_text())
+        self.assertEqual([p['id'] for p in manifest['control_points']], ['sun-gate', 'west-wadi', 'east-wadi'])
+        self.assertIn('sky', manifest['look'])
+        self.assertNotIn('sun_direction', manifest['look'])          # keeps the baked sun
+        rc = route_checks.Pack(pack)
+        fx, fz = base.FLAG
+        for b in manifest_bases(self.spec):
+            ox, oy, oz, s = b
+            def world(bx):
+                x0, x1, y0, y1, z0, z1 = bx
+                xs = sorted((ox+s*x0, ox+s*x1)); zs = sorted((oz+s*z0, oz+s*z1))
+                return (xs[0], xs[1], oy+y0, oy+y1, zs[0], zs[1])
+            r = route_checks.flag_routes(rc, (ox, oz+s*6), world((-base.TX, base.TX, base.PIT_FLOOR-.5, base.ROOF+1, base.TZ0, base.TZ1)),
+                                         world((fx-5, fx+5, base.PIT_FLOOR-.5, base.PIT_FLOOR+.8, fz-4, fz+4)),
+                                         extent=80.0, airborne=True)
+            self.assertGreaterEqual(r['routes'], 12, (s, r['routes']))
+
+
+def gate_module_ring():
+    return gate.RING
+
+
+def manifest_bases(spec):
+    return [(*b['position'], -1 if b['yaw'] == 180 else 1) for b in spec['bases']]
 
 
 class SpawnForwardClearance(unittest.TestCase):

@@ -217,3 +217,49 @@ spot it could look down through the keep's open back door. One left-arcade
 spawn moved from z 24.5 to 20.5 to mirror the right one: from behind the
 citadel it was visible through the back-wall breach (true before this change
 as well).
+
+## Survey, flag access, Capture & Hold and look pass (2026-09-24)
+
+Supersedes the cistern, storehouse and spawn dimensions above (asset
+`dustreach-citadel-v4`, gate `dustreach-gate-v2`). From
+`research/playability-survey/proposal.md` and `research/visual-audit/findings.md`.
+
+- **Cistern:** floor lowered to 4 m below the ground: 8 m clear under the hall
+  paving (was 6). The tunnel and tower room drop with it; the tower's exit ramp
+  is 8 m long (26°). The stair still runs down the east wall, now 16.2 m long
+  (29°), from a railed opening at x 9.3-13.2, z -5 to 2, and leaves 2 m of
+  floor in front of its foot. Its side is open where it is under 1.1 m high.
+  Still exactly two ways in (stair, tunnel door).
+- **Storehouse:** one 10 m hall (floor 0, ceiling 10) instead of two 4 m floors.
+  A 5 m mezzanine runs along the west wall at bridge level, entered through the
+  6 m curtain gate; a landing and a 26° ramp join it to the hall floor. The
+  ground door is 6 m wide under the mezzanine (4 m high), the north door 6 × 6 m.
+  Baffles stay (a spawn room); the gate baffle runs the mezzanine's length so
+  its spawns can't be seen from behind the citadel. Spawns: two on the hall
+  floor, two on the mezzanine. Inventory at local (41.5, 17).
+- **Gates and arcades:** keep doors 6 m wide × 5.5 m high (under the 6 m hall
+  ceiling), curtain gate 6 × 6 m, arcade bays about 5.2 m wide × 5.4 m high
+  (four columns a side, roof at 11.4 m). Courtyard spawns moved to the gaps
+  between columns (z 17.6 and 11.2).
+- **Flag court:** stays fully open to the sky. `route_checks.flag_routes`
+  (airborne) finds 18 distinct routes to each flag (entries over the curtains,
+  back breach, keep doors, gate and arcade roofs); the test asks for at least 12.
+- **Capture & Hold:** three points, none active in CTF. The Sun Gate
+  (1024, 152, 1024) is the centre point: its arch spans the flag lane, so it has
+  eight render-only marker posts on the 12 m ring instead of a pylon. West Wadi
+  (880, 950) and East Wadi (1168, 1098) are `cnh_tower`s on levelled plateaus,
+  mirrored through the centre and clear of the sewer.
+- **Look:** procedural desert sky (deep blue zenith, sandy horizon, thin cloud,
+  visible sun), warm sun colour, exposure 1.1, warm sky and sand-bounce ambient
+  and a low haze. The sun keeps the baked direction. The old cubemap's streaks
+  are gone because the cubemap is no longer drawn.
+- **Visual fixes:** the terrace paving no longer runs under the curtains and
+  back wall (its edges flickered along their outer faces); keep door wall and
+  brazier caps, the drum bands, the tower-room slab and an obsolete turret
+  shroud fixed. Z-fighting pairs 119 → 0 (except one pair inside the shared kit
+  turret mount, which the kit owns) and no visible hovering edges; both are now
+  tests (`DustreachPassTests`).
+- **Counts:** 3,338 collision triangles per citadel, 432 for the two towers,
+  9,988 total; 26,056 render triangles; 20 lightmap pages.
+- **Still untested by people:** the taller rooms, the mezzanine, the new ring,
+  and whether 18 routes make the flag too easy to take.

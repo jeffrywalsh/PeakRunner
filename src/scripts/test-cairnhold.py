@@ -89,7 +89,7 @@ class CairnholdTests(unittest.TestCase):
         samples = [(x, z, 0) for x in (-12, -8, 8, 12) for z in (-13, -6, 2)
                    if not (hx0 <= x <= hx1 and hz0 <= z <= hz1)]                        # hall, off the stair opening
         samples += [(x, z, base.VAULT_FLOOR) for x in (4.2, 9.8) for z in (-8, -2)]      # vault
-        samples += [(x, z, base.VAULT_FLOOR) for x in (12.0, 14.4) for z in (4, 11)]      # walkway by the well
+        samples += [(x, z, base.VAULT_FLOOR) for x in (12.0, 14.4) for z in (5, 11)]      # walkway by the well
         samples += [(x, z, base.PIT_FLOOR) for x, z in ((4.0, 11.2), (9.6, 11.2), (6.8, 4.4))]  # generator well
         samples += [(x, 8, 3.0) for x in (48, 64, 84)] + [(84, z, 3.0) for z in (-4, -16)]  # sally port, level runs
         samples += [(x, z, base.EXIT_GROUND) for x in (82, 86) for z in (-42.2, -37)]    # exit house
@@ -170,7 +170,7 @@ class CairnholdTests(unittest.TestCase):
             if base.TX0 <= x <= base.TX1 and base.TZ0 <= z <= base.TZ1: continue        # trench floor/roof
             if base.STAIR[0] <= x <= base.STAIR[1] and base.STAIR[2] <= z <= base.STAIR[3]: continue  # vault stair
             if base.PIT_RAMP[0] <= x <= base.PIT_RAMP[1] and base.PIT_RAMP[2] <= z <= base.PIT_RAMP[3]: continue  # well ramp
-            if 16 <= x <= 41.1 and base.T_EAST[2] <= z <= base.T_EAST[3]: continue       # sally port, east climb
+            if 16 <= x <= base.T_EAST_FLOOR[2][0]+.1 and base.T_EAST[2] <= z <= base.T_EAST[3]: continue  # sally port, east climb
             if base.T_SOUTH[0] <= x <= base.T_SOUTH[1] and -36 <= z <= -20: continue    # sally port, south climb
             if y > 5 and any(x0 <= x <= x1 and z0 <= z <= z1 for name, (x0, x1, z0, z1) in base.HOLES.items()
                              if name.startswith('tunnel')): continue                     # lids: ground over the tunnel
@@ -276,7 +276,8 @@ class CairnholdTests(unittest.TestCase):
         # Recess: the jambs stand 2 m proud of the front wall either side of the door.
         self.assertAlmostEqual(self.soup.first((4.8, 2, -30), (0, 0, 1)), base.GATE_Z+30, delta=.01)
         self.assertAlmostEqual(self.soup.first((3.2, 2, -30), (0, 0, 1)), base.BZ0+30, delta=.01)
-        self.assertAlmostEqual(self.soup.first((0, 5.5, -30), (0, 0, 1)), base.BZ0+30, delta=.01)
+        # Over the 6 m door the roof slab's front edge closes the opening.
+        self.assertAlmostEqual(self.soup.first((0, 6.5, -30), (0, 0, 1)), base.BZ0+30, delta=.01)
         # The roof turret stands on the gatehouse.
         turret = [e for e in self.mesh.entities if e['kind'] == 'turret']
         self.assertTrue(any(abs(e['position'][1]-base.TIERS[0][2]-2.8) < 1e-6 for e in turret))
@@ -364,7 +365,7 @@ class CairnholdTests(unittest.TestCase):
         self.assertAlmostEqual(runs['east'][0], base.TUN_DOOR[1]-base.TUN_DOOR[0]-.3, delta=.6)
         for x in np.arange(vx0+.5, base.STAIR[0], 1.0):
             for z in np.arange(vz0+.5, vz1, 1.0):
-                self.assertLess(self.soup.first((x, F+.3, z), (0, 1, 0)), 5.5, (x, z, 'open ceiling'))
+                self.assertLess(self.soup.first((x, F+.3, z), (0, 1, 0)), base.VAULT_CEIL-F, (x, z, 'open ceiling'))
         # The stair: under 30 degrees, headroom all the way, closed beneath its open edge.
         s0, s1, zh, zf = base.STAIR
         self.assertLess(math.degrees(math.atan(-F/(zf-zh))), 30)
@@ -379,7 +380,8 @@ class CairnholdTests(unittest.TestCase):
                 self.assertLess(self.soup.first((s0-1, F+.3, z), (1, 0, 0)), 1.01, (z, 'open under the stair'))
 
     def test_sally_port_is_walkable_roofed_and_lidded(self):
-        """Along the whole tunnel: a floor at `tunnel_floor`, 4.3 m of headroom,
+        """Along the whole tunnel: a floor at `tunnel_floor`, 6.5 m of headroom
+        (or open sky under the two skylights; checked to 4.2 m here),
         walls either side, no slope over 22 degrees, and its lid top flush with
         the ring height it pins the terrain to."""
         path = [(x, 8.0) for x in np.arange(16.3, 84.0, .7)] + [(84.0, z) for z in np.arange(8.0, -42.5, -.7)]
@@ -400,8 +402,11 @@ class CairnholdTests(unittest.TestCase):
             x0, x1, z0, z1 = base.HOLES[name]
             for x in np.arange(x0+.2, x1, 2.0):
                 for z in np.arange(z0+.2, z1, 2.0):
+                    well = name == 'tunnel east' and any(s0 <= x <= s1 for s0, s1 in base.SKYLIGHTS) \
+                        and z0+base.WALL < z < z1-base.WALL
                     t = self.soup.first((x, 60, z), (0, -1, 0))
-                    self.assertAlmostEqual(60-t, base.ring_height(name, x, z), delta=.02, msg=(name, x, z))
+                    want = base.tunnel_floor(x, z) if well else base.ring_height(name, x, z)
+                    self.assertAlmostEqual(60-t, want, delta=.02, msg=(name, x, z, 'skylight' if well else 'lid'))
 
     def test_exit_house_door_is_open_and_the_battery_faces_away(self):
         """The exit house's door is open straight in: a body band walks from
@@ -552,6 +557,11 @@ class CairnholdTests(unittest.TestCase):
         # Slope over the play area's terrain cells (hole cells render no ground).
         slope = cairnhold_terrain.slope_degrees(grid)
         cut = np.zeros(65536, bool); cut[holes] = True; cut = cut.reshape(256, 256)
+        # The flank Capture & Hold plateaus are level by design, like the cut
+        # cells; leave them out of the ruggedness statistics.
+        zc, xc = np.mgrid[0:256, 0:256]*8.0
+        for c in spec.get('control_points', []):
+            if not c.get('on_ring'): cut |= np.hypot(xc-c['x'], zc-c['z']) <= build.PLATEAU_R+8
         rows, cols = slice(int((1024-330)/8), int((1024+330)/8)+1), slice(int((1024-280)/8), int((1024+280)/8)+1)
         play = slope[rows, cols][~cut[rows, cols]]
         self.assertTrue(26 <= np.median(play) <= 30, np.median(play))
@@ -650,6 +660,227 @@ class CairnholdTests(unittest.TestCase):
                 digests.append({f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in out.iterdir()})
             self.assertEqual(digests[0], digests[1])
             self.assertEqual(len(digests[0]), 7)
+
+class PlayabilityV4(unittest.TestCase):
+    """The playability-survey fixes (research/playability-survey): a
+    two-level hall, 6 x 6 m doorways, a 6.5 m vault and tunnel with two
+    skylight wells, and a fully open flag platform."""
+    @classmethod
+    def setUpClass(cls):
+        cls.mesh, cls.anchors = one_base()
+        cls.soup = Soup(cls.mesh.collision)
+
+    def test_hall_is_two_levels_with_gallery_doorways(self):
+        ix = base.BX-base.WALL
+        gx = ix-base.GALLERY_W
+        hz0, hz1 = base.HALL_Z
+        # The tall part of the hall: a clear 12 m+ from the floor to its roof.
+        for x in (-8.0, 0.0, 8.0):
+            for z in (hz0+1.0, -6.0, base.PART_A[0]-base.GALLERY_W-1.0):
+                if base.HALL_HOLE[0] <= x <= base.HALL_HOLE[1] and base.HALL_HOLE[2] <= z <= base.HALL_HOLE[3]: continue
+                self.assertGreater(self.soup.first((x, .2, z), (0, 1, 0)), 12.0, (x, z, 'tall hall'))
+        # The gallery: a floor at hillside level round the sides and back,
+        # with 5.5 m+ over it.
+        gy = base.GALLERY_Y
+        for x, z in [(-ix+1.5, hz0+1.5), (-ix+1.5, -4.0), (ix-1.5, -10.0), (ix-1.5, 1.0), (0.0, base.PART_A[0]-1.5)]:
+            t, ny = self.soup.hits((x, gy+3, z), (0, -1, 0))
+            self.assertTrue(len(t) and abs(3-t[0]) < 1e-6 and ny[0] > .999, (x, z, 'gallery floor'))
+            self.assertGreater(self.soup.first((x, gy+.2, z), (0, 1, 0)), 5.5, (x, z, 'gallery headroom'))
+        # Each side wall's doorway opens from the hillside straight onto the
+        # gallery and across the void: 6 m wide, 6 m tall.
+        ga, gb = base.GALLERY_DOOR
+        for s in (-1, 1):
+            for z in np.arange(ga+.3, gb-.29, .5):
+                for dy in (.4, 3.0, 5.6):
+                    t = self.soup.first((s*40, gy+dy, z), (-s, 0, 0))
+                    self.assertGreater(t, 40-gx, (s, z, dy, 'gallery doorway'))
+            self.assertGreaterEqual(gb-ga, 6.0); self.assertGreaterEqual(base.HALL_CEIL-gy, 6.0)
+            # The ground outside the doorway is at gallery level.
+            self.assertAlmostEqual(base.bunker_ground((ga+gb)/2), gy, delta=.01)
+
+    def test_front_and_interior_doorways_are_six_by_six(self):
+        self.assertGreaterEqual(base.DOOR[1]-base.DOOR[0], 6.0)
+        self.assertGreaterEqual(base.DOOR_TOP, 6.0)
+        for d0, d1 in base.PART_A_DOORS+[base.PART_B_DOOR, base.BACK_DOOR]:
+            self.assertGreaterEqual(d1-d0, 6.0)
+        # A skier at head height passes the front door and the vestibule.
+        for x in (-2.7, 0, 2.7):
+            for y in (.3, 3.0, 5.6):
+                self.assertGreater(self.soup.first((x, y, -30), (0, 0, 1)), 30+base.BZ0+base.WALL+8, (x, y))
+
+    def test_vault_and_tunnel_have_six_and_a_half_metres(self):
+        F = base.VAULT_FLOOR
+        self.assertGreaterEqual(base.VAULT_CEIL-F, 6.5)
+        self.assertGreaterEqual(base.TUN_H, 6.5)
+        for x in (4.2, 9.8):
+            for z in (-8, -2):
+                self.assertGreater(self.soup.first((x, F+.2, z), (0, 1, 0)), 6.2, (x, z))
+        for x in (20.0, 30.0, 44.0, 58.0, 76.0):
+            if any(s0 <= x <= s1 for s0, s1 in base.SKYLIGHTS): continue
+            y = base.tunnel_floor(x, 8.0)
+            self.assertGreater(self.soup.first((x, y+.2, 8.0), (0, 1, 0)), 6.2, x)
+
+    def test_skylights_drop_into_the_tunnel_and_can_be_jetted_out(self):
+        ez0, ez1 = base.T_EAST[2:]
+        for s0, s1 in base.SKYLIGHTS:
+            x = (s0+s1)/2
+            for z in (ez0+base.WALL+.6, (ez0+ez1)/2, ez1-base.WALL-.6):
+                t = self.soup.first((x, 60, z), (0, -1, 0))
+                self.assertAlmostEqual(60-t, base.tunnel_floor(x, z), delta=.02, msg=(x, z))
+            # Shallow enough to jet straight out of (well under a full tank).
+            self.assertLess(base.east_lid(s1)-base.tunnel_floor(x, 8.0), 16.0)
+            # The wells open into the tunnel, not the vault.
+            self.assertGreater(s0, base.VAULT[1]+10)
+
+    def test_flag_platform_is_fully_open(self):
+        fx, fz = base.FLAG
+        top = base.TOWER_TOP
+        tx0, tx1, tz0, tz1 = base.TW
+        # No parapet: nothing stands on the platform's edges.
+        for x in np.arange(tx0+.2, tx1, .8):
+            for z in (tz0+.2, tz1-.2):
+                self.assertGreater(self.soup.first((x, top+.05, z), (0, 1, 0)), 1.5, (x, z))
+        for z in np.arange(tz0+.2, tz1, .8):
+            for x in (tx0+.2, tx1-.2):
+                self.assertGreater(self.soup.first((x, top+.05, z), (0, 1, 0)), 1.5, (x, z))
+        # Straight fly-in lines to the flag from every direction but the two
+        # that cross the sentry mast and the sensor at the platform's back.
+        blockers = [base.MAST, base.SENSOR]
+        clear = 0
+        for k in range(16):
+            a = k*math.tau/16
+            d = np.array([-math.cos(a), 0, -math.sin(a)])
+            o = np.array([fx+30*math.cos(a), top+1.2, fz+30*math.sin(a)])
+            crosses = any(np.linalg.norm(np.cross(np.array([bx-o[0], 0, bz-o[2]]), d)) < 2.6
+                          and 0 < np.dot(np.array([bx-o[0], 0, bz-o[2]]), d) < 30 for bx, bz in blockers)
+            if crosses: continue
+            self.assertGreater(self.soup.first(o, d), 28.5, (k, 'flag line blocked'))
+            clear += 1
+        self.assertGreaterEqual(clear, 12)
+
+    def test_no_z_fighting_on_the_base_the_ring_or_the_towers(self):
+        from assets import surface_checks, cnh_tower
+        self.assertEqual(surface_checks.z_fighting(self.mesh.vertices, self.mesh.collision), [])
+        m = kit.Mesh(); m.origin = (0, 0, 0); m.yaw = 0.0
+        cairnhold_ring.build(m)
+        m.origin = (0, cairnhold_ring.DAIS_H, 0)
+        cnh_tower.build(m)
+        self.assertEqual(surface_checks.z_fighting(m.vertices, m.collision), [])
+
+
+class CommittedPack(unittest.TestCase):
+    """Checks on the embedded pack: capture points, flag routes, hovering
+    edges and overlapping surfaces over the whole map."""
+    PACK = Path(__file__).resolve().parent.parent/'assets/maps/cairnhold'
+
+    @classmethod
+    def setUpClass(cls):
+        import json
+        cls.manifest = json.loads((cls.PACK/'map.json').read_text())
+        cls.spec = build.spec()
+        cls.heights = np.frombuffer((cls.PACK/'height.bin').read_bytes(), np.uint16).reshape(256, 256)/32.0
+
+    def test_three_capture_points_ring_centre_and_mirrored_flanks(self):
+        from assets import cnh_tower
+        points = self.manifest['control_points']
+        self.assertEqual([p['name'] for p in points], ['The Ring', 'West Cairn', 'East Cairn'])
+        for p in points:
+            self.assertFalse(p['ctf_active']); self.assertEqual(p['radius'], cnh_tower.RING)
+        rx, ry, rz = self.spec['ring']['position']
+        self.assertEqual(points[0]['pos'], [rx, ry+cairnhold_ring.DAIS_H, rz], 'the Ring point stands on the dais')
+        self.assertGreaterEqual(cairnhold_ring.DAIS_R, cnh_tower.RING, 'the capture ring is the dais')
+        (ax, _, az), (bx, _, bz) = points[1]['pos'], points[2]['pos']
+        self.assertEqual((ax+bx, az+bz), (2*rx, 2*rz), 'flank points mirror through the centre')
+        self.assertAlmostEqual(points[1]['pos'][1], points[2]['pos'][1], delta=.05)
+        from assets import pack_writer
+        for p in points[1:]:
+            x, y, z = p['pos']
+            # A level plateau across the capture ring (walkable, under 3 m of
+            # relief), and the tower's buried solids covering the ground
+            # under its plinth and cover walls.
+            ring = [pack_writer.sample_height(self.heights, x+dx, z+dz)
+                    for dx in np.arange(-cnh_tower.RING, cnh_tower.RING+.1, 2.0)
+                    for dz in np.arange(-cnh_tower.RING, cnh_tower.RING+.1, 2.0) if math.hypot(dx, dz) <= cnh_tower.RING]
+            self.assertLess(max(ring)-min(ring), 3.0, p['id'])
+            outline = [(math.cos(a)*(cnh_tower.PLINTH_R+.4), math.sin(a)*(cnh_tower.PLINTH_R+.4))
+                       for a in np.linspace(0, math.tau, 16, endpoint=False)]
+            for k in range(4):
+                a = math.pi/4+k*math.pi/2
+                for off in (-cnh_tower.COVER_LEN/2, 0, cnh_tower.COVER_LEN/2):
+                    outline.append((math.cos(a)*cnh_tower.COVER_R-math.sin(a)*off, math.sin(a)*cnh_tower.COVER_R+math.cos(a)*off))
+            for dx, dz in outline:
+                h = pack_writer.sample_height(self.heights, x+dx, z+dz)
+                self.assertGreater(h, y-cnh_tower.SINK+.2, (p['id'], dx, dz, 'base shows above ground'))
+                self.assertLess(h, y+cnh_tower.PLINTH_H-.05, (p['id'], dx, dz, 'buried'))
+        # And none of the flank towers sits near a base structure.
+        for p in points[1:]:
+            for bat in (a for i in self.manifest['instances'] if 'battery' in i.get('anchors', {}) for a in [i['anchors']['battery']]):
+                self.assertGreater(math.hypot(p['pos'][0]-bat[0], p['pos'][2]-bat[2]), 80)
+
+    def test_many_distinct_routes_to_each_flag(self):
+        """User rule: "two main entrances but ~10 ways of getting to the flag".
+        The flag platform is fully open, so every way into the hut and tower
+        (walk, drop or jet) times every way from it onto the platform round
+        the flag counts (route_checks.flag_routes, airborne)."""
+        from assets import route_checks
+        pack = route_checks.Pack(self.PACK)
+        fx, fz = base.FLAG
+        for b in self.spec['bases']:
+            ox, oy, oz = b['position']; s = -1 if b['yaw'] == 180 else 1
+            def world(bx):
+                x0, x1, y0, y1, z0, z1 = bx
+                xs = sorted((ox+s*x0, ox+s*x1)); zs = sorted((oz+s*z0, oz+s*z1))
+                return (xs[0], xs[1], oy+y0, oy+y1, zs[0], zs[1])
+            r = route_checks.flag_routes(pack, (ox+s*fx, oz+s*fz),
+                                         world((base.HX0, base.HX1, base.HUT_FLOOR-.5, base.TOWER_TOP+.5, base.HZ0, base.HZ1)),
+                                         world((fx-5, fx+5, base.TOWER_TOP-.5, base.TOWER_TOP+.8, fz-5, fz+5)), airborne=True)
+            self.assertGreaterEqual(len(r['entries']), 8, (b['team'], r['entries']))
+            self.assertGreaterEqual(r['routes'], 10, (b['team'], [len(a) for a in r['approaches']]))
+
+    def test_no_hovering_wall_bottoms(self):
+        """No wall's lowest edge floats 0.3-2.5 m over the terrain without a
+        floor under it (the visual audit's check, with the engine's bilinear
+        terrain height)."""
+        from assets import pack_writer
+        v = np.frombuffer((self.PACK/'vertices.bin').read_bytes(), np.float32).reshape(-1, 3, 12).astype(float)
+        holes = set(self.manifest['holes'])
+        p = v[:, :, :3]; nz = np.cross(p[:, 1]-p[:, 0], p[:, 2]-p[:, 0]); ln = np.maximum(np.linalg.norm(nz, axis=1), 1e-9)
+        ny = np.abs(nz[:, 1])/ln
+        walls = np.nonzero((ny < .05) & (ln/2 > .05))[0]; floors = np.nonzero(ny > .9)[0]
+        grid = {}
+        for f in floors:
+            lo = p[f].min(0); hi = p[f].max(0)
+            for gx in range(int(lo[0]//4), int(hi[0]//4)+1):
+                for gz in range(int(lo[2]//4), int(hi[2]//4)+1): grid.setdefault((gx, gz), []).append(f)
+        found = []
+        for w in walls:
+            b = p[w][p[w][:, 1].argmin()]
+            x, z = int(b[0]//8), int(b[2]//8)
+            if not (0 <= x < 256 and 0 <= z < 256) or z*256+x in holes: continue
+            ground = pack_writer.sample_height(self.heights, b[0], b[2]); gap = b[1]-ground
+            if not (.3 < gap < 2.5): continue
+            supported = any(p[f].min(0)[0]-.3 <= b[0] <= p[f].max(0)[0]+.3 and p[f].min(0)[2]-.3 <= b[2] <= p[f].max(0)[2]+.3
+                            and ground-.1 <= p[f][:, 1].max() <= b[1]+.05
+                            for f in grid.get((int(b[0]//4), int(b[2]//4)), []))
+            if not supported: found.append([round(float(c), 1) for c in b])
+        self.assertEqual(found, [])
+
+    def test_no_z_fighting_anywhere_on_the_map(self):
+        from assets import surface_checks
+        v = np.frombuffer((self.PACK/'vertices.bin').read_bytes(), np.float32)
+        c = np.frombuffer((self.PACK/'collision.bin').read_bytes(), np.float32)
+        self.assertEqual(surface_checks.z_fighting(v, c), [])
+
+    def test_own_look_and_fog(self):
+        import json
+        look = self.manifest['look']
+        self.assertEqual(look, self.spec['look'])
+        self.assertNotIn('sun_direction', look, 'keeps the baked sun')
+        self.assertEqual(self.manifest['sky']['fogColor'], self.spec['fog_color'])
+        for other in ('raindance', 'tower-complex', 'frostline', 'dustreach'):
+            f = self.PACK.parent/other/'map.json'
+            self.assertNotEqual(json.loads(f.read_text()).get('look', {}).get('sky'), look['sky'], other)
+
 
 class SpawnForwardClearance(unittest.TestCase):
     """Every committed spawn faces open floor: a clear body-width view for

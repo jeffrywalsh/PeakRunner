@@ -19,6 +19,7 @@ from array import array
 
 import numpy as np
 
+from assets import cnh_tower
 from assets import dustreach_citadel
 from assets import dustreach_gate
 from assets import dustreach_materials
@@ -94,7 +95,36 @@ def terrain_sites(definition):
     for wx, y, wz, _, _ in pieces(definition):
         out.append((lambda x, z, y=y: np.full_like(x, y-.1),
                     lambda x, z, wx=wx, wz=wz: 1-smooth(0, 10, _shape_distance(('disc', wx, wz, dustreach_gate.PIECE_R), x, z))))
+    # Capture & Hold towers stand on a level plateau (cnh_tower.MAX_TILT).
+    for cx, cz in tower_points(definition):
+        y = float(dustreach_terrain.natural(np.array([cx]), np.array([cz]), definition['seed'])[0])
+        out.append((lambda x, z, y=y: np.full_like(x, y),
+                    lambda x, z, cx=cx, cz=cz: 1-smooth(0, 16, _shape_distance(('disc', cx, cz, cnh_tower.RING+4), x, z))))
     return out
+
+
+def tower_points(definition):
+    """(x, z) of every control point that gets a cnh_tower. The centre point
+    is the Sun Gate itself, whose arch spans the flag lane, so it gets ring
+    markers from dustreach_gate instead of a pylon in the lane."""
+    return [(c['x'], c['z']) for c in definition.get('control_points', []) if c.get('structure') != 'gate']
+
+
+def build_points(definition, mesh, grid):
+    """Build the Capture & Hold towers and return (control_points, instances)."""
+    points, instances = [], []
+    for c in definition.get('control_points', []):
+        if c.get('structure') == 'gate':
+            ground = definition['gate']['position'][1]
+        else:
+            ground = round(terrain_height(c['x'], c['z'], grid), 3)
+            mesh.origin = (c['x'], ground, c['z']); mesh.yaw = 0.0
+            anchors = cnh_tower.build(mesh)
+            instances.append(dict(asset=cnh_tower.ASSET_ID, id=c['id'], position=[c['x'], ground, c['z']],
+                                  anchors={k: mesh.point(v) for k, v in anchors.items()}))
+        points.append({'id': c['id'], 'name': c['name'], 'pos': [c['x'], ground, c['z']],
+                       'radius': cnh_tower.RING, 'ctf_active': False})
+    return points, instances
 
 
 def holes(definition):
@@ -198,6 +228,10 @@ def build(output, bake=True):
     mesh.lamps.extend(sewer_lamps)
     lid_render, lid_collision = dustreach_sewer.lid(grid)
     sewer_triangles = len(mesh.collision)//9-before+len(lid_collision)//9
+    before = len(mesh.collision)//9
+    control_points, tower_instances = build_points(definition, mesh, grid)
+    instances.extend(tower_instances)
+    tower_triangles = len(mesh.collision)//9-before
     instances.append(dict(asset=dustreach_sewer.ASSET_ID, position=list(sewer['centre']), yaw=0,
                           anchors={k: list(v) for k, v in sewer.items()}))
     # The sewer's roof collides like the ground it replaces. It is appended
@@ -231,6 +265,8 @@ def build(output, bake=True):
         asset_sha256=pack_writer.source_hash(dustreach_citadel.__file__),
         gate_asset_sha256=pack_writer.source_hash(dustreach_gate.__file__),
         sewer_asset_sha256=pack_writer.source_hash(dustreach_sewer.__file__),
+        control_points=control_points, look=definition['look'],
+        cnh_asset_sha256=pack_writer.source_hash(cnh_tower.__file__),
         structure_kit_sha256=pack_writer.source_hash(structure_kit.__file__),
         terrain_source_sha256=pack_writer.source_hash(dustreach_terrain.__file__),
         material_source_sha256=pack_writer.source_hash(dustreach_materials.__file__),
@@ -240,8 +276,9 @@ def build(output, bake=True):
         definition_sha256=pack_writer.source_hash(ROOT/'maps/dustreach.json'))
     pack_writer.write_pack(output, files, manifest)
     print(f'Built {definition["name"]}: {len(mesh.collision)//9} solid triangles '
-          f'({base_triangles//2} per citadel, {len(mesh.collision)//9-base_triangles-sewer_triangles} gate and ruins, '
-          f'{sewer_triangles} sewer), '
+          f'({base_triangles//2} per citadel, '
+          f'{len(mesh.collision)//9-base_triangles-sewer_triangles-tower_triangles} gate and ruins, '
+          f'{sewer_triangles} sewer, {tower_triangles} C&H towers), '
           f'{len(manifest["holes"])} terrain holes, '
           f'{len(mesh.vertices)//36+len(lid_render)//36} render triangles'
           + (f', {lightmap["pages"]} lightmap pages' if lightmap else ', unbaked'))

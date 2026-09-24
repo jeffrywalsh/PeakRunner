@@ -668,6 +668,21 @@ class RouteCounts(unittest.TestCase):
             sx, _, sz = [p-q for p, q in zip(m.point((base.SLIT_DIR[0], 0, base.TZ+base.SLIT_DIR[1])), (cx, 0, cz))]
             for e in mitre: self.assertGreater((e[0]-cx)*sx+(e[2]-cz)*sz, 0, (b['id'], 'mitre entry not at the slit', e))
 
+    def test_distinct_flag_routes(self):
+        """route_checks.flag_routes on the bishop chamber (airborne): each of
+        the four doors and the mitre slit lands straight in the flag's zone,
+        so each is one route. Five per flag today, a regression floor; the
+        pipeline's target is about ten (docs/map-pipeline.md)."""
+        from assets import route_checks as rc
+        pack = rc.Pack(PACK)
+        for b in build.spec()['bases']:
+            ox, oy, oz = b['position']
+            m = kit.Mesh(); m.origin = tuple(b['position']); m.yaw = math.radians(b['yaw'])
+            cx, _, cz = m.point((0, 0, base.TZ)); floor = oy+base.CH_FLOOR; r = base.R_IN
+            found = rc.flag_routes(pack, (cx, cz), (cx-r, cx+r, floor-.5, floor+14, cz-r, cz+r),
+                                   (cx-2.5, cx+2.5, floor-.5, floor+.8, cz-2.5, cz+2.5), airborne=True)
+            self.assertGreaterEqual(found['routes'], 5, (b['id'], [len(a) for a in found['approaches']]))
+
     @staticmethod
     def door_points():
         """Where each door's crossing lands: just inside the inner wall."""

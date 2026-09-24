@@ -15,7 +15,9 @@ the west and east walls join the levels, so the deck has two approaches and
 nobody has to leave the way they came. Three doors reach Level 1 from three
 sides: the front porch, the rear door and an east side door. The doors and
 the command deck's window bands are open: players and shots go straight
-through. Turrets face the field with a limited field of fire
+through. Doors are 6 m wide and 5.5 m tall. A 10 x 10 m void in the command
+deck in front of the flag (VOID) makes the hall and the deck one two-level
+space, entered from either level; the roof hatch sits over it. Turrets face the field with a limited field of fire
 (turret_arcs.py) rather than being walled off, and no spawn sits in a
 straight line through an opening. Baffles remain only at the basement
 (generator room) door and inside the relay outpost (a spawn room).
@@ -36,41 +38,45 @@ import math
 
 from assets.structure_kit import Builder
 
-ASSET_ID = 'frostline-station-v3'
+ASSET_ID = 'frostline-station-v4'
 
 G = -3.0                              # shelf ground under the station
 SX, SZ0, SZ1, WALL = 14.0, -14.0, 14.0, .6
 IX, IZ0, IZ1 = SX-WALL, SZ0+WALL, SZ1-WALL   # inner faces
 L1, L1_CEIL, L2, L2_CEIL, ROOF = 0.0, 6.5, 7.5, 13.5, 14.5
 SKIRT = G-.3
-DOOR, DOOR_TOP = (-2.2, 2.2), 3.8
-REAR_DOOR = (-10.0, -6.5)
+DOOR, DOOR_TOP = (-3.0, 3.0), 5.5
+REAR_DOOR = (-12.0, -6.0)
 # Roofed porch in front of the door (open straight through into the hall).
-PORCH_X, PORCH_Z, PORCH_TOP = 2.6, -18.0, 4.4
-PARTITION_Z, PART_DOOR, PART_DOOR_TOP = (6.0, 6.6), (6.5, 10.0), 4.0
+PORCH_X, PORCH_Z, PORCH_TOP = 3.2, -18.0, 6.0
+PARTITION_Z, PART_DOOR, PART_DOOR_TOP = (6.0, 6.6), (4.0, 10.0), 5.5
+PART_DOOR_W = (-10.0, -4.0)            # second partition doorway, west of the void
 # West ramp: surface y = L2 at RAMP_TOP_Z down to L1 at RAMP_FOOT_Z.
 RAMP_X = (-IX, -10.4)
 RAMP_TOP_Z, RAMP_FOOT_Z = -10.0, 5.4
 OPENING_Z = (RAMP_TOP_Z, -2.6)        # L2 floor opening over the ramp
-HATCH = (5.0, 10.0, -1.0, 5.0)        # roof hatch x0, x1, z0, z1
+HATCH = (-3.0, 3.0, -3.0, 3.0)        # roof hatch x0, x1, z0, z1, over the void
+# Two-level void: a 10 x 10 m hole in the command deck in front of the flag,
+# so the hall and the deck are one space; enter it from either level.
+VOID = (-5.0, 5.0, -4.0, 6.0)
 WINDOW_BAND = (9.2, 11.8)
 FRONT_WINDOWS = ((-11.0, -4.0), (4.0, 11.0))
 SIDE_WINDOWS = ((-10.0, -3.0), (3.0, 10.0))
 FLAG = (0.0, 8.0)
 PLINTH = .3
 INVENTORIES = ((-6.0, 3.4), (-1.0, 3.4))
-CRATES = (((1.0, -4.5), (2.2, 1.5, 1.8)), ((6.0, -1.0), (1.8, 1.5, 2.6)))
+CRATES = (((1.0, -4.5), (2.4, 1.5, .8)), ((6.0, -1.0), (.8, 1.5, 2.6)))
 # East ramp, the mirror of the west one: the deck's second approach.
 E_RAMP_X = (10.4, IX)
 E_OPENING_Z = OPENING_Z
 # East side door into the rear hall and the stair down to the shelf.
-EAST_DOOR, EAST_DOOR_TOP = (7.0, 10.5), 3.8
+EAST_DOOR, EAST_DOOR_TOP = (6.8, 12.8), 5.5
 EAST_STAIR_FOOT_X = SX+6.0
 
 # --- Basement generator room (v3) ---------------------------------------------
 # Terrain holes: whole 8 m cells. With the base origins in maps/frostline.json
 # (world x/z multiples of 8), local x and z must be multiples of 8 too.
-B_FLOOR, B_CEIL = -7.0, L1-1.0             # floor top; underside of the hall floor
+B_FLOOR, B_CEIL = -7.5, L1-1.0             # floor top; underside of the hall floor
 B_CELLS = (-8.0, 8.0, -8.0, 8.0)
 B_IN = (-7.4, 7.4, -7.4, 7.4)
 B_STAIR = (-7.4, -4.4, -7.4, 6.6)          # x0, x1, z at the hall floor, z at the basement floor
@@ -252,13 +258,23 @@ def build(mesh, team, circuit):
     # Floors: L1 over the plinth with the basement stair's opening; L2 with
     # both ramp openings; roof with the hatch.
     bx0, bx1, bz0, bz1 = B_OPENING
-    slab(-SX, bx0, SZ0, SZ1, L1, DECKING)
-    slab(bx1, SX, SZ0, SZ1, L1, DECKING)
-    slab(bx0, bx1, SZ0, bz0, L1, DECKING)
-    slab(bx0, bx1, bz1, SZ1, L1, DECKING)
+    # The hall floor stops at the walls' inner faces: run out to the outer
+    # faces, its edges would share a plane with the wall faces and flicker.
+    slab(-IX, bx0, IZ0, IZ1, L1, DECKING)
+    slab(bx1, IX, IZ0, IZ1, L1, DECKING)
+    slab(bx0, bx1, IZ0, bz0, L1, DECKING)
+    slab(bx0, bx1, bz1, IZ1, L1, DECKING)
     ox0, ox1 = RAMP_X
     ex0, ex1 = E_RAMP_X
-    slab(ox1, ex0, IZ0, IZ1, L2, DECKING)
+    vx0, vx1, vz0, vz1 = VOID
+    slab(ox1, vx0, IZ0, IZ1, L2, DECKING)
+    slab(vx1, ex0, IZ0, IZ1, L2, DECKING)
+    slab(vx0, vx1, IZ0, vz0, L2, DECKING)
+    slab(vx0, vx1, vz1, IZ1, L2, DECKING)
+    # Accent trim on the void's four edge faces, so the drop reads.
+    for axis, plane, into, u0, u1 in (('x', vx0, 1, vz0, vz1), ('x', vx1, -1, vz0, vz1),
+                                      ('z', vz0, 1, vx0, vx1), ('z', vz1, -1, vx0, vx1)):
+        b.face_quad(axis, plane, into, u0, u1, L2-.45, L2-.05, accent, .03)
     for x0, x1, (z0, z1) in ((ox0, ox1, OPENING_Z), (ex0, ex1, E_OPENING_Z)):
         slab(x0, x1, IZ0, z0, L2, DECKING)
         slab(x0, x1, z1, IZ1, L2, DECKING)
@@ -293,9 +309,10 @@ def build(mesh, team, circuit):
     mesh.box((rxc, DOOR_TOP+.45, SZ1+.4), (1.2, .1, .6), GLOW, False)
     b.lamp((rxc, DOOR_TOP-.2, SZ1+1.5), .5)
     # Rear hall partition with its door off the hall's axis.
-    for u0, u1 in _runs_without(-IX, IX, [PART_DOOR]):
+    for u0, u1 in _runs_without(-IX, IX, [PART_DOOR, PART_DOOR_W]):
         wall(u0, u1, *PARTITION_Z, L1, L1_CEIL, HULL)
-    wall(*PART_DOOR, *PARTITION_Z, PART_DOOR_TOP, L1_CEIL, HULL)
+    for door in (PART_DOOR, PART_DOOR_W):
+        wall(*door, *PARTITION_Z, PART_DOOR_TOP, L1_CEIL, HULL)
     # West and east ramps between the levels; their undersides are closed off.
     mesh.ramp((ox0+ox1)/2, ox1-ox0, RAMP_TOP_Z, RAMP_FOOT_Z, L2, L1, GRATE)
     closed_side(ox1, RAMP_TOP_Z, RAMP_FOOT_Z, L1, ramp_surface)
@@ -362,7 +379,7 @@ def build(mesh, team, circuit):
 
     # --- Station interior dressing (render only) ----------------------------
     b.dress('z', IZ0, 1, _runs_without(-IX, IX, [DOOR]), L1, L1_CEIL, pilasters=False)
-    b.dress('z', PARTITION_Z[0], -1, _runs_without(-IX, IX, [PART_DOOR]), L1, L1_CEIL, pilasters=False)
+    b.dress('z', PARTITION_Z[0], -1, _runs_without(-IX, IX, [PART_DOOR, PART_DOOR_W]), L1, L1_CEIL, pilasters=False)
     b.dress('x', IX, -1, [(RAMP_FOOT_Z, PARTITION_Z[0])], L1, L1_CEIL, pilasters=False)
     b.dress('x', IX, -1, _runs_without(PARTITION_Z[1], IZ1, [EAST_DOOR]), L1, L1_CEIL, stripe=False, pilasters=False)
     # Basement: liners on the free walls, light strips, tunnel and shed lamps.
@@ -385,10 +402,10 @@ def build(mesh, team, circuit):
                                     ('x', IX, -1, _runs_without(IZ0, IZ1, SIDE_WINDOWS)),
                                     ('x', -IX, 1, _runs_without(IZ0, IZ1, SIDE_WINDOWS))):
         b.dress(axis, plane, into, runs, L2, L2_CEIL, pilasters=False)
-    for x in (-4.0, 4.0): b.ceiling_strip('z', x, IZ0+1.5, PARTITION_Z[0]-1, L1_CEIL, .7)
+    for x in (-4.0, 4.0): b.ceiling_strip('z', x, IZ0+1.5, VOID[2]-1, L1_CEIL, .7)
     b.ceiling_strip('x', IZ0+1.2, -6.0, 6.0, L1_CEIL, .5)
     b.ceiling_strip('x', (PARTITION_Z[1]+IZ1)/2, -IX+2, IX-2, L1_CEIL, .7)
-    for x in (-6.0, 1.0, 11.0): b.ceiling_strip('z', x, IZ0+1.5, IZ1-1.5, L2_CEIL, .7)
+    for x in (-7.5, 7.5, 11.0): b.ceiling_strip('z', x, IZ0+1.5, IZ1-1.5, L2_CEIL, .7)
     # Window frames and mullions inside and out.
     for z, into in ((SZ0, -1), (SZ1, 1)):
         for u0, u1 in FRONT_WINDOWS:
@@ -414,7 +431,10 @@ def build(mesh, team, circuit):
         b.face_box('x', x, into, SZ0, SZ1, SKIRT, SKIRT+.5, .15, METAL)
     for x in (-SX-.35, -4.7, 4.7, SX+.35):
         for z in (SZ0-.35, SZ1+.35):
-            mesh.column((x, SKIRT, z), .35, L1-SKIRT, METAL, 6, solid=False)
+            # Legs under the front deck stop at its underside (their caps
+            # would otherwise lie in the deck's walking surface).
+            top = L1-1 if (z < 0 and abs(x) < DECK[1]) else L1
+            mesh.column((x, SKIRT, z), .35, top-SKIRT, METAL, 6, solid=False)
     # Emblem over the door: a white peak above a white frost line.
     ez = SZ0
     b.face_quad('z', ez, -1, -3.0, 3.0, 8.0, 13.2, accent, .05)

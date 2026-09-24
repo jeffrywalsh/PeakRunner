@@ -28,7 +28,7 @@
       0.57735,
       -0.57735
     ],
-    "lamps": 265,
+    "lamps": 287,
     "baker_sha256": "66d1c04a0581f283b62d4a01a9229abd22fbd18a738474c8c5c148db84800fed"
   },
   "version": 1,
@@ -50,12 +50,12 @@
     [
       1005.8,
       136.2,
-      658.5
+      661.4
     ],
     [
       1042.2,
       136.2,
-      1389.5
+      1386.6
     ]
   ],
   "exact_spawns": true,
@@ -64,43 +64,43 @@
       [
         1005.8,
         136.2,
-        658.5,
+        661.4,
         4.71238898038469
       ],
       [
         1042.2,
         136.2,
-        658.5,
+        661.4,
         1.5707963267948966
       ],
       [
-        988.0,
+        982.0,
         131.2,
-        674.8,
+        673.0,
         0.0
       ],
       [
-        983.0,
+        978.0,
         131.2,
-        674.0,
+        671.0,
         0.0
       ],
       [
-        988.0,
+        991.4,
         136.2,
-        670.0,
-        1.5707963267948966
+        675.0,
+        0.0
       ],
       [
-        990.0,
+        991.4,
         136.2,
-        661.0,
-        1.5707963267948966
+        658.8,
+        3.141592653589793
       ],
       [
         1042.2,
         136.2,
-        663.5,
+        667.8,
         1.5707963267948966
       ],
       [
@@ -114,43 +114,43 @@
       [
         1042.2,
         136.2,
-        1389.5,
+        1386.6,
         1.5707963267948966
       ],
       [
         1005.8,
         136.2,
-        1389.5,
+        1386.6,
         4.71238898038469
       ],
       [
-        1060.0,
+        1066.0,
         131.2,
-        1373.2,
+        1375.0,
         3.141592653589793
       ],
       [
-        1065.0,
+        1070.0,
         131.2,
-        1374.0,
+        1377.0,
         3.141592653589793
       ],
       [
-        1060.0,
+        1056.6,
         136.2,
-        1378.0,
-        4.71238898038469
+        1373.0,
+        3.141592653589793
       ],
       [
-        1058.0,
+        1056.6,
         136.2,
-        1387.0,
-        4.71238898038469
+        1389.2,
+        0.0
       ],
       [
         1005.8,
         136.2,
-        1384.5,
+        1380.2,
         4.71238898038469
       ],
       [
@@ -434,7 +434,7 @@
       "kind": "generator",
       "position": [
         1024.0,
-        130.5,
+        128.5,
         684.0
       ],
       "team": 0,
@@ -446,9 +446,9 @@
       "id": "inventory-6",
       "kind": "inventory",
       "position": [
-        986.0,
-        136.0,
-        674.8
+        982.5,
+        131.0,
+        663.0
       ],
       "team": 0,
       "circuit": "base-0",
@@ -553,7 +553,7 @@
       "kind": "generator",
       "position": [
         1024.0,
-        130.5,
+        128.5,
         1364.0
       ],
       "team": 1,
@@ -565,9 +565,9 @@
       "id": "inventory-14",
       "kind": "inventory",
       "position": [
-        1062.0,
-        136.0,
-        1373.2
+        1065.5,
+        131.0,
+        1385.0
       ],
       "team": 1,
       "circuit": "base-1",
@@ -595,7 +595,7 @@
   ],
   "instances": [
     {
-      "asset": "dustreach-citadel-v3",
+      "asset": "dustreach-citadel-v4",
       "team": 0,
       "position": [
         1024,
@@ -612,7 +612,7 @@
         "spawn": [
           1005.8,
           136.2,
-          658.5
+          661.4
         ],
         "entrances": [
           [
@@ -638,12 +638,17 @@
           [
             996.0,
             130.2,
-            669.0
+            671.5
           ],
           [
-            986.0,
+            982.5,
             130.2,
             657.0
+          ],
+          [
+            996.0,
+            135.2,
+            663.5
           ],
           [
             1052.5,
@@ -653,18 +658,18 @@
         ],
         "generator": [
           1024.0,
-          128.0,
+          126.0,
           684.0
         ],
         "gen_entrances": [
           [
             1012.75,
             135.2,
-            680.5
+            677.0
           ],
           [
             1035.1,
-            128.2,
+            126.2,
             672.8
           ]
         ],
@@ -727,17 +732,17 @@
         ],
         "cistern_view": [
           1036.4,
-          129.8,
+          127.8,
           694.4
         ],
         "tunnel_view": [
           1036.0,
-          129.7,
+          127.7,
           671.0
         ],
         "tower_room_view": [
           1054.6,
-          129.8,
+          127.8,
           662.6
         ],
         "tower_exit": [
@@ -746,9 +751,9 @@
           648.0
         ],
         "store_view": [
-          977.6,
+          994.4,
           136.7,
-          658.6
+          675.4
         ],
         "store_ground_view": [
           977.6,
@@ -756,14 +761,14 @@
           675.4
         ],
         "store_inventory": [
-          986.0,
-          135.0,
-          673.8
+          982.5,
+          130.0,
+          662.0
         ]
       }
     },
     {
-      "asset": "dustreach-citadel-v3",
+      "asset": "dustreach-citadel-v4",
       "team": 1,
       "position": [
         1024,
@@ -780,7 +785,7 @@
         "spawn": [
           1042.2,
           136.2,
-          1389.5
+          1386.6
         ],
         "entrances": [
           [
@@ -806,12 +811,17 @@
           [
             1052.0,
             130.2,
-            1379.0
+            1376.5
           ],
           [
-            1062.0,
+            1065.5,
             130.2,
             1391.0
+          ],
+          [
+            1052.0,
+            135.2,
+            1384.5
           ],
           [
             995.5,
@@ -821,18 +831,18 @@
         ],
         "generator": [
           1024.0,
-          128.0,
+          126.0,
           1364.0
         ],
         "gen_entrances": [
           [
             1035.25,
             135.2,
-            1367.5
+            1371.0
           ],
           [
             1012.9,
-            128.2,
+            126.2,
             1375.2
           ]
         ],
@@ -895,17 +905,17 @@
         ],
         "cistern_view": [
           1011.6,
-          129.8,
+          127.8,
           1353.6
         ],
         "tunnel_view": [
           1012.0,
-          129.7,
+          127.7,
           1377.0
         ],
         "tower_room_view": [
           993.4,
-          129.8,
+          127.8,
           1385.4
         ],
         "tower_exit": [
@@ -914,9 +924,9 @@
           1400.0
         ],
         "store_view": [
-          1070.4,
+          1053.6,
           136.7,
-          1389.4
+          1372.6
         ],
         "store_ground_view": [
           1070.4,
@@ -924,14 +934,14 @@
           1372.6
         ],
         "store_inventory": [
-          1062.0,
-          135.0,
-          1374.2
+          1065.5,
+          130.0,
+          1386.0
         ]
       }
     },
     {
-      "asset": "dustreach-gate-v1",
+      "asset": "dustreach-gate-v2",
       "position": [
         1024,
         152,
@@ -978,7 +988,7 @@
       }
     },
     {
-      "asset": "dustreach-gate-v1-wall",
+      "asset": "dustreach-gate-v2-wall",
       "position": [
         904.0,
         120.461,
@@ -987,7 +997,7 @@
       "yaw": 20.0
     },
     {
-      "asset": "dustreach-gate-v1-wall",
+      "asset": "dustreach-gate-v2-wall",
       "position": [
         1144.0,
         120.461,
@@ -996,7 +1006,7 @@
       "yaw": 200.0
     },
     {
-      "asset": "dustreach-gate-v1-wall",
+      "asset": "dustreach-gate-v2-wall",
       "position": [
         1159.0,
         147.214,
@@ -1005,7 +1015,7 @@
       "yaw": -35.0
     },
     {
-      "asset": "dustreach-gate-v1-wall",
+      "asset": "dustreach-gate-v2-wall",
       "position": [
         889.0,
         147.214,
@@ -1014,7 +1024,7 @@
       "yaw": 145.0
     },
     {
-      "asset": "dustreach-gate-v1-columns",
+      "asset": "dustreach-gate-v2-columns",
       "position": [
         819.0,
         137.447,
@@ -1023,7 +1033,7 @@
       "yaw": 70.0
     },
     {
-      "asset": "dustreach-gate-v1-columns",
+      "asset": "dustreach-gate-v2-columns",
       "position": [
         1229.0,
         137.447,
@@ -1032,7 +1042,7 @@
       "yaw": 250.0
     },
     {
-      "asset": "dustreach-gate-v1-columns",
+      "asset": "dustreach-gate-v2-columns",
       "position": [
         1094.0,
         124.41,
@@ -1041,7 +1051,7 @@
       "yaw": 10.0
     },
     {
-      "asset": "dustreach-gate-v1-columns",
+      "asset": "dustreach-gate-v2-columns",
       "position": [
         954.0,
         124.41,
@@ -1050,7 +1060,7 @@
       "yaw": 190.0
     },
     {
-      "asset": "dustreach-gate-v1-wall",
+      "asset": "dustreach-gate-v2-wall",
       "position": [
         1214.0,
         114.89,
@@ -1059,7 +1069,7 @@
       "yaw": 55.0
     },
     {
-      "asset": "dustreach-gate-v1-wall",
+      "asset": "dustreach-gate-v2-wall",
       "position": [
         834.0,
         114.89,
@@ -1068,7 +1078,7 @@
       "yaw": 235.0
     },
     {
-      "asset": "dustreach-gate-v1-columns",
+      "asset": "dustreach-gate-v2-columns",
       "position": [
         964.0,
         132.849,
@@ -1077,13 +1087,55 @@
       "yaw": -15.0
     },
     {
-      "asset": "dustreach-gate-v1-columns",
+      "asset": "dustreach-gate-v2-columns",
       "position": [
         1084.0,
         132.849,
         1174.0
       ],
       "yaw": 165.0
+    },
+    {
+      "asset": "cnh-tower-v1",
+      "id": "west-wadi",
+      "position": [
+        880,
+        128.312,
+        950
+      ],
+      "anchors": {
+        "point": [
+          880.0,
+          128.312,
+          950.0
+        ],
+        "beacon": [
+          880.0,
+          145.812,
+          950.0
+        ]
+      }
+    },
+    {
+      "asset": "cnh-tower-v1",
+      "id": "east-wadi",
+      "position": [
+        1168,
+        128.312,
+        1098
+      ],
+      "anchors": {
+        "point": [
+          1168.0,
+          128.312,
+          1098.0
+        ],
+        "beacon": [
+          1168.0,
+          145.812,
+          1098.0
+        ]
+      }
     },
     {
       "asset": "dustreach-sewer-v1",
@@ -1157,20 +1209,100 @@
     "fogDistance": "1500",
     "fogColor": "0.80 0.69 0.52"
   },
-  "asset_sha256": "2b21acef1db74f96c54de3ab727791785e661e289afea530d5447dcc7abd6b83",
-  "gate_asset_sha256": "463844e0c681ff0a7a7a2a9b69757aab937db8a846413c8e03cadccec9339e2d",
+  "asset_sha256": "d9e83b20d0fe7809ad351fa55caf14d070846a1365ecb53412549c371fe90600",
+  "gate_asset_sha256": "812378eb51746cfe96a30c2521ec7bb64677de89002a9628a3fadbe0a7569f07",
   "sewer_asset_sha256": "a1beca97330f536d0837492e12b008ef4226323995ade08a3443b9d55f7a477e",
+  "control_points": [
+    {
+      "id": "sun-gate",
+      "name": "Sun Gate",
+      "pos": [
+        1024,
+        152,
+        1024
+      ],
+      "radius": 12.0,
+      "ctf_active": false
+    },
+    {
+      "id": "west-wadi",
+      "name": "West Wadi",
+      "pos": [
+        880,
+        128.312,
+        950
+      ],
+      "radius": 12.0,
+      "ctf_active": false
+    },
+    {
+      "id": "east-wadi",
+      "name": "East Wadi",
+      "pos": [
+        1168,
+        128.312,
+        1098
+      ],
+      "radius": 12.0,
+      "ctf_active": false
+    }
+  ],
+  "look": {
+    "sun_color": [
+      1.12,
+      1.0,
+      0.84
+    ],
+    "sun_disc": 1.6,
+    "exposure": 1.1,
+    "ambient_sky": [
+      0.66,
+      0.63,
+      0.6
+    ],
+    "ambient_ground": [
+      0.66,
+      0.54,
+      0.4
+    ],
+    "height_fog": {
+      "density": 0.0016,
+      "base": 128,
+      "falloff": 45
+    },
+    "sky": {
+      "zenith": [
+        0.2,
+        0.4,
+        0.74
+      ],
+      "horizon": [
+        0.88,
+        0.8,
+        0.66
+      ],
+      "cloud_cover": 0.12,
+      "cloud_color": [
+        1.0,
+        0.96,
+        0.9
+      ],
+      "cloud_scale": 2.2,
+      "sun_size": 0.026
+    }
+  },
+  "cnh_asset_sha256": "d290ddbbce96db68f5ade56c380baaa96636ec48d3e3e655ebdc7fbdbfef67b3",
   "structure_kit_sha256": "0636249d6eb133db27977b895a48d7d50ce7b8882ec8ba8fd0a63908b5f04630",
   "terrain_source_sha256": "7c1a24c6528ffc8c1315496e9b447cc2fe7061322afa9c3f43f6263a606f99fa",
   "material_source_sha256": "46e919d56b58c04eda219ac0529d9583e98e5d8bcf76586485b5ca2e6a33f838",
   "provenance": "PeakRunner original Dustreach geometry, original procedural dune terrain, original material kit, sky and synthesized wind; no extracted assets, no external height data, no recordings",
-  "definition_sha256": "3c8dbe0b1b75922fbf6a1a4a1ab87eaca781f9cd9a3f3f2a4c37975db5623583",
+  "definition_sha256": "a09a9e6fb88bdbc7f624a337a52970af6336c4bfb43446c5a200be62e92e4bbc",
   "files": {
-    "height.bin": "c6dfaca84a24c372640888f8dd3541dd627144844193ddfc1666a86700e16a38",
-    "vertices.bin": "424bd62bac467086ca0c9625a92d3787690e684c0128e46e157cbb00800aad9b",
-    "collision.bin": "87eaf00088efa11401c183e3998e557217d06a0b3d11d046aa965b379fe1c161",
-    "weights.rgba": "f71c0e623e45f28b804145e6f011aed122846b4d1daa4a75a0c032419d6427da",
-    "textures.rgba": "d661e60b31113ef667bffc5cb6ef0d33e1cc86e537e29b0720de04ee168f1ebd",
+    "height.bin": "fd52b6a7c56cadd1049e55b86cabd11f47eb6139b592122c77236c91f49631b9",
+    "vertices.bin": "8870eb353fd89d5e101a99bd89af20817a130763b13821571e41bc094d3e85ee",
+    "collision.bin": "ae2a5554c24efb2ab06ce7af90c2e6f882fcd6135fdfccfface44b2fbf125c1b",
+    "weights.rgba": "00a0e9cecdc6f1c1cd961d6aade98f5b5e956b627f4314a3bc55ef34fca63317",
+    "textures.rgba": "d00a9963a9e7c12b60ecc2a41c3ab016dc040c5604e4c5e123787c965b71f6d5",
     "ambient.f32": "a3938b139d99dbdde7156268f817497624177809ab733a0f0ccc8ccce3782462"
   }
 }

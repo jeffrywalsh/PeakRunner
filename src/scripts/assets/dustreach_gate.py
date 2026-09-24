@@ -15,7 +15,12 @@ import math
 
 from assets.structure_kit import Builder
 
-ASSET_ID = 'dustreach-gate-v1'
+ASSET_ID = 'dustreach-gate-v2'
+
+# The gate is the centre Capture & Hold point (its arch spans the flag lane,
+# so no pylon goes there): eight render-only marker posts stand on the ring.
+RING = 12.0
+RING_POSTS = tuple(22.5+45*k for k in range(8))
 
 FOOT = -2.0
 PAVING = (20.0, 9.0)                                 # render-only paving, half x and z
@@ -99,6 +104,12 @@ def build(mesh):
         b.prism(x, z, COLUMN_R+.04, COLUMN_R+.04, 5.0, 5.3, 10, METAL, solid=False, cap=False)
     for x, z, r, top in STUMPS:
         b.prism(x, z, r, r, FOOT, top, 10, STONE)
+    # Capture ring markers: low bronze posts with glowing caps, render only.
+    for deg in RING_POSTS:
+        x, z = RING*math.cos(math.radians(deg)), RING*math.sin(math.radians(deg))
+        b.prism(x, z, .22, .18, -.6, 1.3, 8, METAL, solid=False)
+        b.prism(x, z, .26, .26, 1.3, 1.55, 8, GLOW, solid=False)
+        b.lamp((x, 1.9, z), .35)
     return {
         'arch': (0.0, bt, 0.0),
         'lintel_top': (0.0, ATTIC_TOP, 0.0),

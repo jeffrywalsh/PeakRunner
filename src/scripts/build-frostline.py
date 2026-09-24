@@ -19,6 +19,7 @@ import sys
 
 import numpy as np
 
+from assets import cnh_tower
 from assets import frostline_beacon
 from assets import frostline_cavern
 from assets import frostline_flora
@@ -34,7 +35,26 @@ loader = importlib.util.spec_from_file_location('kit', ROOT/'scripts/build-origi
 kit = importlib.util.module_from_spec(loader)
 loader.loader.exec_module(kit)
 STEP = frostline_terrain.STEP
-FOG = {'visibleDistance': '700', 'fogDistance': '220', 'fogColor': '0.84 0.87 0.90'}
+FOG = {'visibleDistance': '900', 'fogDistance': '180', 'fogColor': '0.84 0.87 0.90'}
+# Frostline's look (manifest `look`, peakrunner_core::look): a cold, bright
+# overcast. The sun keeps the baked direction (the lightmaps assume it), pale
+# and cool, with a small dim disc through high cloud; whiteout mist pools in
+# the valleys (height fog below the station shelves) while the fog distances
+# keep the beacon ridge readable from either base.
+LOOK = {
+    'sun_color': [0.92, 0.95, 1.0],
+    'sun_disc': 0.45,
+    'exposure': 1.0,
+    'ambient_sky': [0.66, 0.72, 0.8],
+    'ambient_ground': [0.7, 0.72, 0.75],
+    'height_fog': {'density': 0.006, 'base': 205.0, 'falloff': 35.0},
+    'sky': {'zenith': [0.5, 0.6, 0.72], 'horizon': [0.84, 0.87, 0.9], 'cloud_cover': 0.72,
+            'cloud_color': [0.9, 0.92, 0.95], 'cloud_scale': 1.2, 'sun_size': 0.03},
+}
+# Capture & Hold points (docs/capture-and-hold.md): the beacon is the centre
+# (see frostline_beacon.py); the Cols are flank shelves mirrored through the
+# map centre on the centre line, 420 m from both flags.
+POINT_SITE_R, POINT_FALLOFF = 16.0, 18.0
 
 
 def spec():
@@ -79,6 +99,21 @@ def terrain_sites(spec):
     bx, by, bz = spec['beacon']['position']
     out.append((lambda x, z: np.full_like(x, by-.06),
                 lambda x, z: 1-smooth(0, 30, _shape_distance(('disc', bx, bz, frostline_beacon.SITE_R), x, z))))
+    for cp in flank_points(spec):
+        level = cp['level']
+        out.append((lambda x, z, level=level: np.full_like(x, level),
+                    lambda x, z, cp=cp: 1-smooth(0, POINT_FALLOFF, _shape_distance(('disc', cp['x'], cp['z'], POINT_SITE_R), x, z))))
+    return out
+
+
+def flank_points(spec):
+    """Flank control points with their shelf level: the natural ground at the
+    ring centre, quantized like height.bin so the ring floor is exact."""
+    out = []
+    for cp in spec.get('control_points', []):
+        if 'x' not in cp: continue
+        h = float(frostline_terrain.natural(np.array([cp['x']], float), np.array([cp['z']], float), spec['seed'])[0])
+        out.append(dict(cp, level=round(h*32)/32))
     return out
 
 
@@ -118,6 +153,7 @@ def tree_exclusions(spec):
             out.append((*to_world(base, lx, lz), r))
     bx, _, bz = spec['beacon']['position']
     out.append((bx, bz, 34))
+    for cp in flank_points(spec): out.append((cp['x'], cp['z'], 26))
     return out
 
 
@@ -181,6 +217,25 @@ def build(output, bake=True):
                           anchors={k: [mesh.point(p) for p in v] if isinstance(v, list) else mesh.point(v)
                                    for k, v in anchors.items()}))
     beacon_triangles = len(mesh.collision)//9-base_triangles
+    # Control points: the beacon (centre, CTF-active with a drain field) and
+    # the two flank Cols, each a shared C&H tower on a levelled shelf.
+    control_points = []
+    for cp in definition.get('control_points', []):
+        if cp.get('centre'):
+            x, y, z = definition['beacon']['position']
+        else:
+            level = next(f for f in flank_points(definition) if f['id'] == cp['id'])['level']
+            x, y, z = cp['x'], level, cp['z']
+            before = len(mesh.collision)
+            mesh.origin = (x, y, z); mesh.yaw = 0.0
+            tower = cnh_tower.build(mesh)
+            instances.append(dict(asset=cnh_tower.ASSET_ID, id=cp['id'], position=[x, y, z],
+                                  anchors={k: mesh.point(v) for k, v in tower.items()}))
+        entry = {'id': cp['id'], 'name': cp['name'], 'pos': [x, y, z], 'radius': cnh_tower.RING,
+                 'ctf_active': bool(cp.get('ctf_active', False))}
+        if 'drain' in cp: entry['drain'] = dict(cp['drain'])
+        control_points.append(entry)
+    point_triangles = len(mesh.collision)//9-base_triangles-beacon_triangles
     grid = terrain_grid(definition)
     before = len(mesh.collision)//9
     anchors = frostline_cavern.build(mesh, grid)
@@ -218,6 +273,8 @@ def build(output, bake=True):
     manifest.update(version=1, id=definition['id'], name=definition['name'], flags=flags, spawns=spawns,
         exact_spawns=True, spawn_points=spawn_points, holes=holes(definition), entities=turret_arcs.assign(mesh.entities, flags),
         instances=instances, ambient_emitters=[], sky=dict(FOG), trees=len(pines),
+        control_points=control_points, look=LOOK,
+        cnh_asset_sha256=pack_writer.source_hash(cnh_tower.__file__),
         asset_sha256=pack_writer.source_hash(frostline_station.__file__),
         beacon_asset_sha256=pack_writer.source_hash(frostline_beacon.__file__),
         cavern_asset_sha256=pack_writer.source_hash(frostline_cavern.__file__),
@@ -230,7 +287,8 @@ def build(output, bake=True):
         definition_sha256=pack_writer.source_hash(ROOT/'maps/frostline.json'))
     pack_writer.write_pack(output, files, manifest)
     print(f'Built {definition["name"]}: {len(mesh.collision)//9} solid triangles '
-          f'({base_triangles//2} per base, {beacon_triangles} beacon, {cavern_triangles} cavern, {len(pines)} pines), '
+          f'({base_triangles//2} per base, {beacon_triangles} beacon and centre tower, {point_triangles} flank towers, '
+          f'{cavern_triangles} cavern, {len(pines)} pines), '
           f'{len(mesh.vertices)//36} render triangles'
           + (f', {lightmap["pages"]} lightmap pages' if lightmap else ', unbaked'))
 

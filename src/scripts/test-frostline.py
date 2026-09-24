@@ -3,6 +3,7 @@
 Run from src/ with the numpy venv: scripts/test-frostline.py"""
 import hashlib
 import importlib.util
+import json
 import math
 from pathlib import Path
 import sys
@@ -13,6 +14,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 from assets import budgets
+from assets import cnh_tower
 from assets import frostline_beacon as beacon
 from assets import frostline_cavern as cavern
 from assets import frostline_flora as flora
@@ -113,7 +115,7 @@ class FrostlineTests(unittest.TestCase):
     def test_room_floors_have_floor_and_headroom(self):
         samples = [(x, z, st.L1) for x, z in ((-8, -7), (0, -8), (10, -8), (10, 4), (-8, 0), (0, -12), (-9, -12), (9, -12))]
         samples += [(x, z, st.L1) for x, z in ((-8, 10), (8, 10))]
-        samples += [(x, z, st.L2) for x, z in ((-5, -5), (5, -9), (0, 3), (-8, 10), (12, 0))]
+        samples += [(x, z, st.L2) for x, z in ((-6, -5), (5, -9), (-7, 3), (-8, 10), (12, 0), (3, 10.5), (0, -6))]
         samples += [(OX+x, OZ+z, st.OG) for x, z in ((-5, -5), (5.5, 2), (0, 5), (-4, 2))]
         samples += [(x, z, st.B_FLOOR) for x, z in ((-2, -5), (3, -5), (-3, 6), (6.4, -4), (6.4, 5))]
         samples += [(x, -4, st.B_FLOOR) for x in (9, 12, 15)]
@@ -144,6 +146,11 @@ class FrostlineTests(unittest.TestCase):
         e_surface = lambda z: top+(st.EG-top)*min(max((z-EZ-st.E_RAMP[0])/(st.E_RAMP[1]-st.E_RAMP[0]), 0), 1)
         routes.append(((EX,), EZ+st.E_RAMP[0]+.3, EZ+st.E_RAMP[1]-.3, e_surface))
         routes.append(((sum(st.B_STAIR[:2])/2,), st.B_STAIR[2]+.3, st.B_STAIR[3]-.3, st.basement_stair_surface))
+        # The basement stair descends to the 6.5 m generator room at about
+        # 28 degrees; the engine only counts ground as steep past 35 degrees
+        # (normal.y < 0.82), and Cairnhold's vault stair is 29.3 degrees.
+        # The shed's exit stair climbs from that same lowered floor (29.4).
+        limits = {st.basement_stair_surface: 30, st.exit_stair_surface: 30}
         for xs, z0, z1, surface in routes:
             for x in xs:
                 for z in np.arange(z0, z1, .8):
@@ -151,7 +158,7 @@ class FrostlineTests(unittest.TestCase):
                     t, _ = self.soup.hits((x, y+1, z), (0, -1, 0))
                     self.assertLess(abs(1-t[0]), .03, (x, z))
                     self.assertGreater(self.soup.first((x, y+.2, z), (0, 1, 0)), 2.4, (x, z, 'stair headroom'))
-            self.assertLess(math.degrees(math.atan(abs(surface(z1)-surface(z0))/(z1-z0))), 27)
+            self.assertLess(math.degrees(math.atan(abs(surface(z1)-surface(z0))/(z1-z0))), limits.get(surface, 27))
         # Stairs that climb along x: the east door's and the shed's sunken one.
         for z, x0, x1, surface in ((sum(st.EAST_DOOR)/2, st.SX+.3, st.EAST_STAIR_FOOT_X-.3, st.east_stair_surface),
                                    (sum(st.T_IN)/2, st.X_STAIR[0]+.3, st.X_STAIR[1]-.3, st.exit_stair_surface)):
@@ -160,7 +167,7 @@ class FrostlineTests(unittest.TestCase):
                 t, _ = self.soup.hits((x, y+1, z), (0, -1, 0))
                 self.assertLess(abs(1-t[0]), .03, (x, z))
                 self.assertGreater(self.soup.first((x, y+.2, z), (0, 1, 0)), 2.4, (x, z, 'stair headroom'))
-            self.assertLess(math.degrees(math.atan(abs(surface(x1)-surface(x0))/(x1-x0))), 27)
+            self.assertLess(math.degrees(math.atan(abs(surface(x1)-surface(x0))/(x1-x0))), limits.get(surface, 27))
 
     def test_standing_support_is_the_floor_top_everywhere(self):
         """The engine's support ray starts 0.15 m above the feet: wherever a
@@ -426,10 +433,12 @@ class FrostlineTests(unittest.TestCase):
         c = np.array(mesh.collision).reshape(-1, 3)
         self.assertTrue(np.allclose(np.sort(c[:, 0]), np.sort(-c[:, 0]), atol=1e-4))
         self.assertTrue(np.allclose(np.sort(c[:, 2]), np.sort(-c[:, 2]), atol=1e-4))
-        for x, z in ((0, 0), (2.5, 0), (-2.5, 2.5)):
-            if abs(x) > beacon.leg_offset(beacon.PERCH_Y)-.5 or abs(z) > beacon.leg_offset(beacon.PERCH_Y)-.5 or (x, z) == (0, 0):
-                t, ny = soup.hits((x, beacon.PERCH_Y+2, z), (0, -1, 0))
-                self.assertAlmostEqual(2-t[0], 0, places=4); self.assertGreater(ny[0], .999)
+        # The perch is a ring round the Capture & Hold pylon: standable
+        # between the hole and the rail on every side, pylon in the middle.
+        for x, z in ((3.1, 0), (0, -3.1), (-3.1, 0), (0, 3.1), (2.2, -3.2)):
+            t, ny = soup.hits((x, beacon.PERCH_Y+2, z), (0, -1, 0))
+            self.assertAlmostEqual(2-t[0], 0, places=4); self.assertGreater(ny[0], .999)
+        self.assertLess(soup.first((beacon.PERCH_HOLE-.05, beacon.PERCH_Y+.5, 0), (-1, 0, 0)), .6, 'the pylon fills the perch hole')
         self.assertLess(len(mesh.collision)//9, 400)
         self.assertEqual(len(anchors['windbreaks']), 4)
 
@@ -568,6 +577,82 @@ class RouteCounts(unittest.TestCase):
             self.assertGreaterEqual(len(found['station']), 3, (base['team'], found['station']))
             self.assertGreaterEqual(len(found['deck']), 2, (base['team'], found['deck']))
             self.assertEqual(len(found['generator']), 2, (base['team'], found['generator']))
+
+
+class FlagRoutes(unittest.TestCase):
+    """docs/map-pipeline.md: "two main entrances but ~10 ways of getting to
+    the flag". route_checks.flag_routes counts (entry, approach) pairs: every
+    way from the field into the station (walking, drops and jet hops,
+    including the command deck's open windows) times every way from that
+    entry onto the flag's stretch of the deck (either ramp, or a jet up
+    through the two-level void)."""
+    def test_flag_has_at_least_ten_routes(self):
+        from assets import route_checks
+        pack = route_checks.Pack(Path(__file__).resolve().parent.parent/'assets/maps/frostline')
+        fx, fz = st.FLAG
+        for base in build.spec()['bases']:
+            ox, oy, oz = base['position']
+            def box(lx0, lx1, ly0, ly1, lz0, lz1):
+                (ax, az), (bx, bz) = build.to_world(base, lx0, lz0), build.to_world(base, lx1, lz1)
+                return (min(ax, bx), max(ax, bx), oy+ly0, oy+ly1, min(az, bz), max(az, bz))
+            r = route_checks.flag_routes(pack, (ox, oz), box(-st.SX, st.SX, st.L1-1, st.ROOF-1, st.SZ0, st.SZ1),
+                                         box(fx-5, fx+5, st.L2-.5, st.L2+.8, fz-4, st.IZ1), airborne=True)
+            self.assertGreaterEqual(len(r['entries']), 6, (base['team'], r['entries']))
+            self.assertGreaterEqual(r['routes'], 10, (base['team'], [len(a) for a in r['approaches']]))
+
+
+class ControlPoints(unittest.TestCase):
+    """Capture & Hold (docs/capture-and-hold.md): the beacon is the centre
+    point, active in CTF with a drain field; the West and East Cols are
+    Capture & Hold only and mirror each other through the map centre."""
+    @classmethod
+    def setUpClass(cls):
+        root = Path(__file__).resolve().parent.parent/'assets/maps/frostline'
+        cls.manifest = json.loads((root/'map.json').read_text())
+        cls.heights = np.frombuffer((root/'height.bin').read_bytes(), '<u2').reshape(256, 256)/32
+
+    def test_centre_is_ctf_active_with_a_drain_and_the_cols_mirror(self):
+        pts = self.manifest['control_points']
+        self.assertEqual([p['id'] for p in pts], ['beacon', 'west-col', 'east-col'])
+        centre, west, east = pts
+        self.assertEqual(centre['pos'], build.spec()['beacon']['position'])
+        self.assertTrue(centre['ctf_active'])
+        self.assertEqual(centre['drain'], {'radius': 60, 'rate': 10})
+        for p in (west, east):
+            self.assertFalse(p['ctf_active']); self.assertNotIn('drain', p)
+        self.assertEqual((west['pos'][0]+east['pos'][0], west['pos'][2]+east['pos'][2]), (2048, 2048))
+        self.assertEqual(west['pos'][1], east['pos'][1])
+        # The drain covers both cavern portals (48 m) but not the trench ends.
+        self.assertGreater(centre['drain']['radius'], cavern.PORTAL_D)
+        self.assertLess(centre['drain']['radius'], cavern.PORTAL_D+cavern.TRENCH_L)
+        for p in pts: self.assertEqual(p['radius'], 12.0)
+
+    def test_col_rings_are_level_ground_clear_of_spawns(self):
+        for p in self.manifest['control_points'][1:]:
+            x, y, z = p['pos']
+            for dx in range(-12, 13, 4):
+                for dz in range(-12, 13, 4):
+                    if dx*dx+dz*dz > 144: continue
+                    h = self.heights[int((z+dz)//8), int((x+dx)//8)]
+                    self.assertLess(abs(h-y), cnh_tower.MAX_TILT, (p['id'], dx, dz, h))
+        for p in self.manifest['control_points']:
+            for team in self.manifest['spawn_points']:
+                for s in team:
+                    self.assertGreater(math.hypot(s[0]-p['pos'][0], s[2]-p['pos'][2]), p['radius']+2, (p['id'], s))
+
+
+class Surfaces(unittest.TestCase):
+    """No visible coplanar faces of different materials (they flicker). The
+    only pairs left belong to the shared kit turret mount (its team band sits
+    flush on its collar), which build-original-map.py owns."""
+    def test_no_z_fighting_outside_the_kit_turret_mounts(self):
+        from assets import surface_checks
+        root = Path(__file__).resolve().parent.parent/'assets/maps/frostline'
+        v = np.fromfile(root/'vertices.bin', '<f4'); c = np.fromfile(root/'collision.bin', '<f4')
+        turrets = [e['position'] for e in json.loads((root/'map.json').read_text())['entities'] if e['kind'] == 'turret']
+        left = [e for e in surface_checks.z_fighting(v, c)
+                if not any(math.dist(e[1], t) < 3.0 for t in turrets)]
+        self.assertEqual(left, [])
 
 
 class SpawnForwardClearance(unittest.TestCase):

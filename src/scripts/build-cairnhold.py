@@ -20,6 +20,7 @@ from assets import cairnhold_base
 from assets import cairnhold_materials
 from assets import cairnhold_ring
 from assets import cairnhold_terrain
+from assets import cnh_tower
 from assets import pack_writer
 from assets import turret_arcs
 from assets import structure_kit
@@ -77,7 +78,25 @@ def terrain_sites(spec):
     rx, ry, rz = spec['ring']['position']
     out.append((lambda x, z: np.full_like(x, ry-.06),
                 lambda x, z: 1-smooth(0, 26, _shape_distance(('disc', rx, rz, cairnhold_ring.SITE_R), x, z))))
+    # Capture & Hold plateaus: the ground under each flank tower is levelled
+    # to the natural height at its centre (point-symmetric, so the mirrored
+    # pair gets the same level), flat across the capture ring.
+    for c in spec.get('control_points', []):
+        if c.get('on_ring'): continue
+        level = plateau_level(spec, c)
+        out.append((lambda x, z, level=level: np.full_like(x, level),
+                    lambda x, z, c=c: 1-smooth(0, PLATEAU_FALLOFF,
+                                               _shape_distance(('disc', c['x'], c['z'], PLATEAU_R), x, z))))
     return out
+
+
+PLATEAU_R = cnh_tower.RING+8.0      # level ground this far from a flank tower (one cell past the ring)
+PLATEAU_FALLOFF = 18.0
+
+
+def plateau_level(spec, c):
+    x, z = np.array([float(c['x'])]), np.array([float(c['z'])])
+    return round(float(cairnhold_terrain.natural(x, z, spec['seed'])[0]), 2)
 
 
 def holes_and_rings(spec):
@@ -139,7 +158,22 @@ def build(output, bake=True):
     instances.append(dict(asset=cairnhold_ring.ASSET_ID, **definition['ring'],
                           anchors={k: [mesh.point(p) for p in v] if isinstance(v, list) else mesh.point(v)
                                    for k, v in anchors.items()}))
+    ring_triangles = len(mesh.collision)//9-base_triangles
     grid, holes = terrain_grid(definition)
+    # Capture & Hold towers: the centre one on the Ring's dais (its 12 m ring
+    # is the dais), the flank pair on their levelled plateaus.
+    control_points = []
+    for c in definition.get('control_points', []):
+        if c.get('on_ring'):
+            ground = round(float(definition['ring']['position'][1])+cairnhold_ring.DAIS_H, 3)
+        else:
+            ground = round(pack_writer.sample_height(grid, c['x'], c['z']), 3)
+        mesh.origin = (c['x'], ground, c['z']); mesh.yaw = 0.0
+        anchors = cnh_tower.build(mesh)
+        instances.append(dict(asset=cnh_tower.ASSET_ID, id=c['id'], position=[c['x'], ground, c['z']],
+                              anchors={k: mesh.point(v) for k, v in anchors.items()}))
+        control_points.append({'id': c['id'], 'name': c['name'], 'pos': [c['x'], ground, c['z']],
+                               'radius': cnh_tower.RING, 'ctf_active': False})
     heights = bytearray(struct.pack('<65536H', *[round(float(v)*32) for v in grid.ravel()]))
     weights = cairnhold_terrain.weights(grid).tobytes()
     if sys.byteorder != 'little': mesh.vertices.byteswap(); mesh.collision.byteswap()
@@ -164,7 +198,9 @@ def build(output, bake=True):
     manifest.update(version=1, id=definition['id'], name=definition['name'], flags=flags, spawns=spawns,
         exact_spawns=True, spawn_points=spawn_points, holes=holes, entities=turret_arcs.assign(mesh.entities, flags),
         instances=instances, ambient_emitters=[],
-        sky={'visibleDistance': '2500', 'fogDistance': '1500'},
+        sky={'visibleDistance': '2500', 'fogDistance': '1500', 'fogColor': definition['fog_color']},
+        control_points=control_points, look=definition['look'],
+        cnh_asset_sha256=pack_writer.source_hash(cnh_tower.__file__),
         asset_sha256=pack_writer.source_hash(cairnhold_base.__file__),
         ring_asset_sha256=pack_writer.source_hash(cairnhold_ring.__file__),
         structure_kit_sha256=pack_writer.source_hash(structure_kit.__file__),
@@ -175,7 +211,8 @@ def build(output, bake=True):
         definition_sha256=pack_writer.source_hash(ROOT/'maps/cairnhold.json'))
     pack_writer.write_pack(output, files, manifest)
     print(f'Built {definition["name"]}: {len(mesh.collision)//9} solid triangles '
-          f'({base_triangles//2} per base, {len(mesh.collision)//9-base_triangles} Ring), {len(holes)} terrain holes'
+          f'({base_triangles//2} per base, {ring_triangles} Ring, {len(mesh.collision)//9-base_triangles-ring_triangles} '
+          f'C&H towers), {len(holes)} terrain holes'
           + (f', {lightmap["pages"]} lightmap pages in {bake_seconds} s' if lightmap else ', unbaked'))
 
 

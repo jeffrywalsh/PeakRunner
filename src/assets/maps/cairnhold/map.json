@@ -18,9 +18,9 @@
     "position": "-384 -160 54",
     "scale": "720 150 1"
   },
-  "texture_count": 33,
+  "texture_count": 35,
   "lightmap": {
-    "pages": 13,
+    "pages": 15,
     "first_layer": 20,
     "texel_m": 0.5,
     "sun": [
@@ -28,7 +28,7 @@
       0.57735,
       -0.57735
     ],
-    "lamps": 265,
+    "lamps": 306,
     "baker_sha256": "66d1c04a0581f283b62d4a01a9229abd22fbd18a738474c8c5c148db84800fed"
   },
   "version": 1,
@@ -297,7 +297,7 @@
       "kind": "generator",
       "position": [
         1017.2,
-        185.3,
+        183.8,
         836.3
       ],
       "team": 0,
@@ -403,7 +403,7 @@
       "kind": "generator",
       "position": [
         1030.8,
-        185.3,
+        183.8,
         1211.7
       ],
       "team": 1,
@@ -481,7 +481,7 @@
   ],
   "instances": [
     {
-      "asset": "cairnhold-base-v3",
+      "asset": "cairnhold-base-v4",
       "team": 0,
       "position": [
         1024,
@@ -524,39 +524,39 @@
           [
             936.0,
             199.2,
-            885.3
+            884.2
           ]
         ],
         "generator": [
           1017.2,
-          182.8,
+          181.3,
           836.3
         ],
         "gen_entrances": [
           [
             1010.8,
             191.2,
-            853.0
+            853.5
           ],
           [
             1008.8,
-            185.2,
+            183.7,
             836.0
           ]
         ],
         "stair_head": [
           1010.8,
           191.0,
-          853.0
+          853.5
         ],
         "vault_view": [
           1020.0,
-          186.7,
+          185.2,
           832.8
         ],
         "tunnel_view": [
           1005.0,
-          187.45,
+          185.95,
           836.0
         ],
         "tunnel_corner_view": [
@@ -567,7 +567,7 @@
         "exit": [
           936.0,
           199.0,
-          885.3
+          884.2
         ],
         "roof_turret": [
           1024.0,
@@ -634,7 +634,7 @@
       }
     },
     {
-      "asset": "cairnhold-base-v3",
+      "asset": "cairnhold-base-v4",
       "team": 1,
       "position": [
         1024,
@@ -677,39 +677,39 @@
           [
             1112.0,
             199.2,
-            1162.7
+            1163.8
           ]
         ],
         "generator": [
           1030.8,
-          182.8,
+          181.3,
           1211.7
         ],
         "gen_entrances": [
           [
             1037.2,
             191.2,
-            1195.0
+            1194.5
           ],
           [
             1039.2,
-            185.2,
+            183.7,
             1212.0
           ]
         ],
         "stair_head": [
           1037.2,
           191.0,
-          1195.0
+          1194.5
         ],
         "vault_view": [
           1028.0,
-          186.7,
+          185.2,
           1215.2
         ],
         "tunnel_view": [
           1043.0,
-          187.45,
+          185.95,
           1212.0
         ],
         "tunnel_corner_view": [
@@ -720,7 +720,7 @@
         "exit": [
           1112.0,
           199.0,
-          1162.7
+          1163.8
         ],
         "roof_turret": [
           1024.0,
@@ -787,7 +787,7 @@
       }
     },
     {
-      "asset": "cairnhold-ring-v1",
+      "asset": "cairnhold-ring-v2",
       "position": [
         1024,
         240,
@@ -847,26 +847,170 @@
           ]
         ]
       }
+    },
+    {
+      "asset": "cnh-tower-v1",
+      "id": "ring",
+      "position": [
+        1024,
+        241.4,
+        1024
+      ],
+      "anchors": {
+        "point": [
+          1024.0,
+          241.4,
+          1024.0
+        ],
+        "beacon": [
+          1024.0,
+          258.9,
+          1024.0
+        ]
+      }
+    },
+    {
+      "asset": "cnh-tower-v1",
+      "id": "west-cairn",
+      "position": [
+        900,
+        260.031,
+        1010
+      ],
+      "anchors": {
+        "point": [
+          900.0,
+          260.031,
+          1010.0
+        ],
+        "beacon": [
+          900.0,
+          277.531,
+          1010.0
+        ]
+      }
+    },
+    {
+      "asset": "cnh-tower-v1",
+      "id": "east-cairn",
+      "position": [
+        1148,
+        260.031,
+        1038
+      ],
+      "anchors": {
+        "point": [
+          1148.0,
+          260.031,
+          1038.0
+        ],
+        "beacon": [
+          1148.0,
+          277.531,
+          1038.0
+        ]
+      }
     }
   ],
   "ambient_emitters": [],
   "sky": {
     "visibleDistance": "2500",
-    "fogDistance": "1500"
+    "fogDistance": "1500",
+    "fogColor": "0.78 0.71 0.60"
   },
-  "asset_sha256": "d42eb64c55c2cdbb3c35cfd9b6956119d48eaaf2d876c91f9addb7950f887ed4",
-  "ring_asset_sha256": "185b25abc6b4c54c9ae5f166d3bd66c5e6fd2791778f65aecc86b27a49b78c3d",
+  "control_points": [
+    {
+      "id": "ring",
+      "name": "The Ring",
+      "pos": [
+        1024,
+        241.4,
+        1024
+      ],
+      "radius": 12.0,
+      "ctf_active": false
+    },
+    {
+      "id": "west-cairn",
+      "name": "West Cairn",
+      "pos": [
+        900,
+        260.031,
+        1010
+      ],
+      "radius": 12.0,
+      "ctf_active": false
+    },
+    {
+      "id": "east-cairn",
+      "name": "East Cairn",
+      "pos": [
+        1148,
+        260.031,
+        1038
+      ],
+      "radius": 12.0,
+      "ctf_active": false
+    }
+  ],
+  "look": {
+    "sun_color": [
+      1.0,
+      0.9,
+      0.74
+    ],
+    "sun_disc": 0.9,
+    "exposure": 1.08,
+    "ambient_sky": [
+      0.6,
+      0.6,
+      0.66
+    ],
+    "ambient_ground": [
+      0.5,
+      0.45,
+      0.38
+    ],
+    "height_fog": {
+      "density": 0.003,
+      "base": 190,
+      "falloff": 28
+    },
+    "sky": {
+      "zenith": [
+        0.2,
+        0.27,
+        0.44
+      ],
+      "horizon": [
+        0.82,
+        0.73,
+        0.6
+      ],
+      "cloud_cover": 0.5,
+      "cloud_color": [
+        0.97,
+        0.86,
+        0.7
+      ],
+      "cloud_scale": 1.6,
+      "sun_size": 0.03
+    }
+  },
+  "cnh_asset_sha256": "d290ddbbce96db68f5ade56c380baaa96636ec48d3e3e655ebdc7fbdbfef67b3",
+  "asset_sha256": "ee7447ee851785f774d297a2fc8be4b1378e6334eeab2450e084e24930be3aeb",
+  "ring_asset_sha256": "a259ae09ee9f8af85ccf67acd6695cab9ce8acb80641e43701a20016a6e57461",
   "structure_kit_sha256": "0636249d6eb133db27977b895a48d7d50ce7b8882ec8ba8fd0a63908b5f04630",
   "terrain_source_sha256": "3dc2fac10f82a9a6b88e9e4bf4ba8640cfb74e400227d795d05822265f14b690",
   "material_source_sha256": "0178c079b604940d8cfcd5adb88d79faac8f9c3f8318512b146b09fca04b22c0",
   "provenance": "PeakRunner original Cairnhold geometry, original procedural terrain and original material kit; no extracted assets or external height data",
-  "definition_sha256": "dbd0e88673740af42b9815ad9eb5cb5e86fb801e174cdc6ea274f595265dbac4",
+  "definition_sha256": "02fa0c7b7ab442ae35be0e625a73a0b86bc252a057977ad54f35065d78f024a2",
   "files": {
-    "height.bin": "014e4957c2f65bd9df9d3e92838ba8e8d8c943ce35a2f3951bb33d494fd7072e",
-    "vertices.bin": "1785b807d458926ec99c353f09496848e2d955cdb0e0c3f90270a95460e00645",
-    "collision.bin": "62390607282a89f7787f7e3cd93658954e4fd92bc73654ed90ad81452f8f2854",
-    "weights.rgba": "5321e3f710ca7ffea0d57ab3d7eb9e825a91fb98013a8d098e5da594b79f7f7e",
-    "textures.rgba": "b1e38700c70a6f6d08e270ddff9bf1e0881048eaadd0d133b5dc3496e96ac2ca",
+    "height.bin": "d82a378717133949221c8db6ce86e36496f4b5fd4cf6d8f135bb468ed71bb206",
+    "vertices.bin": "c6aefdf753a3e1f7f800e2b5d9e85cf0d205df0c851bcfe203562d255db7fef6",
+    "collision.bin": "d02017731cb8ed6fa5d09ab9b8b4a970b0339e22956cf7672173b871deab2ea4",
+    "weights.rgba": "6fc3106e9027cedb2df8c6dda14c11468e90196eb0fc4427c02eeb11bb0a45e1",
+    "textures.rgba": "6fe06ac1e23c4c5cfa5b9c9efac398762787193508c4a422a8bc1acfd11d94c9",
     "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e"
   }
 }

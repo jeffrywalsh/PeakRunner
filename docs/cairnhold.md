@@ -1,4 +1,4 @@
-# Cairnhold (v2, local build only)
+# Cairnhold (v4, local build only)
 
 Cairnhold is the original PeakRunner map intended to replace the Stonehenge
 Clone reference layout. It keeps the design idea a private study identified
@@ -14,8 +14,8 @@ slope distribution, distances and what each base element is for.
 
 **Status.** v2 is embedded in source from `src/assets/maps/cairnhold/` and holds
 the `stonehenge-clone` slot (`MapId::StonehengeClone`, menu name "Cairnhold"),
-always listed, with no private pack. Gameplay compatibility is `maps5`, which
-includes its fingerprint. Not deployed: the live server still runs the old
+always listed, with no private pack. Gameplay compatibility is `maps6`, which
+includes its fingerprint (v4 changes the fingerprint, not the marker). Not deployed: the live server still runs the old
 Stonehenge clone. The v1 pack is kept in ignored `local-assets/cairnhold-v1/`.
 
 **v2 base pass.** The bunker front is a stepped, crenellated gatehouse facade
@@ -38,22 +38,24 @@ faces +Z; blue is red rotated.
 | Element | Where (red, local; bunker floor = 0) | Notes |
 | --- | --- | --- |
 | Bunker | 32 x 40 m, floor 191 m world | Dug into the knoll's forward slope; roof flush with the hill behind |
-| Facade | front 7 m of the roof, wings to x ±24 | Stepped tiers 17 / 14 / 11.5 m, crenellations, buttresses; gatehouse projects 2 m round a 7.4 x 6.2 m portal |
-| Front vestibule + baffle | baffle 4 m inside the door, x ±10.5 | Blocks every turret/battery line through the portal and door |
-| Hall, inventory room (2), back room | behind the baffle | Bronze-framed doors; no spawns in the hall (v3) |
-| Vault (v3) | under the hall: x 3.2–15.2, z −9.8–12, floor −6, ceiling −1 | Stone piers, bronze ribs. Exactly two ways in: a 29.3° stair from the hall's east side (railed opening, x 11.2–15.2, z −9 to −2) and the tunnel door (6.4 x 4.5 m) in its east wall |
-| Generator well (v3) | x 3.2–10.4, z 3.4–12, floor −8.2 | The kit generator is 5.8 m tall and its hit bar hangs 6.4 m over the floor, so it stands in a well reached by a 28.8° ramp; a walkway runs from the stair foot to the tunnel door along its east side |
-| Sally port (v3) | east x 16–88 (z 4–12), then south z 4 → −36 (x 80–88) | 6.4 m wide, 4.5 m headroom, sconces every 8 m. Floor climbs −6 → 3 (20.6°), runs level, then 3 → 8 (17.4°). Its stone lid is flush with the hillside it runs under |
-| Exit house (v3) | x 80–88, z −44 to −36, on the battery bench | Door in its east wall behind a dog-leg vestibule (baffle 1.8 m inside, joined to the wall at its north end), at the foot of the battery ramp |
+| Facade | front 7 m of the roof, wings to x ±24 | Stepped tiers 17 / 14 / 11.5 m, crenellations, buttresses; gatehouse projects 2 m round an 8.4 x 7.6 m portal (v4) |
+| Front vestibule | z −19.2 to −13, ceiling 6 m, under the facade | The 6 x 6 m front door opens straight in; no baffle |
+| Hall (v4) | z −13 to 4, ceiling 13 m, roof 14 m | Two-level room: a 4 m gallery round its sides and back at hillside level (+7 m), with a 6 x 6 m doorway in each side wall onto the ground outside; the floor is entered by the front door and interior doors |
+| Inventory room (2), back room | behind the hall | 6 m doorways to the 6 m ceiling (no lintels); no spawns in the hall |
+| Vault | under the hall: x 3.2–15.2, z −9.8–12, floor −7.5, ceiling −1 (6.5 m) | Stone piers, bronze ribs. Exactly two ways in: a 28° stair from the hall's east side (railed opening, x 11.2–15.2, z −9.5 to −2) and the tunnel door (6.4 x 6.5 m) in its east wall |
+| Generator well | x 3.2–10.4, z 3.4–12, floor −9.7 | The kit generator is 5.8 m tall and its hit bar hangs 6.4 m over the floor, so it stands in a well reached by a ramp; a walkway runs from the stair foot to the tunnel door along its east side |
+| Sally port | east x 16–88 (z 4–12), then south z 4 → −36 (x 80–88) | 6.4 m wide, 6.5 m headroom (v4), sconces every 8 m. Floor climbs −7.5 → 3 (20.6°), runs level, then 3 → 8 (17.4°). Its stone lid is flush with the hillside it runs under, except two skylight wells (x 48–52 and 64–68): open drop-in shafts with a bronze grate rim, 9–11 m deep, jettable out |
+| Exit house | x 80–88, z −44 to −36, on the battery bench | 5.6 m wide door in its east wall, open straight in, at the foot of the battery ramp |
 | Roof turret (bullet) | top of the gatehouse, 17 m | Solid gatehouse mass below it |
 | Covered trench | x 0–8, z 20–76, floor climbs 22 m (21.4°) | Roof 7 → 27.5 m; ground flush with it 10 m to each side |
 | Guard hut | 24 x 24 m, floor +22 | Dug into the knoll (ground 27.5); its roof is a terrace round the tower |
-| Flag tower | 14 x 20 m on the hut's east half, platform +41 | Hut ramp → floor 29 → ramp → landing 35 → ramp → roof hatch; crenellated, buttressed, bronze ring |
+| Flag tower | 14 x 20 m on the hut's east half, platform +41 | Hut ramp → floor 29 → ramp → landing 35 → ramp → roof hatch; buttressed, bronze ring. v4: the platform is fully open (no parapet or merlons), so the flag can be taken from any edge |
 | Attack ramp + bridge | x −5–0, z 106 → 79 (26.6°) | From the knoll behind the hut to a bridge onto the platform's west edge |
 | Sentry mast (bullet) + sensor | on the tower platform | Sentry about 10 m over the platform |
 | Plasma battery | right flank (+X), bench +8 m | Octagonal bastion, parapet, ramp toward home |
 | Landing/deploy ledge | left flank (−X), deck +5 m | 24 m paved deck, four marked `deploy_slots` |
-| The Ring (neutral) | map centre, 240 m | Octagonal dais, four axis ramps, eight bronze-seamed pylons; landmark and cover only |
+| The Ring | map centre, 240 m | Octagonal dais, four axis ramps, eight bronze-seamed pylons. v4: the dais is the central Capture & Hold point; the shared tower stands at its centre |
+| West / East Cairn (v4) | world (900, 1010) and (1148, 1038) | Mirrored flank Capture & Hold towers on levelled plateaus (radius 20 m) |
 
 Flags are 532 m apart. Each team has eight `spawn_points` (two in the
 inventory room, two in the back room, one in the guard hut, one on the battery
@@ -159,3 +161,65 @@ front door opens straight into the hall behind its recessed portal, and the
 exit house's door opens straight in. Turrets and the battery face the field
 with a 200 degree field of fire beyond 15 m, so neither door gives a turret a
 line into the rooms. The route and sightline tests use the new rule.
+
+## v4 playability pass (2026-09-24)
+
+From `research/playability-survey/proposal.md` and the visual audit
+(`research/visual-audit/findings.md`). Asset `cairnhold-base-v4`, Ring
+`cairnhold-ring-v2`.
+
+- **Two-level hall.** Behind the 6 m entry vestibule the hall rises to a 13 m
+  ceiling (raised roof block, 14 m). A 4 m gallery runs round its sides and
+  back at +7 m, level with the hillside outside, and a 6 x 6 m doorway in each
+  side wall opens from that ground straight onto the gallery. So the hall is
+  entered at floor level (front door) and at gallery level (both side walls),
+  and jetting from the floor to the gallery is the fast way between them.
+- **6 x 6 m doorways.** Front door 6 m wide to the 6 m ceiling (portal 8.4 x
+  7.6 m); interior doorways 6 m wide to the ceiling with no lintels; back door
+  6 m; exit-house door 5.6 m. Door frames stand 2 cm off their reveals.
+- **6.5 m vault and tunnel.** The vault floor drops to −7.5 (6.5 m under the
+  hall slab); the stair runs 14 m at 28°; the well floor is −9.7. The tunnel
+  has 6.5 m headroom, its east climb is 28 m at 20.6°, and its lids were raised
+  where they had to clear the taller tunnel (the south leg's end now meets the
+  exit house's roof at 15.5 m). Two **skylight wells** (east leg x 48–52 and
+  64–68) are open drop-in shafts from the hillside with a render-only bronze
+  grate; they lead into the tunnel, not the vault, which keeps exactly two ways
+  in (the stair and the tunnel door).
+- **Fully open flag platform.** The tower platform's parapet and merlons are
+  gone; only a render-only bronze edge band remains. 15 of 16 straight fly-in
+  lines at +1.2 m reach the flag (the sentry mast blocks one).
+  `route_checks.flag_routes` (airborne, hut + tower box, a 10 m zone round the
+  flag): 10 entries and 19 routes per flag. v3 measured 14/38 and 14/31, because
+  the metric counted each parapet gap as its own approach; the open edge now
+  counts as fewer, wider ones. The test holds at least 8 entries and 10 routes.
+- **Capture & Hold.** Three points (`control_points`, radius 12 m, none active
+  in CTF): **The Ring** on the dais (the shared `cnh_tower` stands at its centre
+  in place of the old brazier stone, the 12 m capture ring is the dais), and
+  **West Cairn** / **East Cairn** at world (900, 1010) and (1148, 1038),
+  mirrored through the centre on plateaus levelled to the natural ground height
+  at their centres (radius 20 m). Rotation accepts `stonehenge-clone` in
+  `capture_and_hold`, and a Rust test captures the Ring and West Cairn.
+- **Visual fixes.** Overlapping same-plane faces (`surface_checks.z_fighting`)
+  went from 72 pairs on the base to 0 on the whole map: door-frame headers
+  under the lintels, the trench stripe on its liner, the tower's buttress bands
+  flush with their caps, the tier cornice ends on the buttresses, and hidden
+  vault slab bottoms. Hovering wall bottoms (the audit's check, bilinear
+  ground) went from 32 to 0: floor-length side banners, and the attack ramp's
+  first lamp post set on flat ground past the ramp foot. The untextured slab
+  the audit reported near (1041, 206, 1261) could not be found: that point is
+  5.8 m under the ground in this build, and a capture of the area
+  (`cairnhold-pass-audit-slab`) shows no untextured face. Tests pin the
+  overlap and hovering checks to zero on the committed pack.
+- **Look.** A late-afternoon highland: warm sun colour, a procedural sky with a
+  slate zenith, amber horizon and gold cloud (cover 0.5), exposure 1.08, warm
+  ground ambient, light valley haze and fog colour 0.78 0.71 0.60. The sun
+  keeps the baked direction.
+- **Counts:** 3,714 collision triangles per base (budget 4,500), 232 for the
+  Ring, 216 per C&H tower, 8,308 in all; about 8,670 render triangles per
+  base; 15 lightmap pages. Two baked builds are byte-identical.
+- **Screenshots:** `research/screenshots/cairnhold-pass-*`: aerial, hall-up,
+  gallery-door-outside, vault, tunnel-skylight, skylight-up, flag-platform,
+  ring, west-cairn, sky-sun, audit-slab.
+- **Still open:** the gallery has no ramp from the hall floor (it is reached
+  by jetting or from outside); nobody has walked or skied it; bots do not use
+  the gallery, skylights or tunnel.
