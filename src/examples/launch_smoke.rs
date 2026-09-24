@@ -1,10 +1,27 @@
 //! Launch the real client renderer and save its window, then close only this test.
 //! QA_CAPTURE_PATH must be set. Optional PEAKRUNNER_JOIN exercises a live match.
+//! Optional QA_CLICKS="x,y@seconds;..." clicks window points at those times (for
+//! example a map, a difficulty and Start match), and QA_CAPTURE_AT delays the
+//! capture from the default 8 s so an offline bot match can develop.
 use std::time::Instant;
 use eframe::egui;
-struct Probe { app: peakrunner::PeakRunnerApp, started: Instant, requested: bool, saved: bool, paused: bool, offline_stage:u8 }
+struct Probe { app: peakrunner::PeakRunnerApp, started: Instant, requested: bool, saved: bool, paused: bool, offline_stage:u8, clicked:usize }
 impl eframe::App for Probe {
     fn raw_input_hook(&mut self, ctx:&egui::Context, input:&mut egui::RawInput) {
+        let clicks:Vec<(f32,f32,f32)>=std::env::var("QA_CLICKS").unwrap_or_default().split(';').filter_map(|c| {
+            let (xy,t)=c.split_once('@')?;let (x,y)=xy.split_once(',')?;
+            Some((x.trim().parse().ok()?,y.trim().parse().ok()?,t.trim().parse().ok()?))
+        }).collect();
+        if let Some(&(x,y,t))=clicks.get(self.clicked) {
+            if self.started.elapsed().as_secs_f32()>=t {
+                self.clicked+=1;
+                let pos=egui::pos2(x,y);
+                input.events.push(egui::Event::PointerMoved(pos));
+                for pressed in [true,false] {input.events.push(egui::Event::PointerButton {
+                    pos,button:egui::PointerButton::Primary,pressed,modifiers:Default::default()
+                });}
+            }
+        }
         if std::env::var_os("QA_STONEHENGE_PLAY").is_some() || std::env::var_os("QA_COLLECTION_PLAY").is_some() {
             let seconds=self.started.elapsed().as_secs_f32();
             let target=if self.offline_stage==0 && seconds>=2. {
@@ -67,10 +84,11 @@ impl eframe::App for Probe {
             self.saved=true;println!("PASS: real client window rendered and captured");
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        if self.started.elapsed().as_secs()>=8 && !self.requested {
+        let capture_at=std::env::var("QA_CAPTURE_AT").ok().and_then(|v|v.parse::<f32>().ok()).unwrap_or(8.);
+        if self.started.elapsed().as_secs_f32()>=capture_at && !self.requested {
             self.requested=true;ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
         }
-        assert!(self.saved || self.started.elapsed().as_secs()<90,"client screenshot timed out");
+        assert!(self.saved || self.started.elapsed().as_secs_f32()<capture_at+82.,"client screenshot timed out");
         ctx.request_repaint();
     }
 }
@@ -86,5 +104,5 @@ fn main()->eframe::Result {
     eframe::run_native("PeakRunner platform check",eframe::NativeOptions {
         viewport:egui::ViewportBuilder::default().with_inner_size([1280.,800.]),
         renderer:eframe::Renderer::Wgpu,..Default::default()
-    },Box::new(|cc|Ok(Box::new(Probe {app:peakrunner::PeakRunnerApp::new(cc).map_err(std::io::Error::other)?,started:Instant::now(),requested:false,saved:false,paused:false,offline_stage:0}))))
+    },Box::new(|cc|Ok(Box::new(Probe {app:peakrunner::PeakRunnerApp::new(cc).map_err(std::io::Error::other)?,started:Instant::now(),requested:false,saved:false,paused:false,offline_stage:0,clicked:0}))))
 }

@@ -1,5 +1,6 @@
 //! Per-user client preferences, deliberately separate from game installs/maps.
 //! Passwords, session tokens, chat and server-provided data are never serialized.
+use peakrunner_core::bot_nav::Difficulty;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -17,6 +18,14 @@ pub(crate) struct Preferences {
     pub direct: String,
     /// 4x multisample anti-aliasing when the GPU supports it.
     pub antialiasing: bool,
+    /// Offline bot difficulty. An unknown value reads as the default.
+    #[serde(deserialize_with = "lenient_difficulty")]
+    pub bot_difficulty: Difficulty,
+}
+
+fn lenient_difficulty<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Difficulty, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
 }
 
 impl Default for Preferences {
@@ -27,6 +36,7 @@ impl Default for Preferences {
             directory: "https://dir.peakrunner.net/servers".into(),
             direct: "quic://play.peakrunner.net:7777".into(),
             antialiasing: true,
+            bot_difficulty: Difficulty::default(),
         }
     }
 }
@@ -52,6 +62,7 @@ impl Preferences {
             directory: address(directory).unwrap_or_else(|| self.directory.clone()),
             direct: address(direct).unwrap_or_else(|| self.direct.clone()),
             antialiasing: self.antialiasing,
+            bot_difficulty: self.bot_difficulty,
         }
     }
 }
@@ -142,6 +153,11 @@ impl Store {
         self.commit(next);
     }
 
+    pub fn set_bot_difficulty(&mut self, difficulty: Difficulty) {
+        let next = Preferences { bot_difficulty: difficulty, ..self.saved.clone() };
+        self.commit(next);
+    }
+
     fn commit(&mut self, next: Preferences) {
         if next == self.saved {
             return;
@@ -176,6 +192,7 @@ fn read(path: &Path) -> io::Result<Preferences> {
     }
     let mut prefs = Preferences::default().edited(&raw.name, &raw.directory, &raw.direct);
     prefs.antialiasing = raw.antialiasing;
+    prefs.bot_difficulty = raw.bot_difficulty;
     Ok(prefs)
 }
 
@@ -268,8 +285,8 @@ mod tests {
         );
         assert_eq!(Store::load(path.clone()).saved.name, "Pilot 3");
         let value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        // schema, name, directory, direct, antialiasing: nothing else.
-        assert_eq!(value.as_object().unwrap().len(), 5);
+        // schema, name, directory, direct, antialiasing, bot_difficulty: nothing else.
+        assert_eq!(value.as_object().unwrap().len(), 6);
         assert!(value.get("password").is_none());
         #[cfg(unix)]
         {
@@ -296,6 +313,24 @@ mod tests {
         let loaded = Store::load(path.clone()).saved;
         assert_eq!(loaded.name, "Pilot 9");
         assert!(!loaded.antialiasing, "editing the name must not reset anti-aliasing");
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn bot_difficulty_defaults_to_normal_persists_and_tolerates_unknown_values() {
+        let dir = temp();
+        let path = dir.join("client.json");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&path, br#"{"schema":1,"name":"Pilot","directory":"https://example.net/s","direct":"quic://example.net:7777"}"#).unwrap();
+        let mut s = Store::load(path.clone());
+        assert_eq!(s.saved.bot_difficulty, Difficulty::Normal);
+        s.set_bot_difficulty(Difficulty::Hard);
+        assert_eq!(Store::load(path.clone()).saved.bot_difficulty, Difficulty::Hard);
+        s.save("Pilot 4", &s.saved.directory.clone(), &s.saved.direct.clone());
+        assert_eq!(Store::load(path.clone()).saved.bot_difficulty, Difficulty::Hard, "editing the name keeps it");
+        // A value from a newer build must not throw away the name.
+        fs::write(&path, br#"{"schema":1,"name":"Pilot 5","directory":"https://example.net/s","direct":"quic://example.net:7777","bot_difficulty":"Brutal"}"#).unwrap();
+        let loaded = Store::load(path.clone()).saved;
+        assert_eq!((loaded.name.as_str(), loaded.bot_difficulty), ("Pilot 5", Difficulty::Normal));
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

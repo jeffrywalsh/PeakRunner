@@ -78,6 +78,8 @@ mod tests {
         assert!(Rotation::parse(r#"[{"map":"raindance","mode":"capture_and_hold"}]"#).is_ok());
         // Tower Complex (key broadside-clone) has three Capture & Hold towers.
         assert!(Rotation::parse(r#"[{"map":"broadside-clone","mode":"capture_and_hold"}]"#).is_ok());
+        // Cairnhold (key stonehenge-clone): the Ring and two flank cairns.
+        assert!(Rotation::parse(r#"[{"map":"stonehenge-clone","mode":"capture_and_hold"}]"#).is_ok());
         let cnh = Rotation::parse(r#"[{"map":"valley","mode":"capture_and_hold"}]"#).err().unwrap();
         assert!(cnh.contains("capture_and_hold needs at least 2"), "{cnh}");
         assert!(Rotation::parse(&" ".repeat(8193)).is_err());

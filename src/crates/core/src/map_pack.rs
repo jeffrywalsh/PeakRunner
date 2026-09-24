@@ -308,6 +308,9 @@ impl MapPack {
 
     pub fn triangle_count(&self)->usize {self.triangles.len()}
 
+    /// Collision triangles, for offline analysis such as bot navigation.
+    pub(crate) fn triangles(&self)->&[[Vec3; 3]] {&self.triangles}
+
     pub fn hole(&self,x:f32,z:f32)->bool {
         let x=(x/self.manifest.terrain_step).floor().clamp(0.0,255.0) as usize;
         let z=(z/self.manifest.terrain_step).floor().clamp(0.0,255.0) as usize;
@@ -479,8 +482,9 @@ mod tests {
             assert_eq!(parse_fog(bad), None, "{bad}");
         }
         use crate::terrain::MapId;
-        // Maps without fogColor keep the historical grey.
-        assert_eq!(on(MapId::StonehengeClone).unwrap().fog_color(), DEFAULT_FOG);
+        // Maps without fogColor keep the historical grey (every shipped map now sets one).
+        assert_eq!(DEFAULT_FOG, [0.62, 0.62, 0.62]);
+        assert_eq!(on(MapId::StonehengeClone).unwrap().fog_color(), [0.78, 0.71, 0.60]);
         assert_eq!(on(MapId::Raindance).unwrap().fog_color(), [0.62, 0.66, 0.68]);
         assert_eq!(on(MapId::BroadsideClone).unwrap().fog_color(), [0.74, 0.80, 0.88]);
         assert_eq!(on(MapId::DesertOfDeathClone).unwrap().fog_color(), [0.80, 0.69, 0.52]);

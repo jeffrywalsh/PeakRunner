@@ -81,3 +81,8 @@ codegen-units = 1
 
 [profile.dev.package."*"]
 opt-level = 2
+
+# The shared simulation runs bot navigation and map queries; unoptimised it
+# makes dev play and the navigation tests an order of magnitude slower.
+[profile.dev.package.peakrunner-core]
+opt-level = 2

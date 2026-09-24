@@ -566,7 +566,7 @@ mod map_tests {
     }
 
     /// Dustreach's generators sit underground: in the cistern under each keep,
-    /// on a floor 2 m below the ground, in cut terrain cells.
+    /// on a floor 4 m below the ground (an 8 m room), in cut terrain cells.
     #[test]
     fn dustreach_generators_are_underground_in_cut_cells() {
         let id = MapId::DesertOfDeathClone;
@@ -583,7 +583,7 @@ mod map_tests {
             assert!(pack.hole(p.x, p.z), "generator {} is not over a cut cell", d.id);
             // The entity point is 2.5 m up the model; probe just above the floor.
             let floor = pack.floor(p - Vec3::Y * 2.4).expect("generator floor").0;
-            assert!((floor - (home.y - 2.0)).abs() < 0.01, "generator {} floor {floor}, base {home:?}", d.id);
+            assert!((floor - (home.y - 4.0)).abs() < 0.01, "generator {} floor {floor}, base {home:?}", d.id);
         }
     }
 
@@ -689,7 +689,7 @@ mod map_tests {
     }
 
     /// Cairnhold's generators sit in a well in the vault under each hall,
-    /// 8.2 m below the hall floor, over cut terrain cells.
+    /// 9.7 m below the hall floor, over cut terrain cells.
     #[test]
     fn cairnhold_generators_are_underground_in_cut_cells() {
         let id = MapId::StonehengeClone;
@@ -704,7 +704,7 @@ mod map_tests {
             let p = d.pos();
             assert!(pack.hole(p.x, p.z), "generator {} is not over a cut cell", d.id);
             let floor = pack.floor(p - Vec3::Y * 2.4).expect("generator floor").0;
-            assert!((floor - (home.y - 8.2)).abs() < 0.01, "generator {} floor {floor}, base {home:?}", d.id);
+            assert!((floor - (home.y - 9.7)).abs() < 0.01, "generator {} floor {floor}, base {home:?}", d.id);
         }
     }
 
@@ -725,7 +725,7 @@ mod map_tests {
             let p = d.pos();
             assert!(pack.hole(p.x, p.z), "generator {} is not over a cut cell", d.id);
             let floor = pack.floor(p - Vec3::Y * 2.4).expect("generator floor").0;
-            assert!((floor - (home.y - 7.0)).abs() < 0.01, "generator {} floor {floor}, base {home:?}", d.id);
+            assert!((floor - (home.y - 7.5)).abs() < 0.01, "generator {} floor {floor}, base {home:?}", d.id);
         }
     }
 

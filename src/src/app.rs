@@ -171,6 +171,8 @@ impl PeakRunnerApp {
             net: NetUi::load(),
         };
         #[cfg(not(target_arch = "wasm32"))]
+        app.world.set_bot_difficulty(app.net.preferences.saved.bot_difficulty);
+        #[cfg(not(target_arch = "wasm32"))]
         if let Ok(address) = std::env::var("PEAKRUNNER_JOIN") {
             if let Ok(name) = std::env::var("PEAKRUNNER_NAME") { app.net.name = name; }
             app.net.password = std::env::var("PEAKRUNNER_MATCH_PASSWORD").unwrap_or_default();
@@ -726,6 +728,31 @@ impl PeakRunnerApp {
                 if points < 2 {
                     ui.label(RichText::new("Capture & Hold needs a map with capture towers; none are placed yet.").color(MUTED).size(12.0));
                 }
+                ui.add_space(10.0);
+                ui.label(RichText::new("BOTS").color(GLACIER).size(13.0));
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    use peakrunner_core::bot_nav::Difficulty;
+                    let current = self.world.bot_difficulty;
+                    for difficulty in Difficulty::ALL {
+                        let on = current == difficulty;
+                        let fill = if on { FG } else { Color32::from_rgb(22, 28, 38) };
+                        let text = if on { BG } else { FG };
+                        let button = egui::Button::new(RichText::new(difficulty.label()).color(text)).fill(fill).min_size(Vec2::new(82.0, 36.0));
+                        if ui.add(button).clicked() {
+                            self.world.set_bot_difficulty(difficulty);
+                            #[cfg(not(target_arch = "wasm32"))]
+                            self.net.preferences.set_bot_difficulty(difficulty);
+                        }
+                    }
+                });
+                let about = match self.world.bot_difficulty {
+                    peakrunner_core::bot_nav::Difficulty::Easy => "Mostly rookies: slow to react, wide of the mark.",
+                    peakrunner_core::bot_nav::Difficulty::Normal => "A spread of grunts, riders, skirmishers and anchors.",
+                    peakrunner_core::bot_nav::Difficulty::Hard => "Quick, accurate skiers and jetters, and aces.",
+                    peakrunner_core::bot_nav::Difficulty::Mixed => "Any personality, from rookie to ace.",
+                };
+                ui.label(RichText::new(about).color(MUTED).size(12.0));
                 ui.add_space(12.0);
                 if ui.add(egui::Button::new(RichText::new("Start match").size(20.0).color(BG)).fill(FG).min_size(Vec2::new(180.0, 44.0))).clicked() {
                     self.start(ui.ctx());

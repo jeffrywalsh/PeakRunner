@@ -12,7 +12,7 @@ pub const STEP: f32 = 1.0 / 60.0;
 // Ascend-inspired tuning in meters/seconds, not a binary-exact engine port.
 // Keep the existing jump thresholds, but use smooth held skiing and air control.
 const T2: f32 = 11.2 / 15.0;
-const GRAVITY: f32 = 20.0;
+pub(crate) const GRAVITY: f32 = 20.0;
 const MASS: f32 = 90.0;
 /// `jumpForce / mass` from the Classic light armor, applied along the ground normal.
 const JUMP_IMPULSE: f32 = 8.34;
@@ -32,16 +32,16 @@ const SKI_TURN_ACCEL: f32 = 28.0;
 /// Tuned downhill assistance for an Ascend-like ski, with ordinary uphill gravity.
 const SKI_SLOPE_GRAVITY: f32 = 2.0;
 /// Climb accel. Not spent when a movement key is held.
-const JET_ACCEL: f32 = 37.28;
+pub(crate) const JET_ACCEL: f32 = 37.28;
 /// Extra sideways accel under the cap. Added on top of the climb, not taken from it.
-const JET_HORIZ_ACCEL: f32 = 22.0;
+pub(crate) const JET_HORIZ_ACCEL: f32 = 22.0;
 /// 72 km/h. Thrust falls off here so jetting alone cannot make a ski line.
-const JET_THRUST_CAP: f32 = 72.0 / 3.6;
+pub(crate) const JET_THRUST_CAP: f32 = 72.0 / 3.6;
 /// Four-second tank with a five-second recharge, tuned for continuous ski routes.
 pub const ENERGY_MAX: f32 = 60.0;
-const ENERGY_JET: f32 = 15.0;
+pub(crate) const ENERGY_JET: f32 = 15.0;
 const ENERGY_REGEN: f32 = 12.0;
-const MIN_JET_ENERGY: f32 = 3.0;
+pub(crate) const MIN_JET_ENERGY: f32 = 3.0;
 /// Classic `dryVelocity`. The disc is a linear round, not a mortar.
 const DISC_SPEED: f32 = 95.0;
 /// Bots notice enemies inside this range, and only with a clear line of sight.
@@ -50,6 +50,13 @@ const BOT_SIGHT_RANGE: f32 = 95.0;
 const BOT_SIGHT_RAYS: usize = 3;
 /// Seconds a bot keeps heading for an enemy's last-seen spot after losing sight.
 const BOT_MEMORY: f32 = 2.5;
+/// Route searches allowed per tick across all bots, and the node budget of
+/// each: bounds the worst tick when every bot re-plans at once.
+const BOT_PLANS_PER_TICK: u32 = 2;
+const BOT_SEARCH_BUDGET: usize = 40_000;
+/// Re-plan at least this often, and when a bot makes no progress this long.
+const BOT_REPLAN_SECONDS: f32 = 6.0;
+const BOT_STUCK_SECONDS: f32 = 2.5;
 /// Classic `velInheritFactor`. Without this the disc runs away and you cannot disc jump.
 const DISC_INHERIT: f32 = 0.75;
 pub const DISC_RELOAD: f32 = 1.05;
@@ -190,6 +197,37 @@ pub struct Player {
     bot_seen: Vec3,
     #[serde(skip)]
     bot_memory: f32,
+    /// Personality and route-following state. Server-only; never sent.
+    #[serde(skip)]
+    bot_profile: crate::bot_nav::BotProfile,
+    #[serde(skip)]
+    bot_path: Vec<u32>,
+    #[serde(skip)]
+    bot_path_i: usize,
+    #[serde(skip)]
+    bot_path_goal: Vec3,
+    #[serde(skip)]
+    bot_replan: f32,
+    #[serde(skip)]
+    bot_stuck: f32,
+    #[serde(skip)]
+    bot_best: f32,
+    #[serde(skip)]
+    bot_link: Option<crate::bot_nav::Link>,
+    /// The next link is a jet climb: save energy for it on the way.
+    #[serde(skip)]
+    bot_saving: bool,
+    /// Seconds the current target has stayed in sight (reaction time).
+    #[serde(skip)]
+    bot_seen_for: f32,
+    /// This think's aim error, yaw and pitch radians.
+    #[serde(skip)]
+    bot_aim: Vec2,
+    #[serde(skip)]
+    bot_kit: bool,
+    /// Links this bot got stuck on recently; its routes avoid them.
+    #[serde(skip)]
+    bot_avoid: Vec<(u32, u32)>,
     coyote: f32,
 }
 
@@ -266,6 +304,11 @@ pub struct World {
     predicting: bool,
     rng: u32,
     last_spawn: [usize; 2],
+    /// Offline bot mix; see `crate::bot_nav::Difficulty`.
+    pub bot_difficulty: crate::bot_nav::Difficulty,
+    /// Route searches left this tick, so bots re-planning together can't
+    /// stall one frame.
+    bot_plans: u32,
 }
 
 struct Rng(u32);
@@ -374,6 +417,8 @@ impl World {
             feed: Vec::new(),
             rng: 0xC0FFEE,
             last_spawn: [usize::MAX; 2],
+            bot_difficulty: crate::bot_nav::Difficulty::default(),
+            bot_plans: 0,
         }
     }
 
@@ -537,7 +582,31 @@ impl World {
             self.players.push(make_player(other, true, p, face, role));
         }
 
+        for i in 0..self.players.len() {
+            if self.players[i].is_bot { self.assign_personality(i); }
+        }
         self.place_flags();
+    }
+
+    /// Give bot `i` a personality from the difficulty mix, a matching role
+    /// and a readable name ("Rider", "Ace 2").
+    fn assign_personality(&mut self, i: usize) {
+        let profile = self.bot_difficulty.pick(self.rng());
+        let same = self.players.iter().enumerate()
+            .filter(|(j, o)| *j < i && o.is_bot && o.bot_profile.name == profile.name).count();
+        let p = &mut self.players[i];
+        p.bot_profile = profile;
+        p.name = if same == 0 { profile.name.into() } else { format!("{} {}", profile.name, same + 1) };
+        match profile.name {
+            "Anchor" => p.bot_role = BotRole::Defense,
+            "Skirmisher" | "Ace" if p.bot_role != BotRole::Defense => p.bot_role = BotRole::Hunter,
+            _ => {}
+        }
+    }
+
+    /// Offline bot mix for the next match.
+    pub fn set_bot_difficulty(&mut self, difficulty: crate::bot_nav::Difficulty) {
+        self.bot_difficulty = difficulty;
     }
 
     fn place_flags(&mut self) {
@@ -702,7 +771,8 @@ impl World {
     fn step_kits(&mut self, dt:f32) {
         if self.predicting {return;}
         for i in 0..self.players.len() {
-            let wants=if self.network_inputs.is_empty() {i==self.player_id && self.input.kit}
+            let wants=if self.players[i].is_bot {self.players[i].bot_kit}
+                else if self.network_inputs.is_empty() {i==self.player_id && self.input.kit}
                 else {self.network_inputs.get(i).is_some_and(|c|c.kit)};
             let p=&mut self.players[i];
             if !p.alive {p.kit_heal=0.;continue;}
@@ -790,6 +860,8 @@ impl World {
     }
 
     fn think_bots(&mut self, dt: f32) {
+        self.bot_plans = BOT_PLANS_PER_TICK;
+        let nav = crate::bot_nav::ready(self.map);
         let n = self.players.len();
         for i in 0..n {
             if !self.players[i].is_bot || !self.players[i].alive {
@@ -797,21 +869,34 @@ impl World {
             }
             self.players[i].bot_think -= dt;
             self.players[i].bot_memory = (self.players[i].bot_memory - dt).max(0.0);
+            self.players[i].bot_replan -= dt;
             if self.players[i].bot_think > 0.0 {
                 continue;
             }
             let wait = 0.18 + self.rng() * 0.22;
             let jx = (self.rng() - 0.5) * 12.0;
             let jz = (self.rng() - 0.5) * 8.0;
+            // Aim error for this think: a rough normal sample, per profile.
+            let spread = self.players[i].bot_profile.aim_error;
+            let gauss = |w: &mut Self| (w.rng() + w.rng() + w.rng() - 1.5) * 2.0;
+            let aim_err = Vec2::new(gauss(self), gauss(self)) * spread;
+            self.players[i].bot_aim = aim_err;
             self.players[i].bot_think = wait;
+            let profile = self.players[i].bot_profile;
             let team = self.players[i].team;
             let role = self.players[i].bot_role;
             let carrying = self.players[i].carrying;
             let pos = self.players[i].pos;
+            let health = self.players[i].health;
             let enemy_flag_pos = self.flags[team.other().idx()].pos;
             let enemy_carrier = self.flags[team.other().idx()].carrier;
             let own_home = self.flags[team.idx()].home;
             let own_carrier = self.flags[team.idx()].carrier;
+
+            // Heal: a kit when hurt, and cautious personalities fall back to
+            // an inventory station when out of kits.
+            self.players[i].bot_kit = profile.uses_kit && health < 55.0 && self.players[i].kits > 0;
+            let retreat = carrying.is_none() && self.players[i].kits == 0 && health < profile.retreat_health;
 
             let mut goal = enemy_flag_pos;
             let cnh_goal = if self.mode == crate::map_catalog::SupportedMode::CaptureAndHold {
@@ -823,7 +908,13 @@ impl World {
                 if role == BotRole::Defense { pick(true).or_else(|| pick(false)) } else { pick(false).or_else(|| pick(true)) }
                     .map(|g| g + Vec3::new(jx * 0.5, 1.2, jz * 0.5))
             } else { None };
-            if let Some(g) = cnh_goal {
+            let station = retreat.then(|| crate::equipment::definitions(self.map).iter()
+                .filter(|d| d.kind == crate::equipment::Kind::Inventory && d.team as usize == team.idx())
+                .map(|d| d.pos())
+                .min_by(|a, b| a.distance(pos).total_cmp(&b.distance(pos)))).flatten();
+            if let Some(g) = station {
+                goal = g;
+            } else if let Some(g) = cnh_goal {
                 goal = g;
             } else if carrying.is_some() {
                 goal = own_home;
@@ -859,33 +950,45 @@ impl World {
 
             // Hunt what it can see; once sight breaks, head for where the enemy
             // was last seen for a moment instead of tracking it through walls.
-            let hunts = (role == BotRole::Hunter || carrying.is_none()) && role != BotRole::Defense;
+            // Aggressive personalities chase farther.
+            let chase = 20.0 + 60.0 * profile.aggression;
+            let hunts = (role == BotRole::Hunter || carrying.is_none()) && role != BotRole::Defense && !retreat;
+            let mut direct = false;
             match seen {
                 Some((d, j)) => {
+                    let same = self.players[i].bot_target == Some(j);
+                    self.players[i].bot_seen_for = if same { self.players[i].bot_seen_for + wait } else { 0.0 };
                     self.players[i].bot_target = Some(j);
                     self.players[i].bot_seen = self.players[j].pos;
                     self.players[i].bot_memory = BOT_MEMORY;
-                    if hunts && d < 48.0 {
+                    if hunts && d < chase {
                         goal = self.players[j].pos;
+                        // In sight and close: fight it out without a route.
+                        direct = d < 28.0;
                     }
                 }
                 None => {
                     self.players[i].bot_target = None;
+                    self.players[i].bot_seen_for = 0.0;
                     let last = self.players[i].bot_seen;
-                    if hunts && self.players[i].bot_memory > 0.0 && pos.distance(last) < 48.0 {
+                    if hunts && self.players[i].bot_memory > 0.0 && pos.distance(last) < chase {
                         goal = last;
                     }
                 }
             }
 
             self.players[i].bot_goal = goal;
+            if !direct {
+                if let Some(g) = nav { self.follow_route(i, g, goal); }
+            }
 
-            // Aim at the visible target with lead, or face its last-seen spot.
+            // Aim at the visible target with this personality's lead and
+            // error, or face its last-seen spot, or face the way it's going.
             let aim = match seen {
                 Some((d, j)) => {
                     let o = &self.players[j];
-                    let lead = d / DISC_SPEED;
-                    Some((o.pos + Vec3::Y * 1.1 + o.vel * lead * 0.85, Some(d)))
+                    let lead = d / DISC_SPEED * profile.lead;
+                    Some((o.pos + Vec3::Y * 1.1 + o.vel * lead, Some(d)))
                 }
                 None if self.players[i].bot_memory > 0.0 => Some((self.players[i].bot_seen + Vec3::Y * 1.1, None)),
                 None => None,
@@ -893,13 +996,109 @@ impl World {
             if let Some((at, dist)) = aim {
                 let dir = (at - (pos + Vec3::Y * 1.4)).normalize_or_zero();
                 if dir.length_squared() > 0.1 {
-                    self.players[i].yaw = (-dir.x).atan2(-dir.z);
-                    self.players[i].pitch = dir.y.asin().clamp(-0.7, 0.7);
+                    self.players[i].yaw = (-dir.x).atan2(-dir.z) + aim_err.x;
+                    self.players[i].pitch = (dir.y.asin() + aim_err.y).clamp(-0.7, 0.7);
                 }
                 if let Some(d) = dist {
                     self.players[i].weapon = if d < 28.0 { 1 } else { 0 };
                 }
+            } else {
+                let to = self.players[i].bot_goal - pos;
+                if Vec2::new(to.x, to.z).length() > 1.0 {
+                    self.players[i].yaw = (-to.x).atan2(-to.z);
+                    self.players[i].pitch = -0.05;
+                }
             }
+        }
+    }
+
+    /// Point bot `i` at the next waypoint of a route to `goal`, planning or
+    /// re-planning when the goal moves, the route runs out, or the bot stalls.
+    fn follow_route(&mut self, i: usize, g: &crate::bot_nav::NavGraph, goal: Vec3) {
+        use crate::bot_nav::Link;
+        let pos = self.players[i].pos;
+        // Last few metres with nothing in the way: go straight in rather
+        // than threading waypoints that can sit behind a lip or railing.
+        if pos.distance(goal) < 14.0 && (goal.y - pos.y).abs() < 3.0 {
+            // A chest-height line: plinths and steps are hopped, not walls.
+            let body = crate::map_pack::on(self.map).map_or(true, |pack| {
+                let chest = Vec3::Y * 1.2;
+                pack.sweep(pos + chest, goal + chest, 0.35).is_none()
+            });
+            if body {
+                let p = &mut self.players[i];
+                p.bot_goal = goal;
+                p.bot_link = None;
+                p.bot_saving = false;
+                p.bot_stuck = 0.0;
+                return;
+            }
+        }
+        let p = &self.players[i];
+        // Never swap routes mid-climb or mid-fall: the new route would start
+        // from the floor below and drop the move in progress.
+        let committed = !p.on_ground && matches!(p.bot_link, Some(Link::Jet) | Some(Link::Drop))
+            && p.bot_path_i < p.bot_path.len() && p.bot_stuck < BOT_STUCK_SECONDS * 2.0;
+        let stale = !committed && (p.bot_path.is_empty() || p.bot_path_i >= p.bot_path.len()
+            || p.bot_path_goal.distance(goal) > 12.0 || p.bot_replan <= 0.0 || p.bot_stuck > BOT_STUCK_SECONDS);
+        if stale && self.bot_plans > 0 {
+            self.bot_plans -= 1;
+            // Stuck: remember the link that failed so the new route avoids it.
+            let p = &mut self.players[i];
+            if p.bot_stuck > BOT_STUCK_SECONDS && p.bot_path_i > 0 && p.bot_path_i < p.bot_path.len() {
+                let bad = (p.bot_path[p.bot_path_i - 1], p.bot_path[p.bot_path_i]);
+                if p.bot_avoid.len() >= 8 { p.bot_avoid.remove(0); }
+                p.bot_avoid.push(bad);
+            }
+            let weights = p.bot_profile.route;
+            let avoid = p.bot_avoid.clone();
+            let mut forgive = false;
+            let path = match (g.nearest_in_reach(self.map, pos), g.nearest(goal)) {
+                // The failed links may have been the only way: forget them
+                // and take the plain route again.
+                (Some(a), Some(b)) => g.path_avoiding(a, b, weights, BOT_SEARCH_BUDGET, &avoid)
+                    .or_else(|| { forgive = true; g.path(a, b, weights, BOT_SEARCH_BUDGET) })
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            };
+            let p = &mut self.players[i];
+            if forgive { p.bot_avoid.clear(); }
+            p.bot_path = path;
+            p.bot_path_i = 0;
+            p.bot_path_goal = goal;
+            p.bot_replan = BOT_REPLAN_SECONDS;
+            p.bot_stuck = 0.0;
+            p.bot_best = f32::MAX;
+        }
+        let p = &mut self.players[i];
+        // Advance past waypoints already reached.
+        while p.bot_path_i < p.bot_path.len() {
+            let w = g.nodes[p.bot_path[p.bot_path_i] as usize];
+            let flat = Vec2::new(w.x - pos.x, w.z - pos.z).length();
+            let reach = if g.terrain[p.bot_path[p.bot_path_i] as usize] { 5.0 } else { 1.8 };
+            // Already past it at speed: the next waypoint is nearer.
+            let passed = p.bot_path.get(p.bot_path_i + 1).is_some_and(|&n| {
+                let nx = g.nodes[n as usize];
+                g.terrain[p.bot_path[p.bot_path_i] as usize] && nx.distance(pos) < w.distance(pos)
+            });
+            if passed || (flat < reach && (w.y - pos.y).abs() < 2.8) {
+                p.bot_path_i += 1;
+                p.bot_best = f32::MAX;
+                p.bot_stuck = 0.0;
+            } else {
+                break;
+            }
+        }
+        if p.bot_path_i < p.bot_path.len() {
+            let here = p.bot_path[p.bot_path_i];
+            p.bot_goal = g.nodes[here as usize];
+            p.bot_link = Some(if p.bot_path_i == 0 { Link::Walk } else { g.link(p.bot_path[p.bot_path_i - 1], here) });
+            p.bot_saving = p.bot_path.get(p.bot_path_i + 1).is_some_and(|&next| g.link(here, next) == Link::Jet);
+            let d = p.bot_goal.distance(pos);
+            if d < p.bot_best - 0.5 { p.bot_best = d; p.bot_stuck = 0.0; }
+        } else {
+            p.bot_link = None;
+            p.bot_saving = false;
         }
     }
 
@@ -1125,37 +1324,104 @@ impl World {
     }
 
     fn bot_wish(&mut self, i: usize) -> (f32, f32, bool, bool, bool, bool) {
+        use crate::bot_nav::{Link, MoveStyle};
         let p = &self.players[i];
         let to = p.bot_goal - p.pos;
         let yaw = p.yaw;
         let pitch = p.pitch;
         let team = p.team;
         let pos = p.pos;
+        let vel = p.vel;
         let on_ground = p.on_ground;
+        let energy = p.energy;
+        let profile = p.bot_profile;
+        let link = p.bot_link;
+        let saving = p.bot_saving;
+        let goal = p.bot_goal;
+        let seen_for = p.bot_seen_for;
+        let target = p.bot_target;
         let (fwd, right) = move_basis(yaw);
         let horiz = Vec3::new(to.x, 0.0, to.z);
         let hlen = horiz.length();
-        let wish = if hlen > 1.0 { horiz / hlen } else { horiz };
-        let mx = wish.dot(right).clamp(-1.0, 1.0);
-        let mz = wish.dot(fwd).clamp(-1.0, 1.0);
-        // Fire only at the enemy it can see, and re-check sight at the trigger:
-        // cover can close between thinks, and bots never shoot at walls.
+        let mut wish = if hlen > 1.0 { horiz / hlen } else { horiz };
+        // Fire only at the enemy it can see, re-checking sight at the trigger,
+        // and only once it has had the target in view for its reaction time.
         let mut fire = false;
-        if let Some(o) = p.bot_target.and_then(|j| self.players.get(j)) {
+        let mut target_in_view = false;
+        if let Some(o) = target.and_then(|j| self.players.get(j)) {
             let d = pos.distance(o.pos);
             let dir = look_dir(yaw, pitch);
             let to_e = ((o.pos + Vec3::Y) - (pos + Vec3::Y * 1.4)).normalize_or_zero();
-            if o.alive && o.team != team && d < 78.0 && dir.dot(to_e) > 0.86 {
+            target_in_view = o.alive && o.team != team;
+            if target_in_view && d < 78.0 && dir.dot(to_e) > 0.86 && seen_for >= profile.reaction {
                 let chest = o.pos + Vec3::Y * crate::equipment::CHEST_HEIGHT;
                 fire = obstacle_hit(self.map, &self.pillars, pos + Vec3::Y * EYE, chest, 0.0).is_none();
             }
         }
-        let energy = p.energy;
-        let uphill = to.y > 5.0;
         let r = self.rng();
-        let jump_edge = on_ground && r < 0.02;
-        let jet = energy >= MIN_JET_ENERGY && (!on_ground || uphill);
-        (mx, mz.max(0.15), true, jump_edge, fire && r < 0.7, jet)
+        let horiz_speed = Vec2::new(vel.x, vel.z).length();
+        let (jet, ski) = match link {
+            // Climbs: wait for a tank first, then jet until a coast would
+            // carry it over the waypoint, braking horizontally near the end.
+            Some(Link::Jet) => {
+                let above = pos.y > goal.y + 1.0;
+                let brake = horiz_speed * horiz_speed / (2.0 * JET_HORIZ_ACCEL);
+                if !above && hlen < brake + 1.0 && horiz_speed > 3.0 {
+                    let back = -Vec3::new(vel.x, 0.0, vel.z).normalize_or_zero();
+                    wish = back;
+                }
+                let tank = energy >= ENERGY_MAX * crate::bot_nav::JET_PLAN_ENERGY - 4.0;
+                if on_ground && !tank && (hlen < 12.0 || horiz_speed < 10.0) {
+                    // Recharge in place before committing to the climb.
+                    wish = Vec3::ZERO;
+                    (false, false)
+                } else {
+                    // Hold the jet while a coast from here would arrive
+                    // under the waypoint, not just until it's briefly above.
+                    let t = hlen / horiz_speed.max(4.0);
+                    let arrive = pos.y + vel.y * t - 0.5 * GRAVITY * t * t;
+                    (arrive < goal.y + 1.5 && energy >= MIN_JET_ENERGY && (!on_ground || tank), on_ground)
+                }
+            }
+            // Drops: walk off, then burn jet near the bottom to soften the landing.
+            Some(Link::Drop) => {
+                let fall = (pos.y - goal.y).max(0.0);
+                let stop = vel.y * vel.y / (2.0 * (JET_ACCEL - GRAVITY));
+                (vel.y < -12.0 && fall < stop + 2.0 && energy >= MIN_JET_ENERGY, false)
+            }
+            // Terrain: skis down on descents and at speed; jet up climbs and
+            // across flats while the tank is healthy, as players do.
+            Some(Link::Ski) => {
+                let downhill = to.y < -0.5;
+                let ski = profile.style == MoveStyle::Skier || downhill || horiz_speed > 15.0;
+                let push = !saving && ((to.y > 1.0 && energy > 15.0) || (!downhill && horiz_speed < 18.0 && energy > 40.0));
+                (push, ski)
+            }
+            // Floors and ramps: walk, so a slide doesn't carry it through
+            // doors; hop a lip or step with a short jet.
+            Some(Link::Walk) => (!saving && to.y > 1.5 && hlen < 4.0 && energy > MIN_JET_ENERGY, false),
+            // No route yet (or a close fight): the original steering.
+            None => {
+                let uphill = to.y > 5.0;
+                (energy >= MIN_JET_ENERGY && (!on_ground || uphill), true)
+            }
+        };
+        // Jetters fight from the air when they have the energy for it.
+        let jet = jet || (profile.style == MoveStyle::Jetter && target_in_view && energy > 30.0 && r < 0.6);
+        let mx = wish.dot(right).clamp(-1.0, 1.0);
+        let mz = wish.dot(fwd).clamp(-1.0, 1.0);
+        // Hop a step or plinth edge too tall to walk up; elsewhere the odd
+        // random hop off rough ground.
+        let step_up = matches!(link, Some(Link::Walk) | None) && to.y > 0.4 && hlen < 3.0;
+        let jump_edge = on_ground && (step_up || (link != Some(Link::Walk) && r < 0.02));
+        // Stall tracking: time without getting closer to the waypoint (the
+        // route follower resets it on progress), except while recharging.
+        // A climb that keeps falling short counts, so it gets re-planned.
+        if link.is_some() && !(on_ground && !jet && wish == Vec3::ZERO) {
+            self.players[i].bot_stuck += STEP;
+        }
+        let forward = if link.is_some() { mz } else { mz.max(0.15) };
+        (mx, forward, ski, jump_edge, fire && r < 0.7, jet)
     }
 
     fn collide_pillars(&mut self, i: usize) {
@@ -2835,7 +3101,7 @@ fn move_in_imported_map(map:MapId,pack:&crate::map_pack::MapPack,p:&mut Player,s
     impact
 }
 
-fn gravity_for_speed(speed: f32) -> f32 {
+pub(crate) fn gravity_for_speed(speed: f32) -> f32 {
     // Gentle high-speed float, blended rather than a sudden threshold change.
     let blend = ((speed - 250.0 / 3.6) / (100.0 / 3.6)).clamp(0.0, 1.0);
     GRAVITY * (1.0 - 0.35 * blend * blend * (3.0 - 2.0 * blend))
@@ -3198,7 +3464,7 @@ fn grenade_contact_normal(map: MapId, pillars: &[Pillar], p: Vec3, far: f32, inc
     normal
 }
 
-fn jet_falloff(speed: f32) -> f32 {
+pub(crate) fn jet_falloff(speed: f32) -> f32 {
     let knee = JET_THRUST_CAP * 0.8;
     if speed <= knee {
         1.0
@@ -3288,6 +3554,19 @@ fn make_player(team: Team, bot: bool, pos: Vec3, yaw: f32, role: BotRole) -> Pla
         bot_target: None,
         bot_seen: pos,
         bot_memory: 0.0,
+        bot_profile: crate::bot_nav::BotProfile::default(),
+        bot_path: Vec::new(),
+        bot_path_i: 0,
+        bot_path_goal: pos,
+        bot_replan: 0.0,
+        bot_stuck: 0.0,
+        bot_best: f32::MAX,
+        bot_link: None,
+        bot_saving: false,
+        bot_seen_for: 0.0,
+        bot_aim: Vec2::ZERO,
+        bot_kit: false,
+        bot_avoid: Vec::new(),
         coyote: 0.0,
     }
 }
@@ -3882,31 +4161,39 @@ mod line_of_sight_tests {
         } else {Vec3::new(info.glacier.x+lx,info.glacier.y+y,info.glacier.z+lz)};
         let trench=|_x:f32,z:f32| 22.*((z-20.)/56.).clamp(0.,1.);
         let level=|y:f32| move |_x:f32,_z:f32| y;
-        // Sally port floors: vault door -6 -> 3 over x 17..41; south leg 3 -> 8 over z -20..-36.
-        let east=|x:f32,_z:f32| -6.+9.*((x-17.)/24.).clamp(0.,1.);
+        // Sally port floors: vault door -7.5 -> 3 over x 17..45; south leg 3 -> 8 over z -20..-36.
+        let east=|x:f32,_z:f32| -7.5+10.5*((x-17.)/28.).clamp(0.,1.);
         let south=|_x:f32,z:f32| 3.+5.*((-20.-z)/16.).clamp(0.,1.);
-        // (x0,x1,z0,z1,floor(x,z),skip hatch columns)
-        let rooms:[(f32,f32,f32,f32,&dyn Fn(f32,f32)->f32,bool);11]=[
+        // (x0,x1,z0,z1,floor(x,z),skip open columns: tower hatches and tunnel skylights)
+        let rooms:[(f32,f32,f32,f32,&dyn Fn(f32,f32)->f32,bool);14]=[
             (-15.,15.,-18.6,19.,&level(0.),false),      // bunker: hall, inventory and back rooms
+            (-14.6,-11.6,-12.4,3.6,&level(7.),false),     // hall gallery, west side
+            (11.6,14.6,-12.4,3.6,&level(7.),false),       // hall gallery, east side
+            (-10.8,10.8,0.4,3.6,&level(7.),false),        // hall gallery, back
             (1.6,6.4,20.6,75.4,&trench,false),            // covered trench
             (-6.6,14.6,77.4,98.6,&level(22.),true),       // guard hut
             (3.4,14.6,77.4,94.6,&level(29.),true),        // tower floor over the hut
             (3.4,14.6,92.4,94.9,&level(35.),false),       // tower landing
-            (3.8,10.6,-9.2,-0.8,&level(-6.),false),       // vault (generator room)
-            (3.8,9.8,4.,11.4,&level(-8.2),false),         // generator well
-            (11.8,14.6,2.2,11.4,&level(-6.),false),       // walkway to the tunnel door
-            (16.6,86.6,5.4,10.6,&east,false),             // sally port, east leg
+            (3.8,10.6,-9.2,-0.8,&level(-7.5),false),      // vault (generator room)
+            (3.8,9.8,4.,11.4,&level(-9.7),false),         // generator well
+            (11.8,14.6,4.6,11.4,&level(-7.5),false),      // walkway to the tunnel door
+            (16.6,86.6,5.4,10.6,&east,true),              // sally port, east leg
             (81.4,86.6,-35.4,4.,&south,false),            // sally port, south leg
             (81.4,86.6,-42.6,-36.2,&level(8.),false)];    // exit house
+        let open_column=|lx:f32,lz:f32| ((9.5..=15.2).contains(&lx) && (80.0..=94.0).contains(&lz))   // tower hatches
+            || ((47.5..=52.5).contains(&lx) || (63.5..=68.5).contains(&lx)) && (4.0..=12.0).contains(&lz);  // skylights
         let flat=|team:u8,lx:f32,lz:f32| {let p=to_world(team,lx,0.,lz);Vec2::new(p.x,p.z)};
-        let openings:Vec<(Vec2,Vec2)>=[0u8,1].iter().flat_map(|&t|[(flat(t,-2.5,-19.2),flat(t,2.5,-19.2)),
-            (flat(t,87.2,-43.),flat(t,87.2,-39.6))]).collect();
+        // Open doorways: the 6 m front door, the gallery doorways in both hall
+        // side walls, and the exit house door.
+        let openings:Vec<(Vec2,Vec2)>=[0u8,1].iter().flat_map(|&t|[(flat(t,-3.,-19.2),flat(t,3.,-19.2)),
+            (flat(t,-15.2,-7.),flat(t,-15.2,-1.)),(flat(t,15.2,-7.),flat(t,15.2,-1.)),
+            (flat(t,87.2,-43.),flat(t,87.2,-37.4))]).collect();
         let (mut sampled,mut seen)=(0,Vec::new());
         for d in defs.iter().filter(|d|matches!(d.kind,Kind::Turret)) {
             {   let team=d.team;   // attackers inside the turret's own base
                 for (r,&(x0,x1,z0,z1,floor,hatch)) in rooms.iter().enumerate() {
                     let mut lx=x0; while lx<=x1 { let mut lz=z0; while lz<=z1 {
-                        if !(hatch && (9.5..=15.2).contains(&lx) && (80.0..=94.0).contains(&lz)) {
+                        if !(hatch && open_column(lx,lz)) {
                             let y=floor(lx,lz);
                             let probe=to_world(team,lx,y+1.5,lz);
                             if let Some((fy,_))=pack.floor(probe) {
@@ -3924,8 +4211,8 @@ mod line_of_sight_tests {
             }
         }
         assert!(sampled>3000,"too few interior samples ({sampled})");
-        let by_room:Vec<usize>=(0..11).map(|r|seen.iter().filter(|s|s.1==r).count()).collect();
-        assert!(seen.is_empty(),"{} interior points visible to turrets (bunker, trench, hut, tower floor, landing, vault, well, walkway, east, south, exit: {by_room:?}), e.g. {:?}",
+        let by_room:Vec<usize>=(0..14).map(|r|seen.iter().filter(|s|s.1==r).count()).collect();
+        assert!(seen.is_empty(),"{} interior points visible to turrets (bunker, 3 galleries, trench, hut, tower floor, landing, vault, well, walkway, east, south, exit: {by_room:?}), e.g. {:?}",
             seen.len(),&seen[..seen.len().min(8)]);
     }
 
@@ -3986,28 +4273,32 @@ mod line_of_sight_tests {
             (-9.8,9.8,-12.8,5.4,0.),       // station hall, between the two ramps
             (-12.8,12.8,7.2,12.8,0.),      // rear hall
             (-12.8,12.8,-12.8,12.8,7.5),   // command deck (flag level)
-            (-6.8,4.2,-6.8,6.8,-7.),       // basement generator room, west of its baffle
-            (4.8,6.8,1.,6.8,-7.),          // basement, north of the baffle
-            (8.6,15.4,-6.6,-1.4,-7.),      // tunnel to the service shed
+            (-6.8,4.2,-6.8,6.8,-7.5),      // basement generator room, west of its baffle
+            (4.8,6.8,1.,6.8,-7.5),         // basement, north of the baffle
+            (8.6,15.4,-6.6,-1.4,-7.5),     // tunnel to the service shed
             (98.1,109.9,-77.9,-69.,20.)];  // relay outpost behind its baffle
         let dust:&[(f32,f32,f32,f32,f32)]=&[
             (-12.6,12.6,-14.6,2.6,5.),     // keep hall
-            (-12.6,12.6,-15.6,5.6,-2.),    // cistern (generator room) under the keep
-            (-14.6,-9.4,7.6,21.6,-2.),     // service tunnel, north leg
-            (-23.4,-16.6,16.4,21.6,-2.),   // service tunnel, west leg
-            (-30.6,-25.4,16.4,22.5,-2.),   // watch tower base room
-            (32.2,46.6,3.4,17.8,0.),       // storehouse ground floor, behind its baffles
-            (32.2,42.4,3.4,20.6,5.)];      // storehouse upper floor, behind its baffle
+            (-12.6,12.6,-15.6,5.6,-4.),    // cistern (generator room) under the keep, 8 m tall
+            (-14.6,-9.4,7.6,21.6,-4.),     // service tunnel, north leg
+            (-23.4,-16.6,16.4,21.6,-4.),   // service tunnel, west leg
+            (-30.6,-25.4,16.4,18.4,-4.),   // watch tower base room, south of its exit ramp
+            (-26.8,-25.4,18.4,26.,-4.),    // tower room beside the exit ramp
+            (32.2,46.6,3.4,17.8,0.),       // storehouse hall floor, behind its baffles
+            (32.2,33.2,3.4,20.6,5.),       // storehouse mezzanine, behind the gate baffle
+            (34.2,37.,15.4,20.6,5.)];      // storehouse landing at the ramp's head
         for (map,rooms,min) in [(MapId::SnowblindClone,frost,1500),(MapId::DesertOfDeathClone,dust,1500)] {
             let pack=crate::map_pack::on(map).unwrap();
             let info=crate::terrain::info(map);
             let to_world=|team:u8,lx:f32,y:f32,lz:f32| if team==0 {
                 Vec3::new(info.ember.x-lx,info.ember.y+y,info.ember.z-lz)
             } else {Vec3::new(info.glacier.x+lx,info.glacier.y+y,info.glacier.z+lz)};
-            // Frostline has no floor over its two ramp openings or its
-            // basement stair's opening in the hall.
+            // Frostline has no floor over its two ramp openings, the
+            // two-level void in front of the flag, or its basement stair's
+            // opening in the hall.
             let skip=|lx:f32,y:f32,lz:f32| map==MapId::SnowblindClone && (
                 (y==7.5 && ((-13.4..=-10.4).contains(&lx) || (10.4..=13.4).contains(&lx)) && (-10.0..=-2.6).contains(&lz))
+                || (y==7.5 && (-5.3..=5.3).contains(&lx) && (-4.3..=6.3).contains(&lz))
                 || (y==0. && (-7.7..=-4.1).contains(&lx) && (-7.4..=0.3).contains(&lz)));
             let mut targets=Vec::new();
             for team in [0u8,1] {
@@ -4028,10 +4319,10 @@ mod line_of_sight_tests {
             assert!(targets.len()>min,"{map:?}: too few interior samples ({})",targets.len());
             // Inner faces of the open doors and windows, local (x0, z0, x1, z1).
             let local:&[(f32,f32,f32,f32)]=if map==MapId::SnowblindClone {&[
-                (-2.2,-13.4,2.2,-13.4),(-10.,13.4,-6.5,13.4),(13.4,7.,13.4,10.5),
+                (-3.,-13.4,3.,-13.4),(-12.,13.4,-6.,13.4),(13.4,6.8,13.4,12.8),
                 (-11.,-13.4,-4.,-13.4),(4.,-13.4,11.,-13.4),(-11.,13.4,-4.,13.4),(4.,13.4,11.,13.4),
                 (-13.4,-10.,-13.4,-3.),(-13.4,3.,-13.4,10.),(13.4,-10.,13.4,-3.),(13.4,3.,13.4,10.)]
-            } else {&[(-2.5,-15.2,2.5,-15.2),(-2.5,3.2,2.5,3.2),(-30.5,30.5,-26.5,30.5)]};
+            } else {&[(-3.,-15.2,3.,-15.2),(-3.,3.2,3.,3.2),(-30.5,30.5,-26.5,30.5)]};
             let flat=|team:u8,lx:f32,lz:f32| {let p=to_world(team,lx,0.,lz);Vec2::new(p.x,p.z)};
             let openings:Vec<(Vec2,Vec2)>=[0u8,1].iter().flat_map(|&t|local.iter().map(move |&(x0,z0,x1,z1)|(t,x0,z0,x1,z1)))
                 .map(|(t,x0,z0,x1,z1)|(flat(t,x0,z0),flat(t,x1,z1))).collect();
@@ -4055,20 +4346,21 @@ mod line_of_sight_tests {
         let map=MapId::DesertOfDeathClone;
         let pack=crate::map_pack::on(map).unwrap();
         let info=crate::terrain::info(map);
-        let stair=|z:f32| -2.0+7.0*((z+14.0)/12.5).clamp(0.,1.);           // hall 5 at z -1.5, cistern -2 at z -14
-        let tramp=|z:f32| -2.0+1.9*((z-22.5)/4.0).clamp(0.,1.);           // tower room -2 to landing -0.1
-        let sramp=|z:f32| 5.0*((19.0-z)/10.0).clamp(0.,1.);               // storehouse ground 0 to upper 5
+        let stair=|z:f32| -4.0+9.0*((z+14.2)/16.2).clamp(0.,1.);           // hall 5 at z 2, cistern -4 at z -14.2
+        let tramp=|z:f32| -4.0+3.9*((z-18.5)/8.0).clamp(0.,1.);           // tower room -4 to landing -0.1
+        let sramp=|z:f32| 5.0*((z-4.8)/10.0).clamp(0.,1.);                // storehouse hall 0 to mezzanine 5
         let routes:Vec<(&str,Vec<(f32,f32,f32)>)>=vec![
-            ("hall to tower exit",vec![(4.,5.,-1.),(11.25,5.,-0.6),(11.25,stair(-1.5),-1.5),(11.25,stair(-13.9),-13.9),
-                (11.25,-2.,-15.2),(5.,-2.,-15.2),(-3.,-2.,-15.2),(-10.5,-2.,-15.2),(-11.,-2.,-10.),(-11.,-2.,5.),(-11.1,-2.,6.6),
-                (-12.,-2.,8.),(-12.,-2.,19.),(-20.,-2.,19.),(-26.,-2.,19.),(-29.2,-2.,21.5),(-29.2,tramp(22.6),22.6),
+            ("hall to tower exit",vec![(4.,5.,2.6),(11.25,5.,2.6),(11.25,stair(1.9),1.9),(11.25,stair(-14.1),-14.1),
+                (11.25,-4.,-15.4),(8.2,-4.,-15.4),(-3.,-4.,-15.4),(-10.5,-4.,-15.4),(-11.,-4.,-10.),(-11.,-4.,5.),(-11.1,-4.,6.6),
+                (-12.,-4.,8.),(-12.,-4.,19.),(-20.,-4.,19.),(-26.,-4.,17.5),(-29.2,-4.,17.5),(-29.2,tramp(18.6),18.6),
                 (-29.2,tramp(26.4),26.4),(-28.5,-0.1,28.5),(-28.5,-0.1,32.3),(-23.,-0.1,32.3),(-20.,-0.1,32.3),
                 (-18.,-0.1,36.)]),
-            ("bridge into the storehouse and down",vec![(15.,5.,15.5),(20.6,5.,15.5),(24.6,5.,15.5),(28.4,5.,15.5),
-                (29.9,5.,15.5),(29.9,5.,20.2),(33.,5.,20.2),(38.,5.,12.),(40.,5.,8.2),(45.3,5.,8.2),(45.3,sramp(9.1),9.1),
-                (45.3,sramp(18.9),18.9),(45.3,0.,20.3),(43.,0.,20.3),(38.,0.,20.),(38.,0.,22.5),(38.,-0.1,25.)]),
-            ("storehouse ground west door",vec![(25.,-0.1,10.),(28.4,0.,10.),(29.9,0.,10.),(29.9,0.,14.8),(33.,0.,14.8),
-                (33.,0.,5.),(40.,0.,5.)]),
+            ("bridge onto the mezzanine and down",vec![(15.,5.,15.5),(20.6,5.,15.5),(24.6,5.,15.5),(28.4,5.,15.5),
+                (29.9,5.,15.5),(29.9,5.,20.6),(33.,5.,20.6),(35.7,5.,18.),(35.7,sramp(14.7),14.7),(35.7,sramp(4.9),4.9),
+                (35.7,0.,3.6),(40.,0.,3.6),(40.,0.,14.5),(46.4,0.,14.5),(46.4,0.,20.3),(41.5,0.,20.3),(41.5,0.,22.5),
+                (41.5,-0.1,25.)]),
+            ("storehouse ground west door",vec![(25.,-0.1,7.5),(28.4,0.,7.5),(29.9,0.,7.5),(29.9,0.,13.),(33.,0.,13.),
+                (33.,0.,16.),(38.,0.,16.),(40.,0.,5.)]),
         ];
         for team in [0u8,1] {
             let world=|(x,y,z):(f32,f32,f32)| if team==0 {
@@ -4092,11 +4384,12 @@ mod line_of_sight_tests {
         let map=MapId::StonehengeClone;
         let pack=crate::map_pack::on(map).unwrap();
         let info=crate::terrain::info(map);
-        let stair=|z:f32| -6.*((z+9.)/10.7).clamp(0.,1.);
-        let east=|x:f32| -6.+9.*((x-17.)/24.).clamp(0.,1.);
+        // Vault floor -7.5 (6.5 m under the hall slab); stair head z -9.5, foot z 4.5.
+        let stair=|z:f32| -7.5*((z+9.5)/14.).clamp(0.,1.);
+        let east=|x:f32| -7.5+10.5*((x-17.)/28.).clamp(0.,1.);
         let south=|z:f32| 3.+5.*((-20.-z)/16.).clamp(0.,1.);
-        let route=[(13.2,0.,-13.),(13.2,0.,-9.),(13.2,stair(-5.),-5.),(13.2,stair(1.4),1.4),(13.2,-6.,2.8),(13.2,-6.,8.),
-            (15.6,-6.,8.),(17.,-6.,8.),(29.,east(29.),8.),(41.,3.,8.),(60.,3.,8.),(84.,3.,8.),(84.,3.,4.),(84.,3.,-20.),
+        let route=[(13.2,0.,-13.),(13.2,0.,-9.5),(13.2,stair(-5.),-5.),(13.2,stair(1.4),1.4),(13.2,stair(3.6),3.6),(13.2,-7.5,5.6),
+            (13.2,-7.5,8.),(15.6,-7.5,8.),(17.,-7.5,8.),(29.,east(29.),8.),(45.,3.,8.),(60.,3.,8.),(84.,3.,8.),(84.,3.,4.),(84.,3.,-20.),
             (84.,south(-28.),-28.),(84.,8.,-36.),(82.8,8.,-38.),(82.8,8.,-42.5),(86.3,8.,-42.5),(86.3,8.,-41.3),
             (89.,8.,-41.3),(94.,8.,-46.)];
         for team in [0u8,1] {
@@ -4863,11 +5156,214 @@ mod capture_and_hold_tests {
         assert!(m.world.points.iter().all(|p| !p.active), "no CTF-active point on Tower Complex");
     }
 
+    /// Frostline's centre is the beacon: a Capture & Hold point that also runs
+    /// in CTF, with a drain field. The West and East Cols are Capture & Hold
+    /// only and mirror each other through the map centre.
     #[test]
-    fn shipped_packs_are_unchanged_and_declare_no_points() {
-        for map in [MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone] {
-            let pack = crate::map_pack::on(map).expect("embedded");
-            assert!(pack.manifest.control_points.is_empty(), "{map:?}");
+    fn frostline_beacon_runs_in_ctf_and_drains_only_the_holders_enemies() {
+        let map = MapId::SnowblindClone;
+        let pack = crate::map_pack::on(map).expect("embedded");
+        let points = &pack.manifest.control_points;
+        assert_eq!(points.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Beacon", "West Col", "East Col"]);
+        assert!(points[0].ctf_active && points[0].drain.is_some());
+        assert!(points[1..].iter().all(|p| !p.ctf_active && p.drain.is_none()));
+        let (w, e) = (points[1].pos, points[2].pos);
+        assert_eq!((w[0] + e[0], w[2] + e[2]), (2048.0, 2048.0));
+        for p in points {
+            let floor = crate::terrain::support_on(map, Vec3::from_array(p.pos) + Vec3::new(7.0, 1.2, 7.0)).0;
+            assert!((floor - p.pos[1]).abs() < 2.1, "{} ring floor {floor} vs {:?}", p.name, p.pos);
+        }
+        let mut m = Match::new(map);
+        let a = m.join(1, "Alpha").unwrap();
+        let b = m.join(2, "Bravo").unwrap();
+        for _ in 0..240 { m.step(&[]); if m.phase == Phase::Playing { break; } }
+        assert_eq!(m.phase, Phase::Playing);
+        assert_eq!(m.world.mode, SupportedMode::Ctf);
+        assert!(m.world.points[0].active && m.world.points[1..].iter().all(|p| !p.active), "only the beacon runs in CTF");
+        m.world.players[b].pos = Vec3::new(100.0, 500.0, 100.0);
+        let beacon = m.world.points[0].pos;
+        hold(&mut m, a, beacon, 9.0);
+        assert!(m.world.points[0].owner.is_none(), "not held after 9 s");
+        hold(&mut m, a, beacon, 1.2);
+        let owner = m.world.points[0].owner.expect("the beacon captures in about 10 s");
+        assert_eq!(owner, m.world.players[a].team.idx() as u8);
+        // Drain: the holder's enemies inside 60 m lose energy, the holders do not.
+        let near = beacon + Vec3::new(40.0, 30.0, 0.0);
+        let enemy = 1 - owner;
+        assert_eq!(crate::control::drain_at(&m.world.points, enemy, near), crate::control::DEFAULT_DRAIN_RATE);
+        assert_eq!(crate::control::drain_at(&m.world.points, owner, near), 0.0);
+        assert_eq!(crate::control::drain_at(&m.world.points, enemy, beacon + Vec3::new(70.0, 0.0, 0.0)), 0.0);
+        m.world.set_mode(SupportedMode::CaptureAndHold);
+        assert!(m.world.points.iter().all(|p| p.active), "all three run in Capture & Hold");
+    }
+
+    /// Dustreach: the Sun Gate is the centre point (its arch spans the flag
+    /// lane, so the ring has marker posts rather than a pylon), and the West
+    /// and East Wadi towers mirror each other through the map centre. None
+    /// runs in CTF.
+    #[test]
+    fn dustreach_holds_the_sun_gate_and_two_mirrored_wadi_towers() {
+        let map = MapId::DesertOfDeathClone;
+        let pack = crate::map_pack::on(map).expect("embedded");
+        let points = &pack.manifest.control_points;
+        assert_eq!(points.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Sun Gate", "West Wadi", "East Wadi"]);
+        assert!(points.iter().all(|p| !p.ctf_active && p.drain.is_none() && p.radius == 12.0));
+        assert_eq!((points[0].pos[0], points[0].pos[2]), (1024.0, 1024.0));
+        let (w, e) = (points[1].pos, points[2].pos);
+        assert_eq!((w[0] + e[0], w[2] + e[2]), (2048.0, 2048.0));
+        for p in points {
+            let floor = crate::terrain::support_on(map, Vec3::from_array(p.pos) + Vec3::new(0.0, 1.2, 8.0)).0;
+            assert!((floor - p.pos[1]).abs() < 2.1, "{} ring floor {floor} vs {:?}", p.name, p.pos);
+        }
+        let mut m = Match::new(map);
+        m.world.set_mode(SupportedMode::CaptureAndHold);
+        let a = m.join(1, "Alpha").unwrap();
+        let b = m.join(2, "Bravo").unwrap();
+        for _ in 0..240 { m.step(&[]); if m.phase == Phase::Playing { break; } }
+        assert_eq!(m.phase, Phase::Playing);
+        assert!(m.world.points.iter().all(|p| p.active));
+        m.world.players[b].pos = Vec3::new(100.0, 500.0, 100.0);
+        let gate = m.world.points[0].pos;
+        hold(&mut m, a, gate, 10.2);
+        assert!(m.world.points[0].owner.is_some(), "the Sun Gate ring captures under the arch");
+        m.world.set_mode(SupportedMode::Ctf);
+        assert!(m.world.points.iter().all(|p| !p.active), "no CTF-active point on Dustreach");
+    }
+
+    #[test]
+    /// Cairnhold: the Ring's dais is the centre point (the shared tower stands
+    /// where the old brazier stone was, and the 12 m capture ring is the
+    /// dais), and West and East Cairn mirror each other through the map
+    /// centre on levelled plateaus. None runs in CTF.
+    fn cairnhold_holds_the_ring_and_two_mirrored_cairns() {
+        let map = MapId::StonehengeClone;
+        let pack = crate::map_pack::on(map).expect("embedded");
+        let points = &pack.manifest.control_points;
+        assert_eq!(points.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["The Ring", "West Cairn", "East Cairn"]);
+        assert!(points.iter().all(|p| !p.ctf_active && p.drain.is_none() && p.radius == 12.0));
+        assert_eq!((points[0].pos[0], points[0].pos[2]), (1024.0, 1024.0));
+        let (w, e) = (points[1].pos, points[2].pos);
+        assert_eq!((w[0] + e[0], w[2] + e[2]), (2048.0, 2048.0));
+        for p in points {
+            // Standing ground 8 m out from the pylon, inside the ring.
+            let floor = crate::terrain::support_on(map, Vec3::from_array(p.pos) + Vec3::new(0.0, 1.2, 8.0)).0;
+            assert!((floor - p.pos[1]).abs() < 1.0, "{} ring floor {floor} vs {:?}", p.name, p.pos);
+        }
+        let mut m = Match::new(map);
+        m.world.set_mode(SupportedMode::CaptureAndHold);
+        let a = m.join(1, "Alpha").unwrap();
+        let b = m.join(2, "Bravo").unwrap();
+        for _ in 0..240 { m.step(&[]); if m.phase == Phase::Playing { break; } }
+        assert_eq!(m.phase, Phase::Playing);
+        assert!(m.world.points.iter().all(|p| p.active));
+        m.world.players[b].pos = Vec3::new(100.0, 500.0, 100.0);
+        let ring = m.world.points[0].pos;
+        hold(&mut m, a, ring, 10.2);
+        assert!(m.world.points[0].owner.is_some(), "the Ring's dais captures");
+        let west = m.world.points[1].pos;
+        hold(&mut m, a, west, 10.2);
+        assert!(m.world.points[1].owner.is_some(), "West Cairn captures on its plateau");
+        m.world.set_mode(SupportedMode::Ctf);
+        assert!(m.world.points.iter().all(|p| !p.active), "no CTF-active point on Cairnhold");
+    }
+}
+
+#[cfg(test)]
+mod bot_soak_metrics {
+    use super::*;
+
+    pub(crate) const MAPS: [MapId; 5] = [MapId::Raindance, MapId::BroadsideClone, MapId::StonehengeClone,
+        MapId::SnowblindClone, MapId::DesertOfDeathClone];
+
+    /// Bot-only match: (seconds until each team first touches the enemy flag,
+    /// sight encounters per minute, kills per minute, [mean, worst] tick cost
+    /// in microseconds).
+    pub(crate) fn soak(map: MapId, seconds: f32) -> ([Option<f32>; 2], f32, f32, [f32; 2]) {
+        crate::bot_nav::graph(map);
+        let mut w = World::new();
+        w.set_map(map);
+        w.start_match(true);
+        w.players[0].is_bot = true;
+        // Offline fills five bots; add two so the cost covers seven bots
+        // beside the player's slot (which a bot also drives here).
+        for team in [Team::Ember, Team::Glacier] {
+            let (pos, yaw) = w.players.iter().find(|p| p.team == team).map(|p| (p.pos, p.yaw)).unwrap();
+            w.players.push(make_player(team, true, pos + Vec3::new(2.0, 0.0, 0.0), yaw, BotRole::Offense));
+            let i = w.players.len() - 1;
+            w.assign_personality(i);
+        }
+        let mut reach = [None; 2];
+        let mut encounters = 0u32;
+        let mut had: Vec<bool> = vec![false; w.players.len()];
+        let steps = (seconds / STEP) as u32;
+        let (mut total, mut worst) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
+        for s in 0..steps {
+            let clock = std::time::Instant::now();
+            w.tick(STEP);
+            let spent = clock.elapsed();
+            total += spent;
+            worst = worst.max(spent);
+            let t = s as f32 * STEP;
+            for (i, p) in w.players.iter().enumerate() {
+                let now = p.bot_target.is_some();
+                if now && !had[i] { encounters += 1; }
+                had[i] = now;
+                let team = p.team.idx();
+                if reach[team].is_none() && p.alive
+                    && (p.carrying.is_some() || p.pos.distance(w.flags[1 - team].home) < 6.0) {
+                    reach[team] = Some(t);
+                }
+            }
+        }
+        let kills: u32 = w.players.iter().map(|p| p.frags).sum();
+        let min = seconds / 60.0;
+        let cost = [total.as_secs_f32() * 1e6 / steps as f32, worst.as_secs_f32() * 1e6];
+        (reach, encounters as f32 / min, kills as f32 / min, cost)
+    }
+
+    /// A lone bot from each team's spawn, on every map: seconds until it
+    /// reaches (touches or takes) the enemy flag, or `None`.
+    pub(crate) fn lone_run(map: MapId, ember: bool, limit: f32) -> Option<f32> {
+        crate::bot_nav::graph(map);
+        let mut w = World::new();
+        w.set_map(map);
+        w.start_match(ember);
+        let team = w.players[0].team;
+        let mut bot = make_player(team, true, w.players[0].pos, w.players[0].yaw, BotRole::Offense);
+        bot.bot_profile = crate::bot_nav::ARCHETYPES[1];
+        w.players = vec![bot];
+        let target = w.flags[team.other().idx()].home;
+        for s in 0..(limit / STEP) as u32 {
+            // Navigation, not survival: base turrets would otherwise end the run.
+            w.players[0].health = 100.0;
+            w.tick(STEP);
+            let p = &w.players[0];
+            if p.carrying.is_some() || (p.alive && p.pos.distance(target) < 6.0) { return Some(s as f32 * STEP); }
+        }
+        None
+    }
+
+    #[test]
+    fn a_lone_bot_reaches_the_enemy_flag_on_every_map() {
+        let mut missed = Vec::new();
+        for map in MAPS {
+            for ember in [true, false] {
+                let t = lone_run(map, ember, 240.0);
+                println!("{map:?} {}: {t:?}", if ember { "ember" } else { "glacier" });
+                if t.is_none() { missed.push((map, ember)); }
+            }
+        }
+        assert!(missed.is_empty(), "never reached the enemy flag: {missed:?}");
+    }
+
+    #[test]
+    #[ignore = "bot navigation soak; run with --release -- --ignored --nocapture"]
+    fn bot_navigation_soak_report() {
+        for map in MAPS {
+            let (reach, enc, kills, cost) = soak(map, 180.0);
+            println!("{map:?}: flag reach ember {:?} glacier {:?}, encounters/min {enc:.1}, kills/min {kills:.2}, tick {:.0} us mean {:.0} us worst ({} players)",
+                reach[0].map(|t| t.round()), reach[1].map(|t| t.round()), cost[0], cost[1], 8);
+            // (seven bots plus the player's slot, also bot-driven)
         }
     }
 }

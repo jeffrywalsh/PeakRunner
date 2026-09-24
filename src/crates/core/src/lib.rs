@@ -1,5 +1,6 @@
 //! Shared simulation: no graphics, audio, window system, or networking dependencies.
 pub mod sim;
+pub mod bot_nav;
 pub mod terrain;
 pub mod grass;
 pub mod map_pack;

@@ -166,17 +166,28 @@ mod tests {
     #[test]
     fn uniform_layout_matches_the_shader_and_defaults_keep_the_old_values() {
         use peakrunner_core::terrain::MapId;
-        // Cairnhold (key stonehenge-clone) sets no look fields.
-        let pack=super::map_pack::on(MapId::StonehengeClone).unwrap();
         let frame=crate::drawlist::build_frame(&crate::sim::World::new(),1.6,0.016);
-        let data=super::uniform_data(pack,&frame);
-        assert_eq!(data.len(),super::UNIFORM_FLOATS);
-        // Sun and the historical grey fog sit where the shader always read them.
-        assert_eq!(&data[36..39],&peakrunner_core::look::DEFAULT_SUN);
-        assert_eq!(&data[40..43],&pack.fog_color());
-        // No look fields: cubemap sky, unit exposure, no height fog.
-        // Exposure 1, cubemap sky mode, sun disc on, height fog off.
-        assert_eq!(data[59],1.0);assert_eq!(data[63],0.0);assert_eq!(data[67],1.0);assert_eq!(data[80],0.0);
+        let maps=[MapId::Raindance,MapId::BroadsideClone,MapId::StonehengeClone,MapId::SnowblindClone,MapId::DesertOfDeathClone];
+        for id in maps {
+            let pack=super::map_pack::on(id).unwrap();
+            let data=super::uniform_data(pack,&frame);
+            assert_eq!(data.len(),super::UNIFORM_FLOATS);
+            // Sun and fog sit where the shader always read them.
+            assert_eq!(&data[36..39],&pack.manifest.look.resolved().sun_direction,"{id:?}");
+            assert_eq!(&data[40..43],&pack.fog_color(),"{id:?}");
+        }
+        // A pack with no look fields keeps the old values: the historical sun,
+        // exposure 1, cubemap sky mode, sun disc on, height fog off. Shipped
+        // maps may all set a look, so check any that does not, if one exists.
+        if let Some(pack)=maps.iter().map(|&id|super::map_pack::on(id).unwrap())
+            .find(|p|p.manifest.look==peakrunner_core::look::Look::default()) {
+            let data=super::uniform_data(pack,&frame);
+            assert_eq!(&data[36..39],&peakrunner_core::look::DEFAULT_SUN);
+            assert_eq!(data[59],1.0);assert_eq!(data[63],0.0);assert_eq!(data[67],1.0);assert_eq!(data[80],0.0);
+        }
+        let empty=peakrunner_core::look::Look::default().resolved();
+        assert_eq!(empty.sun_direction,peakrunner_core::look::DEFAULT_SUN);
+        assert_eq!(empty.exposure,1.0);assert!(empty.sky.is_none());
         let wgsl=include_str!("map.wgsl");
         assert!(wgsl.contains("hfog: vec4<f32>,"),"map.wgsl uniform must end with the look block");
     }
