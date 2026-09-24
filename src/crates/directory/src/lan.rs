@@ -67,7 +67,7 @@ fn handle(request: DirRequest, peer: IpAddr, listings: &mut HashMap<String, List
             }
             if host.parse::<IpAddr>().ok() != Some(peer) || name.is_empty() || name.len() > 64
                 || name.chars().any(char::is_control) || port == 0 || players > max_players
-                || !(2..=8).contains(&max_players) || !["Valley", "Raindance"].contains(&map.as_str()) {
+                || !(2..=8).contains(&max_players) || !peakrunner_discovery::valid_map_label(&map) {
                 return error("invalid advert; advertised IP must match registering peer");
             }
             let mut random = [0u8; 32];
@@ -109,5 +109,23 @@ mod tests {
         assert!(matches!(handle(DirRequest::Heartbeat { id: id.clone(), token: token.clone(), players: 2 }, ip, &mut state), DirResponse::Ok));
         assert!(matches!(handle(DirRequest::Unregister { id, token }, ip, &mut state), DirResponse::Ok));
         assert!(state.is_empty());
+    }
+    #[test]
+    fn every_current_and_legacy_map_can_be_advertised() {
+        let ip = "127.0.0.1".parse().unwrap();
+        let mut state = HashMap::new();
+        let reg = |map: &str| DirRequest::Register { name: "Test".into(), host: "127.0.0.1".into(),
+            port: 7781, players: 0, max_players: 8, map: map.into() };
+        for map in ["raindance", "broadside-clone", "stonehenge-clone", "snowblind-clone",
+            "desert-of-death-clone", "Old Holler", "Tower Complex", "Cairnhold", "Frostline",
+            "Dustreach", "Raindance", "Valley", "Skybreak Bastions", "skybreak-bastions"] {
+            state.clear();
+            assert!(matches!(handle(reg(map), ip, &mut state), DirResponse::Registered { .. }), "{map}");
+            let DirResponse::Servers { servers } = handle(DirRequest::List, ip, &mut state) else { panic!() };
+            assert_eq!(servers[0].map, map);
+        }
+        for map in ["", "<script>x</script>", "a\u{202e}b", "x\ny", &"m".repeat(40)] {
+            assert!(matches!(handle(reg(map), ip, &mut state), DirResponse::Error { .. }), "{map:?}");
+        }
     }
 }
