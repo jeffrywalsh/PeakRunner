@@ -11,6 +11,8 @@ use crate::sim::{
 pub const MAX_EMIT_DRAWS: usize = 1200;
 /// Alpha-blended smoke/dust/scorch draws per frame; the farthest are dropped.
 pub const MAX_SMOKE_DRAWS: usize = 220;
+/// Players closer than this get the full-detail articulated model.
+pub const PLAYER_DETAIL_RANGE: f32 = 80.0;
 use crate::terrain::{self, MapId};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -136,6 +138,8 @@ pub fn build_frame_with(world: &World, aspect: f32, dt: f32, fx: &mut Effects) -
     }
 
     for f in &world.flags {
+        // A carried flag rides on its carrier's back (player_model).
+        if f.carrier.is_some() { continue; }
         let color = if f.team == Team::Ember {
             Vec3::new(0.89, 0.29, 0.20)
         } else {
@@ -191,34 +195,15 @@ pub fn build_frame_with(world: &World, aspect: f32, dt: f32, fx: &mut Effects) -
     }
 
     for (i, p) in world.players.iter().enumerate() {
-        if !p.alive {
-            continue;
-        }
         if i == world.player_id && world.state != MatchState::Flyby {
-            if p.jetting {
+            if p.alive && p.jetting {
                 push_jet(&mut emit, p.pos, p.team);
             }
             continue;
         }
-        push_runner(&mut lit, p, world.time, eye.distance_squared(p.pos) < 75.0 * 75.0);
-        if p.carrying.is_some() {
-            let c = if p.team == Team::Ember {
-                Vec3::new(0.24, 0.78, 0.88)
-            } else {
-                Vec3::new(0.89, 0.29, 0.20)
-            };
-            lit.push(LitDraw {
-                mesh: MeshId::Cube,
-                model: Mat4::from_translation(p.pos + Vec3::Y * 2.25)
-                    * Mat4::from_scale(Vec3::new(0.35, 0.7, 0.08)),
-                color: c,
-                emit: 0.4,
-                mode: 0.0,
-            });
-        }
-        if p.jetting {
-            push_jet(&mut emit, p.pos, p.team);
-        }
+        // Articulated armor; dead players collapse briefly, then vanish.
+        crate::player_model::push_player(&mut lit, &mut emit, p, world.time,
+            eye.distance_squared(p.pos) < PLAYER_DETAIL_RANGE * PLAYER_DETAIL_RANGE);
     }
 
     for d in &world.discs {
@@ -660,134 +645,6 @@ fn disc_launcher(base: Mat4, time: f32, cooldown: f32, shot_age: f32, ready_flas
     draws
 }
 
-/// Original modular armor. Local -Z is forward, +Y is up; render-only posing
-/// never changes the authoritative capsule, aim or movement.
-fn push_runner(lit: &mut Vec<LitDraw>, p: &crate::sim::Player, time: f32, detailed: bool) {
-    let team = if p.team == Team::Ember { Vec3::new(0.74,0.20,0.12) }
-        else { Vec3::new(0.12,0.51,0.65) };
-    let alloy = Vec3::new(0.48,0.55,0.61);
-    let suit = Vec3::new(0.065,0.085,0.11);
-    let trim = Vec3::new(0.18,0.23,0.29);
-    let light = Vec3::new(0.32,0.88,1.0);
-    let base = Mat4::from_translation(p.pos) * Mat4::from_rotation_y(p.yaw);
-    let speed = Vec3::new(p.vel.x,0.,p.vel.z).length();
-    let stride = if p.on_ground && !p.skiing {
-        (time * 9.0 + p.net_id as f32 * 0.7).sin() * (speed / 8.).min(1.) * 0.23
-    } else { 0.0 };
-    let crouch = if p.skiing { 0.13 } else if p.jetting { 0.06 } else { 0.0 };
-    let torso = base * Mat4::from_translation(Vec3::new(0.,-crouch,0.))
-        * Mat4::from_rotation_x(if p.skiing { -0.09 } else { 0.0 });
-    let mut part = |root: Mat4, pos: Vec3, size: Vec3, color: Vec3, glow: f32| {
-        lit.push(LitDraw { mesh:MeshId::Armor,
-            model:root * Mat4::from_translation(pos) * Mat4::from_scale(size),
-            color, emit:glow, mode:0.0 });
-    };
-    // Narrow waist, broad breastplate and a sealed, recessed visor.
-    part(torso,Vec3::new(0.,0.92,0.),Vec3::new(0.38,0.31,0.29),suit,0.);
-    part(torso,Vec3::new(0.,1.22,0.),Vec3::new(0.60,0.49,0.35),team,0.);
-    part(torso,Vec3::new(0.,1.63,0.),Vec3::new(0.37,0.37,0.37),alloy,0.);
-    part(torso,Vec3::new(0.,1.65,-0.189),Vec3::new(0.30,0.115,0.04),suit,0.);
-    part(torso,Vec3::new(0.,1.66,-0.235),Vec3::new(0.25,0.044,0.022),light,0.65);
-    if !detailed {
-        for side in [-1.,1.] {
-            part(base,Vec3::new(side*0.21,0.42,0.),Vec3::new(0.23,0.76,0.27),alloy,0.);
-            part(torso,Vec3::new(side*0.39,1.18,0.),Vec3::new(0.25,0.48,0.32),team,0.);
-        }
-        part(torso,Vec3::new(0.,1.17,0.30),Vec3::new(0.62,0.53,0.28),trim,0.);
-        return;
-    }
-    for side in [-1.,1.] {
-        // Connected two-piece legs with a planted sole, or a tucked flight pose.
-        let hip=Vec3::new(side*0.19,0.85-crouch,0.);
-        let knee=Vec3::new(side*0.21,0.46-crouch*0.5,-0.06+side*stride);
-        let ankle=Vec3::new(side*0.23,0.14,if p.jetting {0.13} else {side*stride*0.65});
-        for (a,b,width,color) in [(hip,knee,0.235,team),(knee,ankle,0.20,alloy)] {
-            let axis=b-a;
-            let root=base * Mat4::from_translation((a+b)*0.5)
-                * Mat4::from_quat(glam::Quat::from_rotation_arc(Vec3::Y,axis.normalize()));
-            part(root,Vec3::ZERO,Vec3::new(width,axis.length()+0.04,0.23),color,0.);
-        }
-        part(base,ankle+Vec3::new(0.,-0.07,-0.06),Vec3::new(0.25,0.14,0.39),trim,0.);
-        part(torso,Vec3::new(side*0.39,1.31,0.),Vec3::new(0.27,0.27,0.37),team,0.);
-        part(torso,Vec3::new(side*0.40,1.07,-0.035),Vec3::new(0.19,0.30,0.21),trim,0.);
-        // Forearms carried forward in a braced weapon stance.
-        part(torso * Mat4::from_rotation_x(-0.65),Vec3::new(side*0.36,0.89,0.42),
-            Vec3::new(0.20,0.29,0.23),alloy,0.);
-        part(torso,Vec3::new(side*0.21,1.17,0.30),Vec3::new(0.24,0.53,0.28),trim,0.);
-        if detailed {
-            part(torso,Vec3::new(side*0.21,1.40,0.32),Vec3::new(0.18,0.11,0.25),alloy,0.);
-            part(torso,Vec3::new(side*0.21,0.91,0.31),Vec3::new(0.15,0.065,0.19),
-                light,if p.jetting {1.6} else {0.15});
-            part(torso,Vec3::new(side*0.15,1.28,-0.185),Vec3::new(0.23,0.22,0.075),alloy,0.);
-            part(torso,Vec3::new(side*0.40,1.35,-0.196),Vec3::new(0.14,0.045,0.025),alloy,0.);
-            part(base,knee+Vec3::new(0.,0.,-0.125),Vec3::new(0.19,0.16,0.06),trim,0.);
-        }
-    }
-    if detailed {
-        part(torso,Vec3::new(0.,1.45,0.),Vec3::new(0.42,0.085,0.40),trim,0.);
-        part(torso,Vec3::new(0.,1.20,-0.218),Vec3::new(0.065,0.09,0.02),light,0.5);
-        part(torso,Vec3::new(0.,0.91,-0.17),Vec3::new(0.35,0.08,0.065),alloy,0.);
-        part(torso,Vec3::new(0.,1.54,-0.19),Vec3::new(0.22,0.075,0.06),trim,0.);
-    }
-    push_held_weapon(lit, torso, p.weapon, team);
-}
-
-/// Third-person weapons matching each first-person silhouette.
-fn push_held_weapon(lit: &mut Vec<LitDraw>, torso: Mat4, weapon: u8, team: Vec3) {
-    let grip = torso * Mat4::from_translation(Vec3::new(0.29, 0.98, -0.40));
-    let mut put = |mesh, model: Mat4, color: Vec3, glow: f32| lit.push(LitDraw { mesh, model: grip * model, color, emit: glow, mode: 0.0 });
-    let box_at = |at: Vec3, size: Vec3| Mat4::from_translation(at) * Mat4::from_scale(size);
-    let gun = Vec3::new(0.24, 0.27, 0.30);
-    match weapon {
-        0 => {
-            put(MeshId::Bevel, box_at(Vec3::new(0.0, 0.0, 0.02), Vec3::new(0.17, 0.15, 0.46)), Vec3::new(0.62, 0.66, 0.70), 0.0);
-            for side in [-1.0, 1.0] {
-                put(MeshId::Cube, box_at(Vec3::new(side * 0.066, 0.06, -0.08), Vec3::new(0.035, 0.05, 0.58)), Vec3::new(0.84, 0.87, 0.9), 0.0);
-            }
-            put(MeshId::Cube, box_at(Vec3::new(0.0, 0.09, -0.12), Vec3::new(0.03, 0.012, 0.36)), Vec3::new(0.05, 0.74, 0.95), 0.9);
-        }
-        1 => {
-            put(MeshId::Bevel, box_at(Vec3::new(0.0, 0.0, 0.08), Vec3::new(0.16, 0.15, 0.30)), gun, 0.0);
-            put(MeshId::Disc, along_z(Vec3::new(0.0, 0.01, -0.27), 0.075, 0.46), Vec3::new(0.40, 0.43, 0.46), 0.0);
-            put(MeshId::Disc, along_z(Vec3::new(0.0, 0.01, -0.49), 0.09, 0.035), Vec3::new(0.07, 0.08, 0.1), 0.0);
-            put(MeshId::Disc, Mat4::from_translation(Vec3::new(-0.11, -0.04, 0.06)) * Mat4::from_rotation_z(std::f32::consts::FRAC_PI_2)
-                * Mat4::from_scale(Vec3::new(0.09, 0.08, 0.09)), Vec3::new(0.22, 0.25, 0.19), 0.0);
-            put(MeshId::Cube, box_at(Vec3::new(0.082, 0.0, 0.08), Vec3::new(0.006, 0.04, 0.24)), team, 0.35);
-        }
-        _ => {
-            put(MeshId::Bevel, box_at(Vec3::new(0.0, 0.0, 0.08), Vec3::new(0.17, 0.16, 0.30)), gun, 0.0);
-            put(MeshId::Disc, along_z(Vec3::new(0.0, 0.02, -0.28), 0.085, 0.34), gun, 0.0);
-            put(MeshId::Disc, along_z(Vec3::new(0.0, -0.03, -0.07), 0.12, 0.15), Vec3::new(0.30, 0.34, 0.19), 0.0);
-            put(MeshId::Cube, box_at(Vec3::new(0.0, 0.09, -0.07), Vec3::new(0.03, 0.02, 0.03)), Vec3::new(1.0, 0.62, 0.18), 0.8);
-        }
-    }
-}
-
-#[cfg(test)]
-mod character_tests {
-    use super::*;
-    #[test]
-    fn armor_poses_are_finite_and_distant_models_are_bounded() {
-        let mut world=World::new(); world.start_match(true);
-        let mut p=world.players[0].clone();
-        p.pos=Vec3::ZERO;
-        for (ski,jet,ground) in [(false,false,true),(true,false,true),(false,true,false)] {
-            p.skiing=ski; p.jetting=jet; p.on_ground=ground;
-            p.vel=Vec3::new(9.,0.,3.);
-            for time in [0.,0.2,0.8] {
-                let mut near=Vec::new(); let mut far=Vec::new();
-                push_runner(&mut near,&p,time,true);
-                push_runner(&mut far,&p,time,false);
-                assert!(near.len()<=40 && far.len()<=10 && far.len()<near.len());
-                for draw in near.iter().chain(&far) {
-                    assert!(draw.model.is_finite() && draw.model.determinant()>0.);
-                    assert!(draw.color.is_finite());
-                }
-            }
-        }
-    }
-}
-
 fn push_jet(emit: &mut Vec<EmitDraw>, pos: Vec3, team: Team) {
     let c = if team == Team::Ember {
         [1.0, 0.42, 0.12, 0.55]
@@ -859,7 +716,7 @@ fn team_accent(team: Team) -> Vec3 {
 
 /// Per-weapon recoil read from the time since the shot: (push back, pitch
 /// up, yaw jitter). Stateless, so snapshot replays and captures are exact.
-fn recoil(weapon: u8, age: f32, time: f32) -> (f32, f32, f32) {
+pub(crate) fn recoil(weapon: u8, age: f32, time: f32) -> (f32, f32, f32) {
     match weapon {
         // Heavy shove: fast back, then a lagging pitch-up that settles.
         0 => { let k = (-age * 9.0).exp(); let rise = age * (-age * 7.0).exp() * 5.5; (0.10 * k, 0.14 * rise + 0.04 * k, 0.0) }
@@ -892,18 +749,58 @@ fn viewmodel_draws(world: &World, anim: &ViewAnim) -> Vec<LitDraw> {
         * Mat4::from_rotation_y(yaw + jitter)
         * Mat4::from_rotation_x(pitch + rise - drop * 0.45);
     let team = team_accent(p.team);
-    match shown {
+    let (frame, mut draws) = match shown {
         0 => {
             // Pivot around the muzzle, not the grip: move the rear toward the
             // right edge without moving the launch point or changing ballistics.
             let angled = base * Mat4::from_translation(VM_MUZZLE_DISC)
                 * Mat4::from_rotation_y(0.12)
                 * Mat4::from_translation(-VM_MUZZLE_DISC);
-            disc_launcher(angled, world.time, cooldown, shot_age, anim.ready_flash, team)
+            (angled, disc_launcher(angled, world.time, cooldown, shot_age, anim.ready_flash, team))
         }
-        1 => chaingun(base, anim, shot_age, team),
-        _ => grenade_launcher(base, anim, cooldown, shot_age, team),
-    }
+        1 => (base, chaingun(base, anim, shot_age, team)),
+        _ => (base, grenade_launcher(base, anim, cooldown, shot_age, team)),
+    };
+    push_vm_hands(&mut draws, frame, shown, team, p.team);
+    draws
+}
+
+/// The support hand: a gloved left hand wrapped round the left side of the
+/// barrel or rail, with an armored forearm running in from the lower left.
+/// The weapon sits at the lower-right screen edge, so this side faces the
+/// player; the firing hand on the grip is always off-screen and not drawn.
+fn push_vm_hands(draws: &mut Vec<LitDraw>, frame: Mat4, weapon: u8, accent: Vec3, team: Team) {
+    let plate = if team == Team::Ember { Vec3::new(0.74, 0.20, 0.12) } else { Vec3::new(0.12, 0.51, 0.65) };
+    let glove = Vec3::new(0.07, 0.085, 0.10);
+    let alloy = Vec3::new(0.48, 0.55, 0.61);
+    // Left-side grip point in the weapon's frame.
+    let hand = match weapon {
+        0 => Vec3::new(-0.30, -0.02, -0.30),
+        1 => Vec3::new(-0.135, -0.01, -0.22),
+        _ => Vec3::new(-0.115, -0.01, -0.34),
+    };
+    let mut part = |mesh, model: Mat4, color: Vec3, glow: f32| {
+        draws.push(LitDraw { mesh, model: frame * model, color, emit: glow, mode: 0.0 });
+    };
+    // Palm against the weapon, fingers curling over the top, knuckle guard.
+    part(MeshId::Bevel, Mat4::from_translation(hand) * Mat4::from_scale(Vec3::new(0.08, 0.12, 0.15)), glove, 0.0);
+    part(MeshId::Bevel, Mat4::from_translation(hand + Vec3::new(0.045, 0.075, 0.0))
+        * Mat4::from_rotation_z(-0.5) * Mat4::from_scale(Vec3::new(0.10, 0.045, 0.14)), glove, 0.0);
+    part(MeshId::Bevel, Mat4::from_translation(hand + Vec3::new(-0.045, 0.01, 0.0))
+        * Mat4::from_scale(Vec3::new(0.03, 0.10, 0.13)), alloy, 0.0);
+    part(MeshId::Cube, Mat4::from_translation(hand + Vec3::new(-0.062, 0.01, 0.0))
+        * Mat4::from_scale(Vec3::new(0.004, 0.05, 0.08)), accent, 0.35);
+    // Forearm to an elbow off the lower-left of the screen.
+    let wrist = hand + Vec3::new(-0.02, -0.05, 0.10);
+    let elbow = hand + Vec3::new(-0.36, -0.36, 0.46);
+    let axis = elbow - wrist;
+    let arm = Mat4::from_translation((wrist + elbow) * 0.5)
+        * Mat4::from_quat(glam::Quat::from_rotation_arc(Vec3::Y, axis.normalize()));
+    part(MeshId::Armor, arm * Mat4::from_scale(Vec3::new(0.12, axis.length(), 0.13)), alloy, 0.0);
+    part(MeshId::Armor, arm * Mat4::from_translation(Vec3::new(0.0, -axis.length() * 0.15, 0.0))
+        * Mat4::from_scale(Vec3::new(0.14, axis.length() * 0.5, 0.15)), plate, 0.0);
+    part(MeshId::Cube, arm * Mat4::from_translation(Vec3::new(0.0, axis.length() * 0.38, -0.07))
+        * Mat4::from_scale(Vec3::new(0.06, 0.03, 0.02)), Vec3::new(0.32, 0.88, 1.0), 0.6);
 }
 
 fn along_z(at: Vec3, radius: f32, length: f32) -> Mat4 {

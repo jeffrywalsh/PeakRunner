@@ -46,6 +46,8 @@ web-sys = { version = "0.3", features = [
     "AudioContextState",
     "AudioDestinationNode",
     "AudioParam",
+    "AudioProcessingEvent",
+    "ScriptProcessorNode",
     "BiquadFilterNode",
     "BiquadFilterType",
     "Document",

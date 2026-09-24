@@ -302,17 +302,18 @@ impl PeakRunnerApp {
             self.world.tick(dt.min(0.1).max(0.0));
         }
         let raw = self.world.hud_json();
-        let listener = self.world.camera().0;
-        for (name, position) in self.world.spatial_sounds.drain(..) {
-            self.audio.play_at(name, position.distance(listener));
+        self.audio.frame(&self.world, dt, self.mode == Mode::Play);
+        let mut sounds = std::mem::take(&mut self.world.spatial_sounds);
+        for (name, position) in sounds.drain(..) {
+            self.audio.play_world(name, position, &self.world);
         }
+        self.world.spatial_sounds = sounds;
         if let Ok(hud) = serde_json::from_str::<Hud>(&raw) {
             if !hud.events.is_empty() {
                 for event in hud.events.split(',') {
                     self.audio.play(event);
                 }
             }
-            self.audio.set_jet(hud.jet == 1 && self.mode == Mode::Play);
             self.audio.set_map_ambience(self.world.map,self.world.player_pos(),self.mode==Mode::Play);
             if hud.state == 3 && self.mode == Mode::Play {
                 self.mode = Mode::End;

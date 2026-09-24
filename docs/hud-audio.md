@@ -78,6 +78,61 @@ no compatibility marker change.
   after `QA_CARRY_AT` seconds (default 6), so the real announcement path fires
   before the 8 s capture. Captures: `research/screenshots/markers-*.png`.
 
+## Sound engine (source only, not deployed)
+
+Code: `src/src/sound.rs` (palette, mixer, director, tests) and `src/src/audio.rs`
+(output only). This supersedes the distance note above: world sounds now have
+pan, distance dulling and, for explosions, travel delay. Client-only; no wire or
+compatibility change, and no gameplay change.
+
+- **All original, all synthesized.** Every sound is generated at startup from
+  deterministic noise, oscillators, resonators and FM; no samples from any
+  game or library. 27 one-shot cues (many with 2–6 variants so rapid fire never
+  repeats one clip) and 6 loops.
+- **One mixer on both platforms.** Native renders it through rodio in 512-frame
+  blocks; the browser runs the same mixer in a WebAudio script node created on
+  the first user gesture. A missing device (e.g. Linux "ALSA no device") leaves
+  the game silent, never crashed.
+- **Voices.** 32 one-shot voices plus 6 loops and the map ambient bed. Per-cue
+  caps (chaingun and turret bullets 8, footsteps 4, shield and hull hits 4,
+  explosions 6, others 3). When full, the least important, most finished voice is
+  stolen; a newcomer never steals from a higher-priority voice. Priorities, from
+  high to low: flag, capture and match cues; generator blast, hit marker, pain, kit,
+  shield down; own weapons; explosions and plasma; bullets and impacts; footsteps and bounces.
+  Playing a sound and rendering never allocate after startup.
+- **Spatial.** Smooth squared falloff to each cue's range (footsteps 38 m, shots
+  140–150 m, near explosions 180 m, far explosions 520 m, generator blast 420 m).
+  Equal-power stereo pan from the camera. A one-pole low-pass makes distant sounds
+  duller, and sounds behind you are slightly quieter and duller. Explosions beyond
+  40 m arrive late at 340 m/s; gunfire is not delayed, so feedback stays instant.
+  Explosions beyond 75 m switch to a rolling low "far" layer.
+- **Room feel.** Under a roof or below the terrain surface (checked four times a
+  second) adds a short room reverb, cuts speed wind to 20% and the map ambience to 35%.
+- **What plays when.**
+  - *Weapons:* layered disc, chaingun and grenade shots with per-shot variation;
+    chaingun motor whine follows the same spin-up and coast-down as the barrels.
+  - *Turrets:* their own bullet and plasma shots, spatialized.
+  - *Movement:* footsteps at stride rate for you and the three nearest walkers;
+    landing thumps scaled by impact; ski hiss and wind by speed; a jet loop
+    whose pitch follows climb and speed.
+  - *Equipment:* shield pings at the struck turret or sensor, a falling sweep
+    when a shield collapses, hull clanks once it is down, a hum near a running
+    generator (silent once offline), and the big generator blast.
+  - *Other:* grenade bounces, the hum and Doppler of a disc passing within 26 m,
+    weapon-switch clicks, the repair-kit shimmer, and new chimes for flag
+    taken/dropped/returned and match start/end.
+- **Tests.** Every cue and variant is deterministic, finite, bounded and
+  click-free at 44.1 and 48 kHz. Loops wrap seamlessly. Voice caps and stealing
+  are checked, as are pan, distance and filter maths, delay and far/generator
+  layer choice, and the director's footsteps, landings, switches, kits, shields,
+  hum and chaingun spin. A source scan fails the build if the sim or network code
+  emits an event name with no cue.
+- **Listen.** `cargo test -p peakrunner --lib render_audio_samples -- --ignored`
+  writes WAVs to ignored `research/audio-samples/`.
+- Not done: wall occlusion, HRTF, Doppler on anything but passing discs,
+  third-person jet loops for other players, bullet ricochets. Mix balance still
+  needs a human ear.
+
 ## Published revision: 20260919.3
 
 - FOV stays at 76 degrees through 20 m/s. A smoothstep speed curve widens it

@@ -1477,6 +1477,137 @@ mod shader_check {
         }
     }
 
+    /// Articulated player poses and first-person hands. Writes
+    /// `screenshots/players-*.png`. Run with --ignored --nocapture.
+    #[test]
+    #[ignore = "requires a GPU adapter"]
+    fn render_player_captures() {
+        use super::*;
+        use crate::sim::{MatchState, Team, World};
+        pollster::block_on(async {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+            let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await.expect("GPU adapter");
+            let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.expect("GPU device");
+            let mut scene = SceneGpu::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+            std::fs::create_dir_all("screenshots").unwrap();
+            let (width, height) = (1280u32, 800u32);
+            let aspect = width as f32 / height as f32;
+            let mut save = |frame: &crate::drawlist::DrawFrame, name: &str| {
+                let mut encoder = device.create_command_encoder(&Default::default());
+                scene.render(&device, &queue, &mut encoder, width, height, frame);
+                let stride = (width * 4).div_ceil(256) * 256;
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some("capture"), size: (stride * height) as u64,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+                encoder.copy_texture_to_buffer(scene.color.as_image_copy(),
+                    wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0, bytes_per_row: Some(stride), rows_per_image: Some(height) } },
+                    wgpu::Extent3d { width, height, depth_or_array_layers: 1 });
+                queue.submit([encoder.finish()]);
+                let (tx, rx) = std::sync::mpsc::channel();
+                buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| { tx.send(r).unwrap(); });
+                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                rx.recv().unwrap().unwrap();
+                let mapped = buffer.slice(..).get_mapped_range().unwrap();
+                let pixels: Vec<u8> = mapped.chunks(stride as usize).flat_map(|row| row[..width as usize * 4].iter().copied()).collect();
+                let path = format!("screenshots/players-{name}.png");
+                let mut png = png::Encoder::new(std::fs::File::create(&path).unwrap(), width, height);
+                png.set_color(png::ColorType::Rgba);
+                png.set_depth(png::BitDepth::Eight);
+                png.write_header().unwrap().write_image_data(&pixels).unwrap();
+                println!("wrote {path}");
+            };
+            let mut w = World::new();
+            w.set_map(MapId::Raindance);
+            w.start_match(true);
+            w.state = MatchState::Playing;
+            w.players.truncate(1);
+            // Stage on open ground in front of the Ember base.
+            let spot = crate::terrain::info(w.map).ember + Vec3::new(0.0, 0.0, -70.0);
+            let ground = crate::terrain::height_on(w.map, spot.x, spot.z);
+            let origin = Vec3::new(spot.x, ground + 0.02, spot.z);
+            w.players[0].pos = origin + Vec3::new(0.0, 30.0, 40.0);
+            let template = w.players[0].clone();
+            // (name, [(offset, yaw, setup)]) and a camera offset.
+            type Setup = fn(&mut crate::sim::Player);
+            let stand: Setup = |p| { p.vel = Vec3::ZERO; p.on_ground = true; };
+            let run: Setup = |p| { p.vel = Vec3::new(0.0, 0.0, -8.0); p.on_ground = true; };
+            let ski: Setup = |p| { p.vel = Vec3::new(9.0, -3.0, -28.0); p.on_ground = true; p.skiing = true; };
+            let jet: Setup = |p| { p.vel = Vec3::new(0.0, 6.0, -18.0); p.on_ground = false; p.jetting = true; };
+            let air: Setup = |p| { p.vel = Vec3::new(0.0, -9.0, -12.0); p.on_ground = false; };
+            let fire: Setup = |p| { p.on_ground = true; p.vel = Vec3::ZERO; p.cooldown = crate::sim::weapon_reload(p.weapon) - 0.03; };
+            let carry: Setup = |p| { p.on_ground = true; p.vel = Vec3::new(0.0, 0.0, -9.0); p.carrying = Some(Team::Glacier); };
+            let dead: Setup = |p| { p.alive = false; p.respawn = 3.4 - 1.2; };
+            let shots: Vec<(&str, Vec<(Vec3, f32, u8, Team, Setup)>, f32)> = vec![
+                ("lineup", vec![(Vec3::new(-1.8, 0.0, 0.0), 0.35, 0, Team::Ember, stand),
+                    (Vec3::ZERO, -0.2, 1, Team::Glacier, stand), (Vec3::new(1.8, 0.0, 0.0), 0.5, 2, Team::Ember, stand)], 0.0),
+                ("run", vec![(Vec3::ZERO, -1.4, 0, Team::Ember, run), (Vec3::new(2.0, 0.0, 0.5), 1.3, 1, Team::Glacier, run)], 0.12),
+                ("ski", vec![(Vec3::ZERO, -1.3, 0, Team::Glacier, ski)], 0.0),
+                ("jet", vec![(Vec3::new(0.0, 1.2, 0.0), -1.2, 0, Team::Ember, jet)], 0.0),
+                ("airborne", vec![(Vec3::new(0.0, 0.8, 0.0), 1.4, 2, Team::Glacier, air)], 0.0),
+                ("fire-disc", vec![(Vec3::ZERO, 0.9, 0, Team::Ember, fire)], 0.0),
+                ("fire-chaingun", vec![(Vec3::ZERO, 0.9, 1, Team::Glacier, fire)], 0.0),
+                ("fire-grenade", vec![(Vec3::ZERO, 0.9, 2, Team::Ember, fire)], 0.0),
+                ("flag-carrier", vec![(Vec3::ZERO, 2.4, 1, Team::Ember, carry)], 0.3),
+                ("death", vec![(Vec3::ZERO, -0.8, 0, Team::Glacier, dead)], 0.0),
+            ];
+            for (name, cast, time) in shots {
+                w.players.truncate(1);
+                w.time = time;
+                for (offset, yaw, weapon, team, setup) in cast {
+                    let mut p = template.clone();
+                    p.pos = origin + offset;
+                    p.yaw = yaw; p.pitch = 0.0; p.weapon = weapon; p.team = team;
+                    p.alive = true; p.skiing = false; p.jetting = false; p.carrying = None; p.cooldown = 0.0;
+                    setup(&mut p);
+                    w.players.push(p);
+                }
+                let mut frame = crate::drawlist::build_frame_with(&w, aspect, 0.0, &mut crate::effects::Effects::new());
+                let target = origin + Vec3::Y * 1.0;
+                // Front three-quarter for the lineup and fire poses, side-on
+                // (from +Z) for movement poses.
+                let front = name == "lineup" || name.starts_with("fire") || name == "death";
+                frame.eye = target + if front { Vec3::new(-1.6, 0.6, -4.3) } else { Vec3::new(0.6, 0.55, 4.6) };
+                frame.view = Mat4::look_at_rh(frame.eye, target, Vec3::Y);
+                frame.proj = crate::drawlist::clip_correct(Mat4::perspective_rh(48f32.to_radians(), aspect, 0.1, 2500.0));
+                frame.inv_vp = (frame.proj * frame.view).inverse();
+                frame.viewmodel.clear();
+                save(&frame, name);
+            }
+            // Far LOD: the same lineup from 110 m.
+            w.players.truncate(1);
+            for (i, weapon) in [0u8, 1, 2].into_iter().enumerate() {
+                let mut p = template.clone();
+                p.pos = origin + Vec3::new((i as f32 - 1.0) * 1.8, 0.0, 0.0);
+                p.yaw = 2.6; p.weapon = weapon; p.alive = true; p.on_ground = true; p.vel = Vec3::new(0.0, 0.0, -8.0);
+                p.carrying = if i == 1 { Some(Team::Glacier) } else { None };
+                w.players.push(p);
+            }
+            let mut frame = crate::drawlist::build_frame_with(&w, aspect, 0.0, &mut crate::effects::Effects::new());
+            let target = origin + Vec3::Y * 1.0;
+            frame.eye = target + Vec3::new(12.0, 55.0, -95.0);
+            frame.view = Mat4::look_at_rh(frame.eye, target, Vec3::Y);
+            frame.proj = crate::drawlist::clip_correct(Mat4::perspective_rh(8f32.to_radians(), aspect, 0.1, 2500.0));
+            frame.inv_vp = (frame.proj * frame.view).inverse();
+            frame.viewmodel.clear();
+            save(&frame, "far-lod");
+            // First-person viewmodels with hands.
+            w.players.truncate(1);
+            w.players[0].pos = origin;
+            w.players[0].yaw = 0.2;
+            w.players[0].pitch = -0.05;
+            for (weapon, name) in [(0u8, "viewmodel-disc"), (1, "viewmodel-chaingun"), (2, "viewmodel-grenade")] {
+                w.players[0].weapon = weapon;
+                w.input.weapon = weapon;
+                w.players[0].cooldown = 0.0;
+                let mut fx = crate::effects::Effects::new();
+                // Settle the switch animation.
+                for _ in 0..40 { crate::drawlist::build_frame_with(&w, aspect, 1.0 / 60.0, &mut fx); }
+                let frame = crate::drawlist::build_frame_with(&w, aspect, 0.0, &mut fx);
+                save(&frame, name);
+            }
+        });
+    }
+
     /// Weapon visuals: every viewmodel state, third-person models, rounds in
     /// flight, chaingun impacts and layered explosions on three maps. Writes
     /// `screenshots/weapons-after-*.png`. Run with --ignored --nocapture.

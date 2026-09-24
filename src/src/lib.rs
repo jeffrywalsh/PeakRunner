@@ -1,5 +1,6 @@
 mod app;
 mod audio;
+mod sound;
 mod flag_hud;
 mod flag_announce;
 mod generator_announce;
@@ -12,6 +13,7 @@ mod online;
 mod preferences;
 mod mouse;
 mod drawlist;
+mod player_model;
 use peakrunner_core::grass;
 mod scene;
 mod map_scene;
