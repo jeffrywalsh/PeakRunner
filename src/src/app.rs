@@ -685,7 +685,7 @@ impl PeakRunnerApp {
                 ui.add_space(4.0);
                 ui.label(RichText::new("PEAKRUNNER").color(FG).size(64.0).strong());
                 ui.add_space(6.0);
-                ui.label(RichText::new("Ascend-inspired movement. Hold Space to ski, carry speed downhill, then jet over the next ridge. WASD steers on slopes and in the air. Right click gives lift; release it to recharge. The disc launcher takes its look from Tribes 1.").color(MUTED));
+                ui.label(RichText::new("Hold Space to ski, carry speed downhill, then jet over the next ridge. WASD steers on slopes and in the air. Right click gives lift; release it to recharge.").color(MUTED));
                 ui.add_space(14.0);
                 ui.horizontal(|ui| {
                     team_button(ui, "Ember", self.ember, EMBER, || self.ember = true);
