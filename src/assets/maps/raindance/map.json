@@ -1,5 +1,5 @@
 {
-  "texture_count": 44,
+  "texture_count": 45,
   "terrain_layers": [
     0,
     1,
@@ -20,7 +20,7 @@
     "scale": "720 150 1"
   },
   "lightmap": {
-    "pages": 24,
+    "pages": 25,
     "first_layer": 20,
     "texel_m": 0.5,
     "sun": [
@@ -28,7 +28,7 @@
       0.57735,
       -0.57735
     ],
-    "lamps": 200,
+    "lamps": 210,
     "baker_sha256": "66d1c04a0581f283b62d4a01a9229abd22fbd18a738474c8c5c148db84800fed"
   },
   "version": 1,
@@ -36,13 +36,13 @@
   "flags": [
     [
       1160.0,
-      122.05,
-      466.0
+      129.95,
+      460.0
     ],
     [
       800.0,
-      122.05,
-      1414.0
+      129.95,
+      1420.0
     ]
   ],
   "spawns": [
@@ -601,8 +601,30 @@
       "anchors": {
         "flag": [
           1160.0,
-          122.05,
-          466.0
+          129.95,
+          460.0
+        ],
+        "flag_tower": [
+          1160.0,
+          129.6,
+          460.0
+        ],
+        "tower_entries": [
+          [
+            1160.0,
+            129.6,
+            466.6
+          ],
+          [
+            1153.4,
+            129.6,
+            460.0
+          ],
+          [
+            1165.303300858899,
+            138.8,
+            454.6966991411009
+          ]
         ],
         "spawn": [
           1112.0,
@@ -673,8 +695,30 @@
       "anchors": {
         "flag": [
           800.0,
-          122.05,
-          1414.0
+          129.95,
+          1420.0
+        ],
+        "flag_tower": [
+          800.0,
+          129.6,
+          1420.0
+        ],
+        "tower_entries": [
+          [
+            800.0,
+            129.6,
+            1413.4
+          ],
+          [
+            806.6,
+            129.6,
+            1420.0
+          ],
+          [
+            794.6966991411009,
+            138.8,
+            1425.303300858899
+          ]
         ],
         "spawn": [
           848.0,
@@ -2651,18 +2695,18 @@
     "rock"
   ],
   "provenance": "PeakRunner original procedural kit v2 (cleaned Raindance); no extracted assets",
-  "base_asset": "raindance-base-v3",
+  "base_asset": "raindance-base-v4",
   "structures_asset": "raindance-structures-v2",
-  "base_asset_sha256": "b34cf8f9947872d25763b81ca034ed706e7affbf61cae06e8fdce8974ad2e2ba",
+  "base_asset_sha256": "f42d04541a8d4b211606287b162c2d01e345f107b56fb78710d2b752b8c3b4e0",
   "structures_asset_sha256": "2168bd8af5ee259d70362d060f006095d3065f853be12cf5d512ade9a638067b",
   "material_source_sha256": "fe226cf2d1f451356c001f0da50bebb734c1f8cc260864d3ba6b6f94a07ae8ad",
   "definition_sha256": "38bbd0cbb27eceb37ec0916ec5426daed5c33bd31314b6aa85e78db28582e494",
   "files": {
     "height.bin": "7305d9f6ff06e086d7a831130da4116c42522d3e7606f28ebdf5d682bbf16eeb",
     "weights.rgba": "f8e2504e4779325a8afe4f46e269c02dbee2eaf61bbb06bbfbeb3d3eab8da19d",
-    "vertices.bin": "075f72ee93009ca27710600f8ffdd6c0db3a8f5db3cb82a70f54b179a159c3bb",
-    "collision.bin": "744af5edbc3c60ec13039e7e128ea028b17fd8afe3cdb6958dc3c704ff2d0664",
-    "textures.rgba": "dcd37317d862f6a4c9264aa250f7cd68e7c6693b2bacff72c554ad64ad74cfdd",
+    "vertices.bin": "12ef529d8b1ccca004da559f880a0c5ba7b75cb5bd67b5554f9058f2d6b41511",
+    "collision.bin": "b352f7221894b38955c7707229190f1a7df2aab3acb0ad6f66a843867fe23ff3",
+    "textures.rgba": "c80f924471360461d7c62aa18996f59d79334b1ef218277abdc9528190d6afdc",
     "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e"
   }
 }

@@ -198,7 +198,7 @@ fn all_maps() -> [MapInfo; 6] {
         MapInfo {
             id: MapId::Raindance,
             name: "Old Holler",
-            note: "2 km. Rainy highland hollows, a ravine crossing and sunken bases over generator basements.",
+            note: "2 km. Rainy highland hollows, a ravine crossing, sunken bases over generator basements and flags high in bishop towers.",
             size: RAIN_SIZE,
             // Original base centers; map packs supply exact flag deck positions.
             ember: Vec3::new(1160.0, 0.0, 480.0),
@@ -575,7 +575,8 @@ mod map_tests {
         let gens: Vec<_> = crate::equipment::definitions(id).iter()
             .filter(|d| d.kind == crate::equipment::Kind::Generator).collect();
         assert_eq!(gens.len(), 2);
-        assert_eq!(pack.manifest.holes.len(), 34);
+        // 17 base cells per citadel, plus the cross-map sewer's 156.
+        assert_eq!(pack.manifest.holes.len(), 34 + 156);
         for d in gens {
             let home = if d.team == 0 { info.ember } else { info.glacier };
             let p = d.pos();
@@ -586,8 +587,90 @@ mod map_tests {
         }
     }
 
+    /// Dustreach's cross-map sewer (scripts/assets/dustreach_sewer.py): every
+    /// covered cell is roofed by an exact copy of the dunes (so the surface
+    /// collides as before), every open cell (mouth trenches and shafts) has a
+    /// floor under the ground, and a body-width lane is clear from the red
+    /// mouth to the blue mouth and out to both flank shafts, with no terrain
+    /// in the way. Red leg x 1072-1080; everything is 180-degree symmetric.
+    #[test]
+    fn dustreach_sewer_is_seamless_and_open_mouth_to_mouth() {
+        let id = MapId::DesertOfDeathClone;
+        let pack = crate::map_pack::on(id).unwrap();
+        // The citadels' own cells (cistern, tunnel, tower room) lie in
+        // x 1008-1056 near each base; every other cut cell is the sewer.
+        let base_cell = |x: usize, z: usize| (122..=133).contains(&x) && ((77..=89).contains(&z) || (166..=178).contains(&z));
+        let sewer: Vec<(usize, usize)> = pack.manifest.holes.iter().map(|&h| (h % 256, h / 256))
+            .filter(|&(x, z)| !base_cell(x, z)).collect();
+        assert_eq!(sewer.len(), 156);
+        let open = |ix: usize, iz: usize| {
+            let (rx, rz) = if iz >= 128 { (255 - ix, 255 - iz) } else { (ix, iz) };
+            (rx == 134 && ((73..81).contains(&rz) || rz == 117)) || (rx == 144 && rz == 85)
+        };
+        for &(ix, iz) in &sewer {
+            for (fx, fz) in [(0.2, 0.3), (0.5, 0.5), (0.8, 0.7)] {
+                let (x, z) = ((ix as f32 + fx) * 8.0, (iz as f32 + fz) * 8.0);
+                let ground = surface_on(id, x, z).0;
+                let top = pack.floor(Vec3::new(x, ground + 0.4, z)).expect("support over a cut cell").0;
+                if open(ix, iz) {
+                    assert!(top < ground - 0.01 && top > 90.0, "open cell floor {top} at ({x}, {z}), ground {ground}");
+                } else {
+                    assert!((top - ground).abs() < 0.02, "roof {top} is not the ground {ground} at ({x}, {z})");
+                }
+            }
+        }
+        // Lanes, one step at a time, at the height of a walking body.
+        let mut lanes: Vec<Vec<(f32, f32)>> = Vec::new();
+        let mut main: Vec<(f32, f32)> = (0..=215).map(|k| (1076.0, 586.0 + k as f32 * 2.0)).collect();
+        main.extend((0..=52).map(|k| (1076.0 - k as f32 * 2.0, 1024.0)));
+        main.extend((0..=216).map(|k| (972.0, 1030.0 + k as f32 * 2.0)));
+        lanes.push(main);
+        // Off the 8 m grid lines, so no sample sits in a wall's plane.
+        lanes.push((0..=40).map(|k| (1077.0 + k as f32 * 2.0, 684.0)).collect());
+        lanes.push((0..=40).map(|k| (971.0 - k as f32 * 2.0, 1364.0)).collect());
+        // The main lane starts at the open trench top; the branch lanes start
+        // inside the culvert at the level junction (floor near 118.5).
+        for (n, lane) in lanes.iter().enumerate() {
+            let (x, z) = lane[0];
+            let probe = if n == 0 { surface_on(id, x, z).0 + 0.4 } else { 121.0 };
+            let mut floor = pack.floor(Vec3::new(x, probe, z)).expect("lane start").0;
+            let mut prev: Option<Vec3> = None;
+            for &(x, z) in lane {
+                floor = pack.floor(Vec3::new(x, floor + 3.0, z)).expect("culvert floor").0;
+                // 0.2 m up: a straight segment between two samples would
+                // otherwise graze the crest where the floor's grade changes.
+                let body = Vec3::new(x, floor + PLAYER_RADIUS + 0.2, z);
+                if let Some(a) = prev {
+                    assert!((body.y - a.y).abs() < 0.8, "step from {a:?} to {body:?}");
+                    assert!(pack.body_sweep(a, body).is_none(), "blocked between {a:?} and {body:?}");
+                    assert!(segment_hit(id, a, body, PLAYER_RADIUS).is_none(), "terrain in the lane at {body:?}");
+                }
+                prev = Some(body);
+            }
+        }
+    }
+
     /// Old Holler's (key `raindance`) generators sit in the basement under
     /// each sunken hall, 8 m below the hall floor, inside the hall's cut.
+    #[test]
+    fn old_holler_flags_sit_in_the_bishop_tower_chambers() {
+        // Old Holler (key `raindance`): each flag stands on the chamber floor
+        // of its bishop tower, 9 m above the 120.6 m roof, on the tower's axis,
+        // under the hollow mitre (far more than a body's headroom above it).
+        let id = MapId::Raindance;
+        let pack = crate::map_pack::on(id).unwrap();
+        let axes = [Vec3::new(1160.0, 0.0, 460.0), Vec3::new(800.0, 0.0, 1420.0)];
+        for (flag, axis) in pack.manifest.flags.iter().zip(axes) {
+            let f = Vec3::from_array(*flag);
+            assert!(glam::Vec2::new(f.x - axis.x, f.z - axis.z).length() < 0.01, "flag {f:?} off the tower axis");
+            let floor = pack.floor(f + Vec3::Y * 0.5).expect("chamber floor").0;
+            assert!((floor - (112.0 + 8.6 + 9.0)).abs() < 0.01, "flag {f:?} stands on {floor}");
+            assert!(f.y - floor > 0.2 && f.y - floor < 0.5, "flag {f:?} not on its deck");
+            let up = pack.sweep(f + Vec3::Y * 0.1, f + Vec3::Y * 12.0, 0.0);
+            assert!(up.map_or(true, |(t, _)| t * 11.9 > 8.0), "flag {f:?} ceiling too low: {up:?}");
+        }
+    }
+
     #[test]
     fn raindance_generators_are_in_basements_in_cut_cells() {
         let id = MapId::Raindance;

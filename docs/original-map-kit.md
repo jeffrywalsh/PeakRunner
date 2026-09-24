@@ -26,7 +26,7 @@ refit or repair. Touch mode provides a contextual Use / repair button.
 
 The map has two multi-level bases approximately one kilometer apart, a central
 ravine with a traversable bridge, two defense towers, two forward bunkers, two
-landing pads, exposed flag decks, lower service halls, and interior/exterior
+landing pads, bishop flag towers, lower service halls, and interior/exterior
 roof ramps. Scenery includes 115 original trees (conifer and broadleaf variants)
 and 80 rock formations. Terrain materials, structural cladding, equipment
 materials, six-face cloudy sky, rain and wind ambience are generated locally.
@@ -35,7 +35,7 @@ The reusable kit contains 12 asset types:
 
 | Asset | Function |
 | --- | --- |
-| `base` | Basement hall, atrium, ramp routes, roof, flag deck and service spire |
+| `base` | Basement hall, atrium, ramp routes, roof and the bishop flag tower |
 | `bridge` | Deck, approach ramps, edge rails and supports |
 | `tower` | Elevated turret platform and sensor mast |
 | `bunker` | Covered forward position |
@@ -188,6 +188,60 @@ service stair, and the route counts. The Rust tests
 `raindance_turrets_cannot_see_into_the_halls` cover the same on the embedded pack.
 
 Human traversal and balance of the new ramp exits are not playtested.
+
+## Old Holler: bishop flag towers (September 23, 2026)
+
+Each base (asset `raindance-base-v4`) replaces its solid service spire and the
+exposed roof flag stand with a flag tower shaped like a chess bishop, behind
+the front roof deck at local (0, 20). It is lathed from 20-sided rings, and the
+flag moves into it.
+
+| | Old spire | Bishop tower |
+| --- | --- | --- |
+| Height above the roof | 18 m (antenna to 23 m) | 23.7 m (finial to 25.2 m) |
+| Widest | 11.6 m (base) | 15.2 m plinth, 14.8 m collar ledge, 13 m mitre |
+
+- **Shape:** ringed plinth, flared foot, stem, a wide collar, hollow upper
+  stem, neck ring, bulbous mitre and ball finial. The lower half is solid and
+  sealed underneath.
+- **Chamber:** its floor is 9 m above the roof (17.6 m above the base origin),
+  10.4 m across inside, with the flag on the axis and 14 m of open space up
+  into the mitre. The collar's top is also a 1.6 m ledge round the outside.
+- **Three ways in** (players jet up; nothing walks up to the chamber):
+  - a **front door** (-Z) and a **side door** (+X), each 1.6 m wide and 3.4 m
+    tall at chamber-floor level, 90° apart so there is no straight shot through;
+  - the **mitre slit**, a 3.6 m band cut diagonally (40°) through both shells
+    of the mitre's back-left face, about 16–20 m above the roof. A standing
+    body fits through it in a lane about 0.5 m wide and 1.5 m tall; from inside,
+    players drop to the flag.
+- **L baffle:** two 4.2 m walls 3 m from the axis, one across each door, joined
+  at the corner. Each door opens into a vestibule that leads round the far end
+  of its wall. No turret can see the chamber floor past the baffle; the two
+  vestibules are the stated tolerance, as on the other maps.
+- **Spawns** are unchanged and all stay on or below the roof, well away from
+  the tower's entries.
+- **Collision:** 2,992 triangles per base (was 1,302; budget 4,500). The
+  baked pack has 25 lightmap pages; chamber light strips and a lit neck ring
+  are baked.
+
+Routes (`route_checks.py`): hall 4 and generator 2 (walking, unchanged). The
+chamber is counted with a round region in the jet model, plus an opt-in
+over-the-top hop (`overhead=`) for the slit: two door entries and the slit
+(one or two clusters: the over-the-top hop and drops from the slit's lip).
+The old roof flag deck had 2 walking routes.
+
+Movement: `old_holler_flag_tower_entries_and_exits_are_flyable` (sim.rs) flies
+a player, using only facing, W and jet, from the roof in through each door and
+through the slit to stand on the chamber floor, and back out each way, for
+both teams. `old_holler_flags_sit_in_the_bishop_tower_chambers` (terrain.rs)
+checks each flag's deck and headroom, and `raindance_turrets_cannot_see_into_the_halls`
+now samples the chamber. `test-raindance.py` adds chamber-floor support, the
+doors, the slit's body lane, the bishop silhouette and the round-region route
+counts.
+
+Not playtested: whether the jet-only chamber is too hard to defend or to cap
+from, and whether the slit is readable from the field. Bots head for the flag
+position but cannot fly these routes.
 
 ## Verification and boundaries
 

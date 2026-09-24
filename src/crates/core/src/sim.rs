@@ -3265,6 +3265,281 @@ mod spawn_point_tests {
         }
     }
 
+    /// Dustreach's sewer: a skier holding ski, with no steering, drops into
+    /// the red leg at its mouth and coasts the whole 368 m leg to the cross
+    /// hall under the Sun Gate: no snag on a wall, seam or rib, no fall
+    /// through the floor, and the rolling floor keeps momentum. The blue leg
+    /// is the red one rotated 180 degrees. Real movement code, embedded pack.
+    #[test]
+    fn dustreach_sewer_leg_skis_mouth_to_hall() {
+        let map = MapId::DesertOfDeathClone;
+        for speed in [30.0_f32, 16.0] {
+            let mut world = World::new();
+            world.set_map(map);
+            world.start_match(true);
+            world.players.truncate(1);
+            world.player_id = 0;
+            let pack = crate::map_pack::on(map).unwrap();
+            let floor = pack.floor(Vec3::new(1076.0, 130.0, 652.0)).expect("leg floor").0;
+            let p = &mut world.players[0];
+            p.pos = Vec3::new(1076.0, floor + PLAYER_RADIUS, 652.0);
+            p.vel = Vec3::new(0.0, 0.0, speed);
+            p.yaw = std::f32::consts::PI;
+            p.alive = true; p.health = 100.0; p.on_ground = true; p.skiing = true; p.jetting = false;
+            world.input = Input::default();
+            world.input.jump = true;
+            let (mut min_speed, mut arrived) = (f32::MAX, None);
+            for _ in 0..(60 * 60) {
+                world.step_players(STEP);
+                let p = &world.players[0];
+                assert!(p.pos.y > 100.0, "fell through at {:?}", p.pos);
+                assert!((p.pos.x - 1076.0).abs() < 3.5, "drifted into the wall at {:?}", p.pos);
+                min_speed = min_speed.min(Vec2::new(p.vel.x, p.vel.z).length());
+                if p.pos.z > 1010.0 { arrived = Some(Vec2::new(p.vel.x, p.vel.z).length()); break; }
+            }
+            let at_hall = arrived.unwrap_or_else(|| panic!("skier at {speed} m/s never reached the hall: {:?}", world.players[0].pos));
+            eprintln!("sewer leg ski: in {speed} m/s, slowest {min_speed:.1}, at the hall {at_hall:.1}");
+            assert!(min_speed > 5.0, "skier entering at {speed} m/s slowed to {min_speed} m/s");
+        }
+    }
+
+    /// Every opening can be left by jet with the real movement code: from the
+    /// floor of each drop shaft (midfield and flank, both teams) and from each
+    /// mouth's portal, a player holding jet rises past the lip, steers out
+    /// over the ground and lands standing outside the cut cell.
+    #[test]
+    fn dustreach_sewer_shafts_and_mouths_jet_out() {
+        let map = MapId::DesertOfDeathClone;
+        let pack = crate::map_pack::on(map).unwrap();
+        // (red start x, z, cell x0, x1, z0, z1, outside target x, z)
+        let red: [(f32, f32, f32, f32, f32, f32, f32, f32); 3] = [
+            (1076.0, 940.0, 1072.0, 1080.0, 936.0, 944.0, 1090.0, 940.0),   // midfield shaft
+            (1156.0, 684.0, 1152.0, 1160.0, 680.0, 688.0, 1170.0, 684.0),   // flank shaft
+            (1076.0, 646.0, 1072.0, 1080.0, 584.0, 648.0, 1090.0, 640.0)];  // red mouth, out over the trench's east wall
+        for &(sx, sz, x0, x1, z0, z1, tx, tz) in &red {
+            for blue in [false, true] {
+                let m = |x: f32, z: f32| if blue { (2048.0 - x, 2048.0 - z) } else { (x, z) };
+                let (sx, sz) = m(sx, sz); let (tx, tz) = m(tx, tz);
+                let ((ax, az), (bx, bz)) = (m(x0, z0), m(x1, z1));
+                let (cx0, cx1, cz0, cz1) = (ax.min(bx), ax.max(bx), az.min(bz), az.max(bz));
+                let mut world = World::new();
+                world.set_map(map);
+                world.start_match(true);
+                world.players.truncate(1);
+                world.player_id = 0;
+                let lip = surface_on_edge_max(map, cx0, cx1, cz0, cz1);
+                let floor = pack.floor(Vec3::new(sx, lip - 1.0, sz)).expect("opening floor").0;
+                {
+                    let p = &mut world.players[0];
+                    p.pos = Vec3::new(sx, floor + PLAYER_RADIUS, sz);
+                    p.vel = Vec3::ZERO; p.energy = ENERGY_MAX;
+                    p.alive = true; p.health = 100.0; p.on_ground = true; p.skiing = false; p.jetting = false;
+                    p.yaw = (-(tx - sx)).atan2(-(tz - sz));
+                }
+                world.input = Input::default();
+                let mut out = false;
+                for _ in 0..(60 * 10) {
+                    let p = &world.players[0];
+                    let above = p.pos.y > lip + 2.0;
+                    world.input.jet = !above || p.vel.y < 0.0 && p.pos.y < lip + 1.0;
+                    world.input.move_z = if above { 1.0 } else { 0.0 };
+                    world.step_players(STEP);
+                    let p = &world.players[0];
+                    let inside = p.pos.x > cx0 && p.pos.x < cx1 && p.pos.z > cz0 && p.pos.z < cz1;
+                    if !inside && p.on_ground { out = true; break; }
+                }
+                let p = &world.players[0];
+                assert!(out, "{} opening at ({sx}, {sz}): no way out by jet, ended at {:?}", if blue { "blue" } else { "red" }, p.pos);
+            }
+        }
+    }
+
+    fn surface_on_edge_max(map: MapId, x0: f32, x1: f32, z0: f32, z1: f32) -> f32 {
+        let mut top = f32::MIN;
+        for k in 0..=16 {
+            let t = k as f32 / 16.0;
+            for (x, z) in [(x0 + (x1 - x0) * t, z0), (x0 + (x1 - x0) * t, z1), (x0, z0 + (z1 - z0) * t), (x1, z0 + (z1 - z0) * t)] {
+                top = top.max(crate::terrain::surface_on(map, x, z).0);
+            }
+        }
+        top
+    }
+
+    /// Evidence, not a rule: crossing Dustreach from the red mouth's top to
+    /// the blue mouth's top, over the dunes (through the Sun Gate) versus
+    /// through the sewer, with the same simple ski-and-jet driver. Run with
+    /// `cargo test -p peakrunner-core --lib dustreach_surface_versus_sewer -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "route timing probe"]
+    fn dustreach_surface_versus_sewer_crossing_time() {
+        let map = MapId::DesertOfDeathClone;
+        let pack = crate::map_pack::on(map).unwrap();
+        let at = |x: f32, z: f32, below: f32| {
+            let y = pack.floor(Vec3::new(x, below, z)).map(|f| f.0).unwrap_or_else(|| crate::terrain::surface_on(map, x, z).0);
+            Vec3::new(x, y, z)
+        };
+        let start = at(1096.0, 590.0, 400.0);
+        let finish = at(952.0, 1458.0, 400.0);
+        let hall = pack.floor(Vec3::new(1024.0, 140.0, 1024.0)).unwrap().0;
+        let surface = vec![start, finish];
+        let sewer = vec![start, at(1076.0, 592.0, 400.0), at(1076.0, 652.0, 140.0), at(1076.0, 1020.0, hall + 3.0),
+            at(972.0, 1028.0, hall + 3.0), at(972.0, 1396.0, 140.0), at(972.0, 1456.0, 400.0), finish];
+        let run = |route: &[Vec3]| -> Option<f32> {
+            let mut world = World::new();
+            world.set_map(map);
+            world.start_match(true);
+            world.players.truncate(1);
+            world.player_id = 0;
+            {
+                let p = &mut world.players[0];
+                p.pos = route[0] + Vec3::Y * PLAYER_RADIUS;
+                p.vel = Vec3::ZERO; p.energy = ENERGY_MAX;
+                p.alive = true; p.health = 100.0; p.on_ground = true;
+            }
+            world.input = Input::default();
+            let mut k = 1;
+            for tick in 0..(60 * 240) {
+                let p = &world.players[0];
+                let target = route[k];
+                let d = Vec2::new(target.x - p.pos.x, target.z - p.pos.z);
+                if d.length() < if k + 1 == route.len() { 5.0 } else { 3.0 } {
+                    if k + 1 == route.len() { return Some(tick as f32 * STEP); }
+                    k += 1;
+                    continue;
+                }
+                let speed = Vec2::new(p.vel.x, p.vel.z).length();
+                let climb = target.y > p.pos.y + 2.0;
+                world.players[0].yaw = (-d.x).atan2(-d.y);
+                world.input.move_z = 1.0;
+                world.input.jump = true;
+                world.input.jet = climb || speed < 18.0;
+                world.step_players(STEP);
+            }
+            None
+        };
+        let (a, b) = (run(&surface), run(&sewer));
+        eprintln!("Dustreach crossing, red mouth top to blue mouth top: surface {a:?} s, sewer {b:?} s");
+        assert!(a.is_some() && b.is_some(), "both routes must finish");
+        assert!(a.unwrap() < b.unwrap(), "the surface should stay the faster crossing");
+    }
+
+    /// Old Holler's (key `raindance`) bishop flag tower, both teams. Using only
+    /// inputs (facing, W, jet) and the real movement code, a player gets from
+    /// the roof into the chamber through the front door, through the side door
+    /// and over the mitre through the slit, standing on the chamber floor each
+    /// time; and leaves again by each of the three ways.
+    #[test]
+    fn old_holler_flag_tower_entries_and_exits_are_flyable() {
+        const FLOOR: f32 = 17.6;
+        const TZ: f32 = 20.0;
+        let map = MapId::Raindance;
+        let h = std::f32::consts::FRAC_1_SQRT_2;
+        // The slit's clear lane for a standing body: 9 m out and 1.5 m in along
+        // its back-left facing, 0.85 m along the slit, feet 16.5 m above the roof.
+        let (sx, sz, lx, lz) = (-h, h, 0.85 * h, 0.85 * h);
+        let slit_out = (sx * 9. + lx, 25.1, TZ + sz * 9. + lz);
+        let slit_in = (sx * 1.5 + lx, 25.1, TZ + sz * 1.5 + lz);
+        // (name, start on the roof, waypoints in, waypoints out); each waypoint
+        // is (local x, y above the base origin, local z, jet). The doors are
+        // entered from a hover over the ledge round the collar (r 5.8..7.4),
+        // then around the L baffle; the slit from a hover beside the mitre.
+        type Route = (&'static str, (f32, f32, f32), Vec<(f32, f32, f32, bool)>, Vec<(f32, f32, f32, bool)>);
+        let routes: [Route; 3] = [
+            ("front", (0., 8.6, 8.),
+                vec![(0., FLOOR + 1., 13.3, true), (0., FLOOR, 15.9, false), (-2.6, FLOOR, 16.3, false),
+                     (-3.5, FLOOR, 17.6, false), (-2., FLOOR, 20., false), (0., FLOOR, 20., false)],
+                vec![(-3.5, FLOOR, 17.6, false), (-2.6, FLOOR, 16.3, false), (0., FLOOR, 15.9, false),
+                     (0., 8.6, 9.5, false)]),
+            ("side", (14., 8.6, 20.),
+                vec![(6.7, FLOOR + 1., 20., true), (4.3, FLOOR, 20., false), (3.9, FLOOR, 22.4, false),
+                     (2.9, FLOOR, 23.3, false), (1.2, FLOOR, 22.5, false), (0., FLOOR, 20., false)],
+                vec![(1.2, FLOOR, 22.5, false), (2.9, FLOOR, 23.3, false), (3.9, FLOOR, 22.4, false),
+                     (4.3, FLOOR, 20., false), (6.7, FLOOR, 20., false), (10.5, FLOOR + 1., 20., true),
+                     (14., 8.6, 20., false)]),
+            ("slit", (-13., 8.6, 26.),
+                vec![(slit_out.0, slit_out.1, slit_out.2, true), (slit_in.0, slit_in.1, slit_in.2, true),
+                     (slit_in.0, FLOOR, slit_in.2, false)],
+                vec![(slit_in.0, slit_in.1, slit_in.2, true), (slit_out.0, slit_out.1, slit_out.2, true),
+                     (-16., 11.6, 26., true), (-16., 8.6, 26., false)]),
+        ];
+        for team in [0u8, 1] {
+            let to_world = |x: f32, y: f32, z: f32| if team == 0 {
+                Vec3::new(1160. - x, 112. + y, 480. - z) } else { Vec3::new(800. + x, 112. + y, 1400. + z) };
+            let axis = to_world(0., FLOOR, TZ);
+            let floor = axis.y;
+            for (name, start, way, out) in &routes {
+                // In: from the roof to the chamber floor.
+                let mut world = World::new();
+                world.set_map(map);
+                world.start_match(true);
+                world.players.truncate(1);
+                world.player_id = 0;
+                let p = &mut world.players[0];
+                p.pos = to_world(start.0, start.1, start.2) + Vec3::Y * PLAYER_RADIUS;
+                p.vel = Vec3::ZERO; p.alive = true; p.health = 100.; p.energy = ENERGY_MAX;
+                p.on_ground = true; p.skiing = false; p.jetting = false;
+                let wps: Vec<(Vec3, bool)> = way.iter().map(|w| (to_world(w.0, w.1, w.2), w.3)).collect();
+                fly(&mut world, &wps, 60 * 20).unwrap_or_else(|e| panic!("team {team} {name} in: {e}"));
+                let p = &world.players[0];
+                assert!(p.on_ground && (p.pos.y - floor - PLAYER_RADIUS).abs() < 0.05,
+                    "team {team} {name}: not standing on the chamber floor at {:?}", p.pos);
+                assert!(Vec2::new(p.pos.x - axis.x, p.pos.z - axis.z).length() < 5.2,
+                    "team {team} {name}: ended outside the chamber at {:?}", p.pos);
+                // Out the same way, back onto the roof beyond the plinth.
+                let back: Vec<(Vec3, bool)> = out.iter().map(|w| (to_world(w.0, w.1, w.2), w.3)).collect();
+                world.players[0].energy = ENERGY_MAX;
+                fly(&mut world, &back, 60 * 20).unwrap_or_else(|e| panic!("team {team} {name} out: {e}"));
+                let p = &world.players[0];
+                assert!(Vec2::new(p.pos.x - axis.x, p.pos.z - axis.z).length() > 7.6,
+                    "team {team} {name}: did not leave the tower, at {:?}", p.pos);
+            }
+        }
+    }
+
+    /// Steer the one player through waypoints with inputs only (facing, W,
+    /// jet). A waypoint with `jet` holds its height with the jet and is
+    /// reached within 0.8 m across and 1.2 m of height; one without is reached
+    /// on foot, or by falling onto it, within 0.8 m across and 0.6 m of height.
+    fn fly(world: &mut World, wps: &[(Vec3, bool)], ticks: usize) -> Result<(), String> {
+        let mut k = 0;
+        for _ in 0..ticks {
+            let (target, jet) = wps[k];
+            let (pos, vel, ground) = { let p = &world.players[0]; (p.pos, p.vel, p.on_ground) };
+            if !pos.is_finite() || !world.players[0].alive { return Err(format!("lost the player at {pos:?}")); }
+            let to = Vec3::new(target.x - pos.x, 0., target.z - pos.z);
+            let dist = to.length();
+            let reached = dist < 0.8 && if jet { (pos.y - PLAYER_RADIUS - target.y).abs() < 1.2 }
+                else { (pos.y - PLAYER_RADIUS - target.y).abs() < 0.6 };
+            if reached {
+                k += 1;
+                if k == wps.len() {
+                    for _ in 0..60 { world.input = Input::default(); world.step_players(STEP); }
+                    return Ok(());
+                }
+                continue;
+            }
+            let mut input = Input::default();
+            // Steer by velocity error: want a speed that can still stop in the
+            // remaining distance, straight at the target; face the difference
+            // between that and the current velocity and push along it. This
+            // cancels sideways drift, so the player does not orbit a waypoint.
+            let brake = if ground { 20. } else { 6. };
+            let wanted = if dist > 1e-3 { to / dist * (2. * brake * dist).sqrt().min(if ground { 6. } else { 4. }) } else { Vec3::ZERO };
+            let error = wanted - Vec3::new(vel.x, 0., vel.z);
+            if error.length() > 0.3 {
+                world.players[0].yaw = (-error.x).atan2(-error.z);
+                input.move_z = 1.;
+            }
+            // Hold height by the apex a coast would reach (gravity 20 m/s/s).
+            let apex = pos.y - PLAYER_RADIUS + vel.y * vel.y.abs() / 40.;
+            input.jet = jet && apex < target.y;
+            world.input = input;
+            world.step_players(STEP);
+        }
+        let p = &world.players[0];
+        Err(format!("stuck before waypoint {k} {:?} at {:?} vel {:?}", wps[k].0, p.pos, p.vel))
+    }
+
     #[test]
     fn server_respawn_picks_varied_points_for_the_right_team() {
         for map in [MapId::BroadsideClone, MapId::Raindance] {
@@ -3464,18 +3739,23 @@ mod line_of_sight_tests {
         let defs=equipment::definitions(map);
         let to_world=|team:u8,lx:f32,y:f32,lz:f32| if team==0 {
             Vec3::new(1160.-lx,112.+y,480.-lz)} else {Vec3::new(800.+lx,112.+y,1400.+lz)};
-        // (x0, x1, z0, z1, floor above the base origin): hall, basement, passage.
-        let rooms:&[(f32,f32,f32,f32,f32)]=&[(-29.,29.,-25.,25.,-10.),(-10.5,10.5,-5.5,23.5,-18.),(-4.5,-1.5,25.3,31.3,-18.)];
-        let (mut sampled,mut seen)=(0,Vec::new());
+        // (x0, x1, z0, z1, floor above the base origin): hall, basement, passage,
+        // and the bishop tower's flag chamber (axis at local z 20, inner radius
+        // 5.2, kept to 4.7 for a body) beyond its L baffle. Allowed: the two
+        // vestibules between each door and the baffle (x > 3.2 or z < 16.8).
+        let rooms:&[(f32,f32,f32,f32,f32)]=&[(-29.,29.,-25.,25.,-10.),(-10.5,10.5,-5.5,23.5,-18.),(-4.5,-1.5,25.3,31.3,-18.),
+            (-4.8,2.8,17.2,24.8,17.6)];
+        let (mut sampled,mut chamber,mut seen)=(0,0,Vec::new());
         for d in defs.iter().filter(|d|matches!(d.kind,Kind::Turret)) {
             let profile=equipment::profile(d.kind,d.weapon).unwrap();
             for team in [0u8,1] { for &(x0,x1,z0,z1,level) in rooms {
                 let mut lx=x0; while lx<=x1 { let mut lz=z0; while lz<=z1 {
+                    if level>17. && Vec2::new(lx,lz-20.).length()>4.7 {lz+=1.5;continue;}
                     let probe=to_world(team,lx,level+1.5,lz);
                     if let Some((fy,_))=pack.floor(probe) {
                         let pos=Vec3::new(probe.x,fy+1.2,probe.z);
                         if (fy-(112.+level)).abs()<0.05 && pack.body_sweep(pos,pos+Vec3::Y*0.01).is_none() {
-                            sampled+=1;
+                            sampled+=1; if level>17. {chamber+=1;}
                             let enemy=equipment::Candidate {index:0,team:1-d.team,pos,vel:Vec3::ZERO};
                             if let Some(a)=equipment::acquire_target(d.pos(),d.radius,d.team,&profile,true,[enemy],
                                 |a,b|obstacle_hit(map,&[],a,b,0.).is_none()) {
@@ -3487,6 +3767,7 @@ mod line_of_sight_tests {
             }}
         }
         assert!(sampled>3500,"too few hall and basement samples ({sampled})");
+        assert!(chamber>100,"too few flag-chamber samples ({chamber})");
         assert!(seen.is_empty(),"{} hall or basement points visible to turrets, e.g. {:?}",seen.len(),&seen[..seen.len().min(8)]);
     }
 

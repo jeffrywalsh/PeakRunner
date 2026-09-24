@@ -1,7 +1,18 @@
-"""Old Holler base (asset raindance-base-v3; the map key stays `raindance`).
+"""Old Holler base (asset raindance-base-v4; the map key stays `raindance`).
 
 Same layout as the original kit base (basement hall, atrium, wide ski ramps,
-exposed flag deck, service spire) with the pipeline checklist applied:
+front roof deck) with the pipeline checklist applied, and the flag in a
+bishop-shaped tower behind the deck (v4, replacing the solid service spire
+and the exposed roof flag stand):
+
+- The tower's lower half is solid; its chamber floor is 9 m above the roof,
+  with the flag on it. Three ways in: a front door (-Z), a side door (+X),
+  and a slit cut diagonally through the mitre's back-left face. An L-shaped
+  baffle inside the doors blocks turret sightlines across the chamber.
+- The chamber is reached by jetting: from the front deck up to the ledge
+  round the collar, or over the mitre and in through the slit.
+
+The earlier cleanup items still hold:
 
 - Walls meet at the corners instead of overlapping, and the roof sits on
   the walls with eaves, so no two visible faces share a plane (z-fighting).
@@ -9,7 +20,7 @@ exposed flag deck, service spire) with the pipeline checklist applied:
   roof slab, and the outer shoulder ramps end flush with the roof edge.
 - Where a ramp's underside is lower than 2.4 m above the floor beneath it,
   a solid closure stops players walking under it.
-- The service spire has a solid base, so it cannot be entered from below.
+- The flag tower is sealed underneath, so it cannot be entered from below.
 - Hall walls get liners, baseboards, cornices, pilasters and a team stripe;
   lit strips under the roof replace the old floating wall lights.
 - Eight spawn points per team, 1.2 m above solid floor, facing open space.
@@ -26,7 +37,7 @@ import math
 
 from assets.structure_kit import Builder
 
-ASSET_ID = 'raindance-base-v3'
+ASSET_ID = 'raindance-base-v4'
 FLOOR, WALL_TOP, ROOF_TOP, APRON_TOP = -10.0, 7.4, 8.6, .03
 LIFT = 1.2
 UNDER, HEADROOM = .6, 2.4
@@ -46,6 +57,18 @@ SERVICE_X = (-1.0, 30.2)
 TUNNEL_CLEAR = 4.5
 CEIL_END = 19.6          # where the rear apron ends and the shed begins
 SHED_X1, SHED_ROOF, DOOR_LINTEL = 32.0, 3.4, 3.0
+# Bishop flag tower: a lathed body on the roof behind the front deck. Heights
+# are above ROOF_TOP; the lower half is solid and the chamber above it is hollow.
+TZ, SIDES, PHASE = 20.0, 20, math.pi/20      # panel 14 faces -Z, panel 19 faces +X
+CH_FLOOR = ROOF_TOP+9.0                      # chamber floor and outer ledge top
+R_OUT, R_IN, R_LEDGE = 5.8, 5.2, 7.4         # stem outer / inner radius at the floor, ledge rim
+DOOR_PANELS = (14, 19)                       # front (-Z) and side (+X) doors
+CH_LINTEL = CH_FLOOR+3.4                     # both doors are one panel (1.6 m) wide, 3.4 m tall
+BAFFLE = 3.0                                 # the L-shaped baffle's walls sit 3 m from the axis
+BAFFLE_TOP = CH_FLOOR+4.2
+R_BULB = 6.5                                 # widest part of the mitre
+SLIT_DIR = (-math.sqrt(.5), math.sqrt(.5))   # the mitre slit faces back-left (-X, +Z)
+SLIT_Y, SLIT_W, SLIT_TILT = ROOF_TOP+18.2, 3.6, math.radians(40)
 
 
 def close_under(mesh, x, width, z0, z1, y0, y1, floor, mat):
@@ -155,6 +178,127 @@ def basement(mesh, b, lit):
     lit.ceiling_strip('x', zc, CEIL_END+1, SHED_X1-1, SHED_ROOF, .8)
 
 
+def _pt(r, y, i, sides=SIDES, phase=PHASE):
+    a = i*math.tau/sides+phase
+    return (r*math.cos(a), y, TZ+r*math.sin(a))
+
+
+def lathe(mesh, prof, mat, solid=True, inward=False, skip=None, sides=SIDES, phase=PHASE):
+    """Surface of revolution about the tower axis through (y, r) profile rings.
+    `skip(i, k)` leaves out panel i of band k (doors, the slit)."""
+    for k in range(len(prof)-1):
+        (y0, r0), (y1, r1) = prof[k], prof[k+1]
+        for i in range(sides):
+            if skip and skip(i, k): continue
+            q, w = _pt(r0, y0, i, sides, phase), _pt(r0, y0, i+1, sides, phase)
+            f, e = _pt(r1, y1, i, sides, phase), _pt(r1, y1, i+1, sides, phase)
+            if r1 == 0: tri = [q, f, w]
+            elif r0 == 0: tri = [q, f, e]
+            else:
+                if inward: mesh.quad(q, w, e, f, mat, solid)
+                else: mesh.quad(q, f, e, w, mat, solid)
+                continue
+            mesh.triangle(tri if not inward else tri[::-1], mat, solid)
+
+
+def annulus(mesh, y, r0, r1, mat, up, solid=True, only=None):
+    """Flat ring at height y between radii r0 < r1 (a disk when r0 == 0)."""
+    for i in range(SIDES):
+        if only is not None and i not in only: continue
+        a, b = _pt(r1, y, i), _pt(r1, y, i+1)
+        if r0 == 0:
+            c = (0, y, TZ)
+            mesh.triangle([c, b, a] if up else [c, a, b], mat, solid)
+        else:
+            ai, bi = _pt(r0, y, i), _pt(r0, y, i+1)
+            if up: mesh.quad(ai, bi, b, a, mat, solid)
+            else: mesh.quad(ai, a, b, bi, mat, solid)
+
+
+def _slit_cut(prof):
+    """Panels of the mitre removed for the slit: a band SLIT_W wide across the
+    back-left face, tilted SLIT_TILT from level, reaching in to the hollow."""
+    dx, dz = SLIT_DIR
+    ax, az = -dz, dx                              # level axis across the slit
+    t = (ax*math.cos(SLIT_TILT), math.sin(SLIT_TILT), az*math.cos(SLIT_TILT))
+    n = (t[1]*dz, t[2]*dx-t[0]*dz, -t[1]*dx)     # cross(dir, t)
+    ln = math.sqrt(sum(v*v for v in n)); n = tuple(v/ln for v in n)
+    cut = set()
+    for k in range(len(prof)-1):
+        (y0, r0), (y1, r1) = prof[k], prof[k+1]
+        for i in range(SIDES):
+            a = (i+.5)*math.tau/SIDES+PHASE; r = (r0+r1)/2
+            x, y, z = r*math.cos(a), (y0+y1)/2-SLIT_Y, r*math.sin(a)
+            if x*dx+z*dz > .35*r and abs(x*n[0]+y*n[1]+z*n[2]) < SLIT_W/2: cut.add((i, k))
+    return cut
+
+
+def bishop_tower(mesh, b, accent):
+    """Each team's flag tower, shaped like a chess bishop: ringed plinth,
+    flared foot, stem, a collar whose top is the chamber floor and an outer
+    landing ledge, a hollow upper stem and mitre, and a ball finial. Three
+    ways into the chamber: a front door (-Z), a side door (+X) and the slit
+    cut diagonally through the mitre's back-left face. An L-shaped baffle
+    inside the doors keeps turrets from seeing across the chamber floor."""
+    lift = lambda prof: [(ROOF_TOP+h, r) for h, r in prof]
+    # Solid lower half: sealed underneath, stepped rings, flare, stem, collar.
+    annulus(mesh, ROOF_TOP, 0, 7.6, 'trim', False)
+    lathe(mesh, lift([(0, 7.6), (.9, 7.6)]), 'trim')
+    annulus(mesh, ROOF_TOP+.9, 7.0, 7.6, 'trim', True)
+    lathe(mesh, lift([(.9, 7.0), (1.6, 7.0)]), 'concrete')
+    annulus(mesh, ROOF_TOP+1.6, 6.8, 7.0, 'concrete', True)
+    lathe(mesh, lift([(1.6, 6.8), (2.4, 6.5), (3.2, 6.1), (4.0, 5.8), (8.2, 5.5)]), 'concrete')
+    lathe(mesh, lift([(3.8, 5.87), (4.2, 5.83)]), accent, solid=False)
+    annulus(mesh, ROOF_TOP+8.2, 5.5, R_LEDGE, 'trim', False)
+    lathe(mesh, lift([(8.2, R_LEDGE), (9.0, R_LEDGE)]), 'trim')
+    annulus(mesh, CH_FLOOR, 0, R_LEDGE, 'grate', True)
+    # Hollow stem with the two doors cut through both shells, then the neck.
+    door = lambda i, k: k == 0 and i in DOOR_PANELS
+    outer = lift([(9, R_OUT), (12.4, 5.7), (14.4, 5.6)])
+    inner = lift([(9, R_IN), (12.4, 5.1), (14.4, 5.0)])
+    lathe(mesh, outer, 'concrete', skip=door)
+    lathe(mesh, inner, 'panel', inward=True, skip=door)
+    for i in DOOR_PANELS:
+        for j, s in ((i, 1), (i+1, -1)):         # jambs close the wall's thickness
+            a, bb = _pt(R_OUT, CH_FLOOR, j), _pt(R_IN, CH_FLOOR, j)
+            c, d = _pt(5.1, CH_LINTEL, j), _pt(5.7, CH_LINTEL, j)
+            mesh.quad(a, bb, c, d, 'trim') if s > 0 else mesh.quad(a, d, c, bb, 'trim')
+        annulus(mesh, CH_LINTEL, 5.1, 5.7, 'trim', False, only={i})
+    annulus(mesh, ROOF_TOP+14.4, 5.6, 6.1, 'trim', False)
+    lathe(mesh, lift([(14.4, 6.1), (15.2, 6.1)]), 'trim')
+    lathe(mesh, lift([(14.95, 6.13), (15.1, 6.13)]), accent, solid=False)
+    annulus(mesh, ROOF_TOP+15.2, 5.7, 6.1, 'trim', True)
+    lathe(mesh, lift([(14.4, 5.0), (15.2, 5.1)]), 'panel', inward=True)
+    # Mitre: outer and inner shells share band heights so the slit cuts both.
+    heights = [15.2, 15.8, 16.4, 17.0, 17.6, 18.2, 18.8, 19.4, 20.0, 20.6, 21.2, 21.8, 22.4, 23.0, 23.5, 23.7]
+    radii = [5.7, 6.1, 6.35, R_BULB, R_BULB, 6.35, 6.1, 5.75, 5.3, 4.75, 4.1, 3.35, 2.5, 1.5, .6, 0]
+    bulb = lift(list(zip(heights, radii)))
+    hollow = [(y, max(0, r-.5) if r > 0 else 0) for y, r in bulb]
+    hollow[0] = (bulb[0][0], 5.1)
+    cut = _slit_cut(bulb)
+    slit = lambda i, k: (i, k) in cut
+    lathe(mesh, bulb, 'concrete', skip=slit)
+    lathe(mesh, hollow, 'panel', inward=True, skip=slit)
+    lathe(mesh, lift([(23.6, .35), (24.0, .35), (24.3, .75), (24.7, .75), (25.0, .45), (25.2, 0)]), 'trim', solid=False, sides=8)
+    # L-shaped baffle: a wall across the front door and one across the side
+    # door, joined at the corner so the two vestibules open only at their far
+    # ends (the -X end in front, the +Z end at the side).
+    b.wall(-2.2, BAFFLE+.2, TZ-BAFFLE-.2, TZ-BAFFLE+.2, CH_FLOOR, BAFFLE_TOP, 'trim')
+    b.wall(BAFFLE-.2, BAFFLE+.2, TZ-BAFFLE+.2, TZ+2.2, CH_FLOOR, BAFFLE_TOP, 'trim')
+    # Team trim and light: flag ring on the floor, glow strips on the inner
+    # wall between the doors, a lit ring under the neck.
+    lathe(mesh, [(CH_FLOOR+.02, 1.6), (CH_FLOOR+.02, 1.2)], accent, solid=False)
+    for i in (3, 7, 10):
+        a = (i+.5)*math.tau/SIDES+PHASE; r = 5.05
+        cx, cz, tx, tz = r*math.cos(a), TZ+r*math.sin(a), -math.sin(a)*.22, math.cos(a)*.22
+        y0, y1 = CH_FLOOR+1, CH_FLOOR+5
+        mesh.quad((cx-tx, y0, cz-tz), (cx+tx, y0, cz+tz), (cx+tx, y1, cz+tz), (cx-tx, y1, cz-tz), 'light', False)
+        b.lamp((cx*.9, CH_FLOOR+3, TZ+(cz-TZ)*.9), 1.0)
+    lathe(mesh, [(ROOF_TOP+14.5, 4.97), (ROOF_TOP+14.7, 4.97)], 'light', solid=False)
+    b.lamp((0, ROOF_TOP+14, TZ), 1.4)
+    b.lamp((0, CH_FLOOR+2.5, TZ), .8)
+
+
 def build(mesh, team, circuit, equipment):
     accent = 'ember' if team == 0 else 'glacier'
     b = Builder(mesh, accent, interior='panel', metal='trim', glow='light')
@@ -188,15 +332,8 @@ def build(mesh, team, circuit, equipment):
     for x in (-22, 22):
         mesh.ramp(x, 18, -52, -28, APRON_TOP, ROOF_TOP, 'concrete')
         close_under(mesh, x, 18, -52, -28, APRON_TOP, ROOF_TOP, APRON_TOP, 'concrete')
-    # Faceted service spire behind the exposed flag deck; solid base.
-    mesh.column((0, ROOF_TOP, 14), 5, 1.1, 'trim', 8)
-    mesh.column((0, ROOF_TOP+1.1, 14), 4.7, .16, accent, 8, solid=False)
-    mesh.column((0, ROOF_TOP, 22), 5.8, 18, 'concrete', 8, top=4.4)
-    cap(mesh, (0, ROOF_TOP, 22), 5.8, 8, 'concrete')
-    mesh.column((0, 26.6, 22), 4.8, 1.2, 'trim', 8)
-    mesh.column((0, 24.7, 22), 4.6, .4, accent, 8, solid=False)
-    mesh.column((0, 27.8, 22), .5, 4, 'panel', 6)
-    for x in (-4, 4): mesh.box((x, 16.5, 18.8), (.6, 12, .6), 'trim', False)
+    # The bishop flag tower behind the front roof deck (see bishop_tower).
+    bishop_tower(mesh, b, accent)
     # Exterior ribbed cladding and team band above ground on the side walls.
     for x in (-32.05, 32.05):
         for z in range(-24, 26, 8): mesh.box((x, WALL_TOP/2, z), (.15, WALL_TOP-.2, .7), 'trim', False)
@@ -215,7 +352,11 @@ def build(mesh, team, circuit, equipment):
         mesh.equipment(item['kind'], item['position'], team, circuit, item.get('weapon', 'bullet'))
     hall, roof = FLOOR+LIFT, ROOF_TOP+LIFT
     return {
-        'flag': (0, 10.05, 14),
+        'flag': (0, CH_FLOOR+.35, TZ),
+        'flag_tower': (0, CH_FLOOR, TZ),
+        # Front door, side door and the mitre slit, each just outside the tower.
+        'tower_entries': [(0, CH_FLOOR, TZ-R_OUT-.8), (R_OUT+.8, CH_FLOOR, TZ),
+                          (SLIT_DIR[0]*(R_BULB+1), SLIT_Y, TZ+SLIT_DIR[1]*(R_BULB+1))],
         'spawn': (48, 0, -65),
         # (x, y, z, local yaw): yaw 0 faces the entrance (-Z), pi faces +Z.
         'spawn_points': [(-10, hall, -18, math.pi), (10, hall, -18, math.pi),

@@ -186,10 +186,71 @@ class RaindanceTests(unittest.TestCase):
                     self.assertTrue(len(first) and first[0] < .17 and fy[0] > .99, (x, z, level, first[:2]))
         self.assertGreater(checked, 2500)
 
-    def test_spire_is_sealed_from_below(self):
-        for dx, dz in [(0, 0), (3, 1), (-2, -1), (4, 2)]:     # all beyond the flag-deck roof (z > 20)
-            t = self.soup.first((dx, 0, 22+dz), (0, 1, 0))
+    def test_flag_tower_is_sealed_from_below(self):
+        for dx, dz in [(0, 2), (3, 3), (-2, 1), (4, 5), (-6, 4)]:     # beyond the front deck roof (z > 20)
+            t = self.soup.first((dx, 0, base.TZ+dz), (0, 1, 0))
             self.assertAlmostEqual(t, base.ROOF_TOP, places=3, msg=(dx, dz))
+
+    # --- Bishop flag tower ----------------------------------------------------
+    def test_chamber_floor_and_ledge_are_standable_with_headroom(self):
+        """The chamber floor (inside the inner wall, off the L baffle) and the
+        ledge round the collar are the floor top, with room to stand."""
+        # The L baffle's two walls, (x0, x1, z0, z1) relative to the axis.
+        walls = [(-2.2, base.BAFFLE+.2, -base.BAFFLE-.2, -base.BAFFLE+.2),
+                 (base.BAFFLE-.2, base.BAFFLE+.2, -base.BAFFLE+.2, 2.2)]
+        near_wall = lambda x, z: any(x0-.3 < x < x1+.3 and z0-.3 < z < z1+.3 for x0, x1, z0, z1 in walls)
+        checked = 0
+        for x in np.arange(-6.8, 6.81, .4):
+            for z in np.arange(-6.8, 6.81, .4):
+                r = math.hypot(x, z)
+                inside = r < base.R_IN-.3 and not near_wall(x, z)
+                ledge = base.R_OUT+.3 < r < base.R_LEDGE-.1
+                if not (inside or ledge): continue
+                p = (x, base.CH_FLOOR+.15, base.TZ+z)
+                first, fy = self.soup.hits(p, (0, -1, 0))
+                self.assertTrue(len(first) and first[0] < .17 and fy[0] > .99, (x, z, first[:2]))
+                self.assertGreater(self.soup.first((x, base.CH_FLOOR+.1, base.TZ+z), (0, 1, 0)), 2.6, (x, z))
+                checked += 1
+        self.assertGreater(checked, 400)
+
+    def test_doors_are_open_and_lead_to_the_baffle(self):
+        """Front (-Z) and side (+X) doors: a body band passes the wall (1.6 m
+        wide, 3.4 m tall) and meets the L baffle inside, never the chamber."""
+        for (x, z), (dx, dz) in (((0, -9), (0, 1)), ((9, 0), (-1, 0))):
+            for h in (.3, 1., 1.8, 2.5, 3.2):
+                for off in (-.5, 0, .5):
+                    o = (x+off*abs(dz), base.CH_FLOOR+h, base.TZ+z+off*abs(dx))
+                    t = self.soup.first(o, (dx, 0, dz), 12)
+                    self.assertAlmostEqual(9-t, base.BAFFLE+.2, places=2, msg=(x, z, h, off))
+            o = (x, base.CH_FLOOR+3.55, base.TZ+z)                       # lintel
+            self.assertLess(self.soup.first(o, (dx, 0, dz), 12), 9-base.R_IN+.01)
+
+    def test_slit_has_a_lane_for_a_standing_body(self):
+        """A 1.04 m wide, 2.56 m tall body box flies straight in through the
+        mitre slit along its facing and on to 1.5 m from the axis."""
+        sx, sz = base.SLIT_DIR; ax, az = -sz, sx
+        lanes = []
+        for a in np.arange(-2, 2.01, .25):
+            for feet in np.arange(14.5, 21, .25):
+                ok = all(self.soup.first((sx*9+ax*(a+off), base.ROOF_TOP+feet+dh, base.TZ+sz*9+az*(a+off)), (-sx, 0, -sz), 7.5) > 7.49
+                         for off in np.linspace(-.52, .52, 5) for dh in np.linspace(0, 2.56, 6))
+                if ok: lanes.append((a, feet))
+        self.assertGreater(len(lanes), 12, lanes)
+        # The lane the movement test flies (sim.rs): 0.85 m along the slit, feet 16.5 m up.
+        self.assertIn((-.75, 16.5), [(round(a, 2), round(f, 2)) for a, f in lanes])
+
+    def test_the_flag_tower_reads_as_a_bishop(self):
+        """Silhouette: wide plinth, narrow stem, collar, wider mitre, taller
+        than the old 18 m spire, sealed at the top apart from the slit."""
+        prof = {}
+        for h in (.5, 5, 8.6, 12, 17.3, 22):
+            rs = [self.soup.first((math.cos(a)*12, base.ROOF_TOP+h, base.TZ+math.sin(a)*12), (-math.cos(a), 0, -math.sin(a)), 12)
+                  for a in np.linspace(0, math.pi, 7)]                # front half, away from the slit
+            prof[h] = 12-min(rs)
+        self.assertGreater(prof[.5], prof[5]); self.assertGreater(prof[8.6], prof[5])      # plinth, collar
+        self.assertGreater(prof[17.3], prof[12]); self.assertGreater(prof[17.3], prof[22])  # mitre bulge
+        t = self.soup.first((0, base.CH_FLOOR+1, base.TZ), (0, 1, 0))
+        self.assertGreater(base.CH_FLOOR+1+t-base.ROOF_TOP, 18.0)          # taller than the old spire
 
     # --- Generator basement ---------------------------------------------------
     def test_basement_floor_has_headroom_over_the_generator(self):
@@ -287,16 +348,22 @@ class RaindanceTests(unittest.TestCase):
 
     def test_manifest_spawn_points_are_world_space_per_team(self):
         self.assertEqual([len(t) for t in self.man['spawn_points']], [8, 8])
-        for team, flag in enumerate(self.man['flags']):
+        bases = sorted(build.spec()['bases'], key=lambda b: b['team'])
+        for team, b in enumerate(bases):
             for x, y, z, yaw in self.man['spawn_points'][team]:
-                self.assertLess(math.hypot(x-flag[0], z-flag[2]), 50)
+                self.assertLess(math.hypot(x-b['position'][0], z-b['position'][2]), 40)   # at their own base
                 self.assertTrue(0 <= yaw < math.tau)
 
-    def test_flag_stands_on_its_stand_open_to_the_sky(self):
+    def test_flag_stands_in_the_bishop_chamber(self):
+        """On the chamber floor at the tower's axis, under the hollow mitre, and
+        away from both doors and the slit (no spawn inside the tower)."""
         fx, fy, fz = self.anchors['flag']
+        self.assertEqual((fx, fz), (0, base.TZ))
         t, ny = self.soup.hits((fx, fy+1, fz), (0, -1, 0))
-        self.assertAlmostEqual(fy+1-t[0], base.ROOF_TOP+1.1, places=3)
-        self.assertEqual(self.soup.first((fx, fy+.1, fz), (0, 1, 0)), np.inf)
+        self.assertAlmostEqual(fy+1-t[0], base.CH_FLOOR, places=3); self.assertGreater(ny[0], .999)
+        self.assertGreater(self.soup.first((fx, fy+.1, fz), (0, 1, 0)), 12)
+        for x, y, z, _ in self.anchors['spawn_points']:
+            self.assertLess(y, base.CH_FLOOR-5, 'spawns stay out of the flag tower')
 
     def test_equipment_is_unchanged_except_the_roof_sensor(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -311,7 +378,10 @@ class RaindanceTests(unittest.TestCase):
         moved = [(a['id'], a['position'], b['position']) for a, b in zip(old['entities'], new) if list(a['position']) != list(b['position'])]
         self.assertEqual([m[0] for m in moved], ['sensor-4', 'sensor-11'])
         for _, a, b in moved: self.assertAlmostEqual(math.dist(a, b), 5, places=4)
-        self.assertEqual([list(f) for f in old['flags']], self.man['flags'])
+        # The flags moved from the exposed roof stand into the bishop towers.
+        for b, flag in zip(sorted(build.spec()['bases'], key=lambda b: b['team']), self.man['flags']):
+            m = kit.Mesh(); m.origin = tuple(b['position']); m.yaw = math.radians(b['yaw'])
+            for got, want in zip(flag, m.point(self.anchors['flag'])): self.assertAlmostEqual(got, want, places=4)
 
     def test_terrain_holes_and_scenery_match_the_original_kit(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -340,6 +410,13 @@ class RaindanceTests(unittest.TestCase):
                 targets.append(m.point((-3, base.B_FLOOR+base.LIFT+.8, z)))
             for x in np.arange(base.SERVICE_X[0]+.5, base.CEIL_END, 1.5):
                 targets.append(m.point((x, base.service_y(x)+base.LIFT+.8, sum(base.STRIP_Z)/2)))
+            # The flag chamber beyond the L baffle. The two vestibules between
+            # each door and the baffle (x > 3.2 or z < -3.2 from the axis) are
+            # the allowed tolerance, as on the other maps.
+            for x in np.arange(-4.6, 2.81, .5):
+                for z in np.arange(-2.8, 4.61, .5):
+                    if math.hypot(x, z) < base.R_IN-.55:
+                        targets.append(m.point((x, base.CH_FLOOR+base.LIFT+.8, base.TZ+z)))
         targets = np.array(targets)
         turrets = [e for e in self.man['entities'] if e['kind'] == 'turret']
         self.assertEqual(len(turrets), 6)
@@ -423,24 +500,50 @@ class RaindanceTests(unittest.TestCase):
                 self.assertEqual(f.read_bytes(), (out/f.name).read_bytes(), f.name)
 
 class RouteCounts(unittest.TestCase):
-    """Walking routes on the committed pack (assets/route_checks.py): more
-    than one way into each hall and onto each flag roof, and exactly two
-    into the generator basement (the atrium stair and the service stair)."""
+    """Routes on the committed pack (assets/route_checks.py). Walking: more
+    than one way into each hall, and exactly two into the generator basement
+    (the atrium stair and the service stair). Jetting: three ways into each
+    bishop flag chamber, the front door, the side door and the mitre slit.
+    The chamber is round, so it is counted with a round region; entries at
+    floor height are the doors, higher ones come in over the top through the
+    slit (the over-the-top hop, or a drop from the slit's lip)."""
     def test_base_routes(self):
-        from assets import route_checks
-        pack = route_checks.Pack(PACK)
+        from assets import route_checks as rc
+        pack = rc.Pack(PACK)
         for b in build.spec()['bases']:
             ox, oy, oz = b['position']; a = math.radians(b['yaw']); c, s = math.cos(a), math.sin(a)
+            m = kit.Mesh(); m.origin = tuple(b['position']); m.yaw = a
             def box(lx0, lx1, ly0, ly1, lz0, lz1):
                 (ax, az), (bx, bz) = [(ox+lx*c+lz*s, oz-lx*s+lz*c) for lx, lz in ((lx0, lz0), (lx1, lz1))]
                 return (min(ax, bx), max(ax, bx), oy+ly0, oy+ly1, min(az, bz), max(az, bz))
-            found = route_checks.base_entries(pack, (ox, oz), {
+            found = rc.base_entries(pack, (ox, oz), {
                 'hall': box(-29.5, 29.5, base.FLOOR-1, base.FLOOR+1.5, -25.5, 25.5),
-                'flag': box(-12, 12, base.ROOF_TOP-1, base.ROOF_TOP+1.5, 4, 20),
                 'generator': box(-base.B_X, base.B_X, base.B_FLOOR-.5, base.B_FLOOR+1.5, base.B_Z0, base.B_Z1)})
             self.assertGreaterEqual(len(found['hall']), 2, (b['id'], found['hall']))
-            self.assertGreaterEqual(len(found['flag']), 2, (b['id'], found['flag']))
             self.assertEqual(len(found['generator']), 2, (b['id'], found['generator']))
+            # The flag chamber, airborne model.
+            g = rc.Graph(pack, ox-64, ox+64, oz-64, oz+64, airborne=True)
+            seeds = list(rc.open_ground(g, ox, oz, 48.0)) + [i for i in range(len(g.nodes)) if g.structure(i) and g.open_sky(i)]
+            cx, _, cz = m.point((0, 0, base.TZ)); floor = oy+base.CH_FLOOR
+            n = g.nodes
+            inside = (np.hypot(n[:, 0]-cx, n[:, 2]-cz) < base.R_IN) & (np.abs(n[:, 1]-floor) < .5)
+            vol = (cx-base.R_IN, cx+base.R_IN, floor-.5, floor+1.5+rc.HEADROOM, cz-base.R_IN, cz+base.R_IN)
+            entries = rc.entries(g, inside, seeds, vol, overhead=(7, 8, 9, 10))
+            doors = [e for e in entries if e[1]-floor < .5]
+            mitre = [e for e in entries if e[1]-floor >= .5]
+            want = [m.point(p) for p in self.door_points()]
+            self.assertEqual(len(doors), 2, (b['id'], entries))
+            for w in want:
+                self.assertLess(min(math.hypot(e[0]-w[0], e[2]-w[2]) for e in doors), 1.5, (b['id'], w, doors))
+            self.assertGreaterEqual(len(mitre), 1, (b['id'], entries))
+            sx, _, sz = [p-q for p, q in zip(m.point((base.SLIT_DIR[0], 0, base.TZ+base.SLIT_DIR[1])), (cx, 0, cz))]
+            for e in mitre: self.assertGreater((e[0]-cx)*sx+(e[2]-cz)*sz, 0, (b['id'], 'mitre entry not at the slit', e))
+
+    @staticmethod
+    def door_points():
+        """Where each door's crossing lands: just inside the inner wall."""
+        r = base.R_IN-.2
+        return [(0, base.CH_FLOOR, base.TZ-r), (r, base.CH_FLOOR, base.TZ)]
 
 
 class SpawnForwardClearance(unittest.TestCase):

@@ -34,6 +34,10 @@ can walk to). It adds, on top of walking:
   the rest of the 4 s tank (about 53 m), then coasts about 8 m: roughly 69 m.
   Hops only cross the region's boundary; long flights between exterior decks
   are already covered by the open-sky rule.
+- Over-the-top hops (opt-in, `overhead=(dh, ...)`). A sixth path climbs to
+  dh metres above the inside node, crosses at that height and drops straight
+  down onto it: the only way in through a slit or hatch high in a room's
+  wall or roof. Off by default, so existing counts do not change.
 
 A crossing's entry point is where its path first enters the region's volume
 (the node box raised by HEADROOM), so every route through one door or one
@@ -268,11 +272,13 @@ def hop_paths(a, b):
             [a, (ax, top, bz), (bx, top, bz), b]]
 
 
-def entries(graph, inside, outside_seeds, volume=None):
+def entries(graph, inside, outside_seeds, volume=None, overhead=()):
     """Clusters of edges from the region's outside (reached from the seeds
     without entering the region) into the region. Returns cluster centres.
     `volume` (x0,x1,y0,y1,z0,z1) places airborne crossings where their path
-    enters the region."""
+    enters the region. `overhead` (airborne only) adds hops that climb to
+    each given height above the inside node, cross there and drop straight
+    down: a slit or hatch in a room's ceiling or upper wall."""
     outside = graph.reach(outside_seeds, inside)
     cross = [(graph.nodes[i]+graph.nodes[j])/2 for i in np.flatnonzero(outside) for j in graph.adj[i] if inside[j]]
     if graph.airborne:
@@ -298,7 +304,10 @@ def entries(graph, inside, outside_seeds, volume=None):
                 for k in ok:
                     i = cand[k]
                     if j in graph.adj[i]: continue
-                    path = next((p for p in hop_paths(tuple(nodes[i]), tuple(b)) if path_clear(graph.pack, p)), None)
+                    a = tuple(nodes[i]); paths = hop_paths(a, tuple(b))
+                    paths += [[a, (a[0], b[1]+dh, a[2]), (b[0], b[1]+dh, b[2]), tuple(b)]
+                              for dh in overhead if b[1]+dh > a[1]]
+                    path = next((p for p in paths if path_clear(graph.pack, p)), None)
                     if path is not None:
                         cross.append(first_inside(path, volume)); break
     clusters = []
@@ -323,13 +332,13 @@ def box_region(graph, x0, x1, y0, y1, z0, z1):
     return (n[:, 0] >= x0) & (n[:, 0] <= x1) & (n[:, 1] >= y0) & (n[:, 1] <= y1) & (n[:, 2] >= z0) & (n[:, 2] <= z1)
 
 
-def base_entries(pack, centre, regions, extent=64.0, seed_radius=48.0, airborne=False):
+def base_entries(pack, centre, regions, extent=64.0, seed_radius=48.0, airborne=False, overhead=()):
     """Entries into each named world-space region box (x0, x1, y0, y1, z0, z1)
     around one base: {name: [entry centres]}. Open ground is every terrain
     node at least seed_radius from the base centre, inside a square of
     half-size `extent`. With airborne=True, open-sky decks also seed the
-    outside and drops and hops count (see the module doc). Pass a Pack or a
-    pack directory."""
+    outside and drops and hops count (see the module doc); `overhead` adds
+    over-the-top hops (see entries). Pass a Pack or a pack directory."""
     pack = pack if isinstance(pack, Pack) else Pack(pack)
     cx, cz = centre
     g = Graph(pack, cx-extent, cx+extent, cz-extent, cz+extent, airborne=airborne)
@@ -338,7 +347,7 @@ def base_entries(pack, centre, regions, extent=64.0, seed_radius=48.0, airborne=
     out = {}
     for name, box in regions.items():
         x0, x1, y0, y1, z0, z1 = box
-        out[name] = entries(g, box_region(g, *box), seeds, (x0, x1, y0, y1+HEADROOM, z0, z1))
+        out[name] = entries(g, box_region(g, *box), seeds, (x0, x1, y0, y1+HEADROOM, z0, z1), overhead)
     return out
 
 
