@@ -96,6 +96,14 @@ impl Cue {
             _ => 120.0,
         }
     }
+    /// Reverb send scale. Explosions stay short and punchy: a long outdoor
+    /// tail would stretch their deep hit into a drawn-out roar.
+    fn wet(self) -> f32 {
+        match self {
+            Cue::BoomNear | Cue::BoomFar | Cue::GenBlast => 0.25,
+            _ => 1.0,
+        }
+    }
     /// Cap on simultaneous copies, so chaingun spam or footsteps can't
     /// crowd out everything else.
     fn max_voices(self) -> usize {
@@ -310,10 +318,11 @@ pub fn synth(cue: Cue, variant: usize, sr: f32) -> Vec<f32> {
             let mut rings = [Reso::new((980.0 + v * 31.0) * p, 10.0, sr), Reso::new((2350.0 - v * 27.0) * p, 12.0, sr)];
             render(sr, if turret { 0.22 } else { 0.16 }, |t| {
                 let x = n.next();
-                let thump = o1.tick(base * (1.0 + 0.6 * (-t * 60.0).exp()), sr) * env(t, 0.0008, 0.04) * 1.0;
-                let crack = f1.hp(x, if turret { 2400.0 } else { 3000.0 }, 0.7, sr) * env(t, 0.0003, 0.01) * 1.5;
-                let mech: f32 = rings.iter_mut().map(|r| r.tick(x * (-t * 380.0).exp())).sum::<f32>() * 2.6 * (-t * 30.0).exp();
-                sat(thump + crack + mech, 2.0)
+                let thump = o1.tick(base * (1.0 + 0.6 * (-t * 60.0).exp()), sr) * env(t, 0.0008, 0.03) * 0.75;
+                let crack = f1.bp(x, if turret { 2000.0 } else { 2300.0 }, 0.8, sr) * env(t, 0.0003, 0.018) * 2.2;
+                let snap = f2.bp(x, 850.0, 1.0, sr) * env(t, 0.0005, 0.03) * 2.4;
+                let mech: f32 = rings.iter_mut().map(|r| r.tick(x * (-t * 320.0).exp())).sum::<f32>() * 3.4 * (-t * 26.0).exp();
+                sat(thump + crack + snap + mech, 2.0)
             })
         }
         Cue::GrenadeFire => {
@@ -345,49 +354,57 @@ pub fn synth(cue: Cue, variant: usize, sr: f32) -> Vec<f32> {
             })
         }
         Cue::BoomNear => {
-            // Sharp crack and a bright fireball over a sub drop, then a
-            // rumbling tail with scattered debris.
+            // Short and deep: a sharp crack, a heavy 40-120 Hz body that
+            // punches and drops away, a quick fireball, a scatter of debris.
+            // Audible for under a second.
             let drop = 1.0 + (v - 1.0) * 0.06;
             let mut debris = Rng(0xDEB2 ^ variant as u32);
-            let mut gf = Svf::default();
-            render(sr, 2.8, |t| {
+            let (mut gf, mut b1) = (Svf::default(), Svf::default());
+            render(sr, 1.0, |t| {
                 let x = n.next();
-                let sub = o1.tick((38.0 + 44.0 * (-t * 4.0).exp()) * drop, sr) * env(t, 0.004, 0.35) * 0.9;
-                let crack = f1.hp(x, 1800.0, 0.7, sr) * env(t, 0.0004, 0.05) * 2.2;
-                let fire = f2.lp(pink.next(), 6500.0 * (-t * 1.1).exp() + 900.0, 0.7, sr) * env(t, 0.003, 0.8) * 4.6;
-                let rumble = f3.lp(pink.next(), 180.0, 0.7, sr) * env(t, 0.05, 0.9) * 1.0;
-                let hit = if t > 0.08 && t < 1.4 && debris.next() > 0.997 + t * 0.0015 { 1.0 } else { 0.0 };
-                let grit = gf.bp(hit, 2300.0 + 700.0 * debris.next(), 5.0, sr) * 1.4 * (1.4 - t).max(0.0);
-                sat(sub + crack + fire + rumble + grit, 1.6)
+                let sub = o1.tick((46.0 + 64.0 * (-t * 9.0).exp()) * drop, sr) * env(t, 0.003, 0.14) * 0.8;
+                let crack = f1.hp(x, 1600.0, 0.7, sr) * env(t, 0.0004, 0.05) * 3.0;
+                let fire = f2.lp(pink.next(), 6500.0 * (-t * 2.5).exp() + 800.0, 0.7, sr) * env(t, 0.003, 0.2) * 6.0;
+                let p = pink.next();
+                let body = b1.lp(f3.lp(p, 150.0, 0.8, sr), 150.0, 0.8, sr) * env(t, 0.006, 0.2) * 3.2;
+                let hit = if t > 0.05 && t < 0.5 && debris.next() > 0.9975 + t * 0.003 { 1.0 } else { 0.0 };
+                let grit = gf.bp(hit, 2300.0 + 700.0 * debris.next(), 5.0, sr) * 1.2 * (0.5 - t).max(0.0) * 2.0;
+                sat(sub + crack + fire + body + grit, 1.8)
             })
         }
         Cue::BoomFar => {
-            // Distant rolling thunder: no crack, rumbling swells.
-            let c = 320.0 + v * 40.0;
-            render(sr, 4.0, |t| {
-                let roll = env(t, 0.04, 0.9) + 0.55 * env(t - 0.45, 0.08, 0.7) + 0.35 * env(t - 1.1, 0.1, 0.8);
-                let rumble = f1.lp(pink.next(), c, 0.7, sr) * roll * 4.0;
-                let sub = o1.tick(42.0, sr) * env(t, 0.05, 0.7) * 0.5;
-                sat(rumble + sub, 1.3)
+            // Distant: the crack is gone, a deep low thud arrives with a short
+            // roll behind it. Stays under about 1.2 s.
+            let c = 380.0 + v * 40.0;
+            let mut b1 = Svf::default();
+            render(sr, 1.2, |t| {
+                let roll = env(t, 0.02, 0.2) + 0.45 * env(t - 0.14, 0.04, 0.18) + 0.25 * env(t - 0.32, 0.05, 0.16);
+                let p = pink.next();
+                let rumble = b1.lp(f1.lp(p, c, 0.7, sr), c, 0.7, sr) * roll * 7.0;
+                let sub = o1.tick(46.0 + 18.0 * (-t * 6.0).exp(), sr) * env(t, 0.02, 0.18) * 0.3;
+                sat(rumble + sub, 1.4)
             })
         }
         Cue::GenBlast => {
+            // The generator lets go: a deep blast with a metallic groan and
+            // a dying electrical hum, over in about a second.
             let mut groan = [Reso::new(112.0, 30.0, sr), Reso::new(157.0, 34.0, sr), Reso::new(233.0, 36.0, sr)];
             let mut arc = Rng(0xA2C);
             let mut gate = 0.0_f32;
             let mut dying = Saw::default();
-            let mut hum_f = Svf::default();
-            render(sr, 4.0, |t| {
+            let (mut hum_f, mut b1) = (Svf::default(), Svf::default());
+            render(sr, 1.2, |t| {
                 let x = n.next();
-                let sub = o1.tick(30.0 + 40.0 * (-t * 1.8).exp(), sr) * env(t, 0.005, 0.7) * 0.9;
-                let crack = f1.hp(x, 1500.0, 0.7, sr) * env(t, 0.0005, 0.07) * 2.2;
-                let roar = f2.lp(pink.next(), 4200.0 * (-t * 1.1).exp() + 420.0, 0.8, sr) * env(t, 0.004, 0.8) * 3.8;
-                let metal: f32 = groan.iter_mut().map(|r| r.tick(x * 0.05)).sum::<f32>() * env(t, 0.02, 1.2) * 6.0;
-                if arc.next() > 0.9994 && t < 1.8 { gate = 1.0; }
+                let sub = o1.tick(38.0 + 52.0 * (-t * 7.0).exp(), sr) * env(t, 0.004, 0.18) * 0.9;
+                let crack = f1.hp(x, 1500.0, 0.7, sr) * env(t, 0.0005, 0.05) * 2.2;
+                let roar = f2.lp(pink.next(), 4200.0 * (-t * 2.6).exp() + 520.0, 0.8, sr) * env(t, 0.004, 0.24) * 4.4;
+                let body = b1.lp(f3.lp(pink.next(), 140.0, 0.8, sr), 140.0, 0.8, sr) * env(t, 0.008, 0.24) * 4.0;
+                let metal: f32 = groan.iter_mut().map(|r| r.tick(x * 0.05)).sum::<f32>() * env(t, 0.02, 0.3) * 6.0;
+                if arc.next() > 0.9994 && t < 0.6 { gate = 1.0; }
                 gate *= 1.0 - 60.0 / sr;
-                let crackle = f3.bp(x, 2800.0, 1.2, sr) * gate * 0.8;
-                let hum = hum_f.lp(dying.tick(52.0 - 22.0 * (t / 4.0), sr), 260.0, 1.5, sr) * env(t, 0.01, 1.4) * 0.35;
-                sat(sub + crack + roar + metal + crackle + hum, 1.6)
+                let crackle = f3.bp(x, 2800.0, 1.2, sr) * gate * 0.6;
+                let hum = hum_f.lp(dying.tick(52.0 - 22.0 * t, sr), 260.0, 1.5, sr) * env(t, 0.01, 0.3) * 0.4;
+                sat(sub + crack + roar + body + metal + crackle + hum, 1.7)
             })
         }
         Cue::ShieldHit => {
@@ -569,9 +586,9 @@ pub fn synth_loop(kind: Loop, sr: f32) -> Vec<f32> {
             Loop::Ski => {
                 // Gritty scrape with grainy texture over a thin low bed.
                 grain += (x.abs() - grain) * lp_coef(28.0, sr);
-                let scrape = f1.bp(x, 2600.0, 0.6, sr) * (0.5 + 1.6 * grain) * 1.4;
+                let scrape = f1.bp(x, 2100.0, 0.6, sr) * (0.5 + 1.6 * grain) * 1.4;
                 let hiss = f3.hp(x, 4500.0, 0.7, sr) * 0.2 * (0.6 + grain);
-                let bed = f2.lp(pink.next(), 300.0, 0.7, sr) * 1.1;
+                let bed = f2.lp(pink.next(), 300.0, 0.7, sr) * 0.45;
                 scrape + hiss + bed
             }
             Loop::Wind => {
@@ -778,6 +795,8 @@ struct Voice {
     lp_a: f32,
     lp_z: f32,
     delay: u32,
+    /// Reverb send scale for this cue.
+    wet: f32,
 }
 
 #[derive(Clone)]
@@ -790,6 +809,33 @@ struct LoopVoice {
     lp_a: f32,
     lp_z: f32,
     target: LoopTarget,
+    /// Gain smoothing coefficients (rise, fall) per sample.
+    attack: f32,
+    release: f32,
+    /// Reverb send scale.
+    wet: f32,
+}
+
+/// One-pole smoothing coefficient for time constant `tau` seconds.
+fn tau_coef(tau: f32, sr: f32) -> f32 { 1.0 - (-1.0 / (tau * sr)).exp() }
+
+/// Rise and fall time constants for a loop's gain. Skiing is a contact
+/// sound: it bites in fast and stops almost at once, like a one-shot scrape,
+/// instead of lingering after the skis leave the ground.
+fn loop_edges(l: Loop) -> (f32, f32) {
+    match l {
+        Loop::Ski => (0.012, 0.02),
+        _ => (0.04, 0.04),
+    }
+}
+
+/// Reverb send per loop. A ski scrape is a dry contact sound; letting it
+/// ring in the outdoor reverb made it drag on after the skis lifted.
+fn loop_wet(l: Loop) -> f32 {
+    match l {
+        Loop::Ski => 0.05,
+        _ => 0.3,
+    }
 }
 
 /// Stereo feedback-delay-network reverb: a pre-delay, then four damped lines
@@ -898,12 +944,13 @@ impl Mixer {
         let loops = LOOPS.iter().map(|&l| LoopVoice {
             clip: Arc::from(synth_loop(l, sr)), pos: 0.0, gain: 0.0, rate: 1.0, pan: 0.0,
             lp_a: 1.0, lp_z: 0.0, target: LoopTarget { gain: 0.0, rate: 1.0, pan: 0.0, cutoff: 18_000.0 },
+            attack: tau_coef(loop_edges(l).0, sr), release: tau_coef(loop_edges(l).1, sr), wet: loop_wet(l),
         }).collect();
         Mixer {
             sr, clips, voices: vec![Voice::default(); VOICES], loops, ambient: None, ambient_target: 0.0,
             queue: Vec::with_capacity(QUEUE), master: 0.85, master_target: 0.85, reverb: Reverb::new(sr),
             room_level: OUTDOOR_WET, room_target: OUTDOOR_WET, smooth: 1.0 - (-1.0 / (0.04 * sr)).exp(),
-            lim: 1.0, lim_attack: 1.0 - (-1.0 / (0.0005 * sr)).exp(), lim_release: 1.0 - (-1.0 / (0.08 * sr)).exp(),
+            lim: 1.0, lim_attack: 1.0 - (-1.0 / (0.0005 * sr)).exp(), lim_release: 1.0 - (-1.0 / (0.25 * sr)).exp(),
         }
     }
 
@@ -973,7 +1020,7 @@ impl Mixer {
                 s[j.min(s.len() - 1)] * (1.0 - f) + s[(j + 1) % s.len()] * f
             }).collect();
             LoopVoice { clip: Arc::from(resampled), pos: 0.0, gain: 0.0, rate: 1.0, pan: 0.0, lp_a: 1.0, lp_z: 0.0,
-                target: LoopTarget::default() }
+                target: LoopTarget::default(), attack: self.smooth, release: self.smooth, wet: 0.3 }
         });
     }
     pub fn set_ambient_gain(&mut self, gain: f32) { self.ambient_target = gain; }
@@ -1018,6 +1065,7 @@ impl Mixer {
             clip: Some(clip), cue_index: ci, priority: p.cue.priority(), pos: 0.0,
             rate: p.rate.clamp(0.25, 4.0), gl: g * angle.cos(), gr: g * angle.sin(),
             lp_a: lp_coef(p.cutoff, self.sr), lp_z: 0.0, delay: (p.delay.max(0.0) * self.sr) as u32,
+            wet: p.cue.wet(),
         };
     }
 
@@ -1040,11 +1088,11 @@ impl Mixer {
                 v.pos += v.rate;
                 l += v.lp_z * v.gl;
                 r += v.lp_z * v.gr;
-                send += v.lp_z * (v.gl + v.gr) * 0.5;
+                send += v.lp_z * (v.gl + v.gr) * 0.5 * v.wet;
             }
             for lv in self.loops.iter_mut().chain(self.ambient.iter_mut()) {
                 let t = lv.target;
-                lv.gain += (t.gain - lv.gain) * k;
+                lv.gain += (t.gain - lv.gain) * if t.gain > lv.gain { lv.attack } else { lv.release };
                 lv.rate += (t.rate.clamp(0.25, 4.0) - lv.rate) * k;
                 lv.pan += (t.pan.clamp(-1.0, 1.0) - lv.pan) * k;
                 lv.lp_a += (lp_coef(t.cutoff.max(60.0), self.sr) - lv.lp_a) * k;
@@ -1058,7 +1106,7 @@ impl Mixer {
                 let angle = (lv.pan + 1.0) * std::f32::consts::FRAC_PI_4;
                 l += lv.lp_z * lv.gain * angle.cos();
                 r += lv.lp_z * lv.gain * angle.sin();
-                send += lv.lp_z * lv.gain * 0.3;
+                send += lv.lp_z * lv.gain * lv.wet;
             }
             if let Some(a) = &mut self.ambient { a.target.gain = self.ambient_target; a.target.rate = 1.0; a.target.cutoff = 18_000.0; }
             self.room_level += (self.room_target - self.room_level) * k;
@@ -1446,6 +1494,120 @@ mod tests {
         }
     }
 
+    /// Transient onsets in a mono clip: rises above half the peak envelope
+    /// after at least 15 ms below a quarter of it (the first rise counts).
+    fn onsets(x: &[f32], sr: f32) -> usize {
+        let k = ((sr * 0.003) as usize).max(1);
+        let mut env = Vec::with_capacity(x.len());
+        let mut acc = 0.0_f32;
+        for (i, v) in x.iter().enumerate() {
+            acc += v.abs();
+            if i >= k { acc -= x[i - k].abs(); }
+            env.push(acc / k as f32);
+        }
+        let peak = env.iter().cloned().fold(0.0_f32, f32::max) + 1e-9;
+        let hop = (sr * 0.005) as usize;
+        let (mut n, mut armed, mut low) = (0, true, 0usize);
+        for e in env.iter().step_by(hop) {
+            if *e < 0.25 * peak { low += 1 } else { low = 0 }
+            if low * 5 >= 15 { armed = true; }
+            if armed && *e > 0.5 * peak { n += 1; armed = false; low = 0; }
+        }
+        n
+    }
+
+    #[test]
+    fn chaingun_and_footsteps_are_single_hits() {
+        let sr = 44_100.0;
+        for cue in [Cue::ChainShot, Cue::TurretBullet, Cue::Footstep] {
+            for v in 0..cue.variants() {
+                assert_eq!(onsets(&synth(cue, v, sr), sr), 1, "{cue:?} variant {v} must be one hit");
+            }
+        }
+    }
+
+    #[test]
+    fn full_auto_chaingun_stays_within_its_voice_cap() {
+        let sr = 44_100.0;
+        let mut m = Mixer::new(sr);
+        let mut chunk = vec![0.0; (0.075 * sr) as usize * 2];
+        let mut peak_voices = 0;
+        for i in 0..40 {
+            m.play(Play::local(Cue::ChainShot, i));
+            m.render(&mut chunk);
+            let n = m.voices.iter().filter(|v| v.clip.is_some() && v.cue_index == Cue::ChainShot.index()).count();
+            peak_voices = peak_voices.max(n);
+            assert!(n <= Cue::ChainShot.max_voices());
+        }
+        // One voice per round; with 0.16 s tails at 0.075 s spacing about three overlap.
+        assert!((2..=4).contains(&peak_voices), "{peak_voices} overlapping chaingun voices");
+    }
+
+    #[test]
+    fn ski_stops_quickly_when_the_skis_lift() {
+        let sr = 44_100.0;
+        let mut m = Mixer::new(sr);
+        let rms = |b: &[f32]| (b.iter().map(|s| s * s).sum::<f32>() / b.len() as f32).sqrt();
+        let mut on = vec![0.0; (sr * 0.6) as usize * 2];
+        m.set_loop(Loop::Ski, LoopTarget { gain: 0.3, rate: 1.1, pan: 0.0, cutoff: 7000.0 });
+        m.render(&mut on);
+        let steady = rms(&on[on.len() / 2..]);
+        // Onset: within 40 ms of touching down it is already near full level.
+        let mut m2 = Mixer::new(sr);
+        m2.set_loop(Loop::Ski, LoopTarget { gain: 0.3, rate: 1.1, pan: 0.0, cutoff: 7000.0 });
+        let mut first = vec![0.0; (sr * 0.06) as usize * 2];
+        m2.render(&mut first);
+        assert!(rms(&first[(sr * 0.04) as usize * 2..]) > steady * 0.6, "ski onset too slow");
+        // Release: 150 ms after lifting, the last 50 ms are 40 dB down.
+        m.set_loop(Loop::Ski, LoopTarget { gain: 0.0, rate: 1.1, pan: 0.0, cutoff: 7000.0 });
+        let mut off = vec![0.0; (sr * 0.15) as usize * 2];
+        m.render(&mut off);
+        let tail = rms(&off[off.len() - (sr * 0.05) as usize * 2..]);
+        assert!(tail < steady * 0.01, "ski tail {tail} vs steady {steady}");
+    }
+
+    /// (share of the first 0.3 s's energy below ~150 Hz, share of all
+    /// energy arriving after 1.0 s).
+    fn boom_shape(x: &[f32], sr: f32) -> (f32, f32) {
+        let a = tau_coef(1.0 / (std::f32::consts::TAU * 150.0), sr);
+        let (mut z1, mut z2) = (0.0_f32, 0.0_f32);
+        let (mut low, mut early, mut late, mut total) = (0.0_f32, 0.0_f32, 0.0_f32, 0.0_f32);
+        for (i, v) in x.iter().enumerate() {
+            z1 += (v - z1) * a;
+            z2 += (z1 - z2) * a;
+            let t = i as f32 / sr;
+            total += v * v;
+            if t < 0.3 { early += v * v; low += z2 * z2; }
+            if t > 1.0 { late += v * v; }
+        }
+        (low / early.max(1e-9), late / total.max(1e-9))
+    }
+
+    #[test]
+    fn explosions_are_short_and_deep() {
+        let sr = 44_100.0;
+        for cue in [Cue::BoomNear, Cue::BoomFar, Cue::GenBlast] {
+            for v in 0..cue.variants() {
+                let x = synth(cue, v, sr);
+                let (low, late) = boom_shape(&x, sr);
+                assert!(low > 0.35, "{cue:?} v{v}: first 0.3 s only {low:.2} below 150 Hz");
+                assert!(late < 0.03, "{cue:?} v{v}: {late:.3} of its energy after 1 s");
+                assert!(x.len() as f32 / sr <= 1.21, "{cue:?} too long");
+            }
+        }
+    }
+
+    #[test]
+    fn stacked_explosions_do_not_clip() {
+        let sr = 44_100.0;
+        let mut m = Mixer::new(sr);
+        for i in 0..4 { m.play(Play::local(Cue::BoomNear, i)); }
+        m.play(Play::local(Cue::GenBlast, 0));
+        let mut buf = vec![0.0; (sr * 3.0) as usize * 2];
+        m.render(&mut buf);
+        assert!(buf.iter().all(|s| s.abs() <= 1.0 && s.is_finite()));
+    }
+
     #[test]
     fn voice_cap_and_priority_stealing() {
         let mut m = Mixer::new(22_050.0);
@@ -1745,16 +1907,30 @@ mod tests {
         mono("turret-plasma", synth(Cue::TurretPlasma, 0, sr));
         mono("flag-taken", synth(Cue::Flag, 0, sr));
         mono("capture-win", synth(Cue::CaptureWin, 0, sr));
-        mono("footsteps", (0..6).flat_map(|v| { let mut s = synth(Cue::Footstep, v, sr); s.resize(11_000, 0.0); s }).collect());
-        // Chaingun burst through the mixer over the spin loop.
+        // Single hits: these pair with the one-shot references for A/B.
+        mono("footsteps", synth(Cue::Footstep, 0, sr));
+        mono("chaingun-burst", synth(Cue::ChainShot, 0, sr));
+        // Sequences, built only by triggering single hits.
+        mono("footsteps-walk", (0..6).flat_map(|v| { let mut s = synth(Cue::Footstep, v, sr); s.resize(16_000, 0.0); s }).collect());
         let mut m = Mixer::new(sr);
         let mut burst = vec![0.0; 44_100 * 2];
         m.set_loop(Loop::Spin, LoopTarget { gain: 0.17, rate: 1.35, pan: 0.0, cutoff: 6000.0 });
-        for (i, chunk) in burst.chunks_mut(4_410).enumerate() {
-            if i < 14 { m.play(Play { rate: 1.0 + (i % 3) as f32 * 0.02, ..Play::local(Cue::ChainShot, i) }); }
+        let every = (0.075 * sr) as usize * 2;
+        for (i, chunk) in burst.chunks_mut(every).enumerate() {
+            if i < 13 { m.play(Play { rate: 1.0 + (i % 3) as f32 * 0.02, ..Play::local(Cue::ChainShot, i) }); }
             m.render(chunk);
         }
-        write("chaingun-burst", &burst, 2);
+        write("chaingun-rapid", &burst, 2);
+        // A short skid: skis touch for 0.3 s, then lift.
+        let mut m = Mixer::new(sr);
+        let mut skid = vec![0.0; (sr * 0.45) as usize * 2];
+        let on = (sr * 0.3) as usize * 2;
+        let (a, b) = skid.split_at_mut(on);
+        m.set_loop(Loop::Ski, LoopTarget { gain: 0.3, rate: 1.1, pan: 0.0, cutoff: 7000.0 });
+        m.render(a);
+        m.set_loop(Loop::Ski, LoopTarget { gain: 0.0, rate: 1.1, pan: 0.0, cutoff: 7000.0 });
+        m.render(b);
+        write("ski-hiss", &skid, 2);
         let l = Listener { pos: Vec3::ZERO, forward: Vec3::NEG_Z };
         let mut d = Director::new();
         let w = World::new();
@@ -1766,7 +1942,7 @@ mod tests {
             write(name, &s, 2);
         }
         for (name, lp, gain, cutoff) in [
-            ("jet-loop", Loop::Jet, 0.24, 9000.0), ("ski-hiss", Loop::Ski, 0.3, 8000.0),
+            ("jet-loop", Loop::Jet, 0.24, 9000.0), ("ski-sustain", Loop::Ski, 0.3, 8000.0),
             ("wind-at-speed", Loop::Wind, 0.34, 3500.0), ("generator-hum", Loop::Hum, 0.24, 3000.0),
             ("disc-idle", Loop::IdleDisc, IDLE_DISC * 3.0, 6000.0), ("chaingun-idle", Loop::IdleChain, IDLE_CHAIN * 3.0, 6000.0),
             ("grenade-idle", Loop::IdleGrenade, IDLE_GRENADE * 3.0, 6000.0), ("disc-in-flight", Loop::DiscHum, 0.22, 9000.0),
