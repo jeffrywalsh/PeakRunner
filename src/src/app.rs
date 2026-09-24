@@ -5,7 +5,7 @@ use eframe::egui_wgpu::Callback;
 use serde::Deserialize;
 
 use crate::audio::Audio;
-use crate::drawlist::build_frame;
+use crate::drawlist::build_frame_with;
 use crate::mouse;
 use crate::scene::{self, SceneCallback};
 use crate::sim::{MatchState, World, ENERGY_MAX};
@@ -74,6 +74,7 @@ struct Pad {
 
 pub struct PeakRunnerApp {
     overlay: crate::world_overlay::OverlayState,
+    effects: crate::effects::Effects,
     announcer: crate::flag_announce::Announcer,
     generator_watch: crate::generator_announce::GeneratorWatch,
     chat_team: bool,
@@ -115,7 +116,7 @@ impl PeakRunnerApp {
             peakrunner_core::feed::Entry::Frag { killer: "Nova".into(), victim: "Ridge".into(), weapon: "Grenade launcher".into() },
             peakrunner_core::feed::Entry::Chat { sender: "Echo".into(), text: "On my way. Cover the flag!".into() },
         ];
-        Self { overlay: Default::default(), announcer: Default::default(), generator_watch: Default::default(), chat_team:false, world, audio: Audio::silent(), mode: Mode::Play, ember: true, map: MapId::Valley,
+        Self { overlay: Default::default(), effects: Default::default(), announcer: Default::default(), generator_watch: Default::default(), chat_team:false, world, audio: Audio::silent(), mode: Mode::Play, ember: true, map: MapId::Valley,
             hud: None, frame_aspect: 1.6, stick: [0.;2], touch: false, grabbed: false,
             touch_jump: false, touch_jet: false, touch_fire: false, touch_interact: false,
             touch_swap: false, look_pending: Vec2::ZERO, wait_fire_release: false,
@@ -131,6 +132,7 @@ impl PeakRunnerApp {
         #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
         let mut app = Self {
             overlay: Default::default(),
+            effects: Default::default(),
             announcer: Default::default(),
             generator_watch: Default::default(),
             chat_team: false,
@@ -472,7 +474,7 @@ impl eframe::App for PeakRunnerApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let rect = ui.max_rect();
         let pixels = ui.ctx().pixels_per_point();
-        let frame = build_frame(&self.world, self.frame_aspect, ui.input(|i| i.stable_dt).max(1.0 / 120.0));
+        let frame = build_frame_with(&self.world, self.frame_aspect, ui.input(|i| i.stable_dt).max(1.0 / 120.0), &mut self.effects);
         ui.painter().add(Callback::new_paint_callback(
             rect,
             SceneCallback {

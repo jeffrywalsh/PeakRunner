@@ -1,0 +1,101 @@
+# Weapon visuals
+
+First slice of the arsenal upgrade (proposal: `research/weapons-study/`).
+Visual only: damage, fire rates, reloads, projectile speeds and movement are
+unchanged, and no compatibility marker changed.
+
+## Viewmodels (`src/drawlist.rs`)
+
+- **Disc launcher**: polished, not redesigned. A charge bar along the top of
+  the left rail fills over the 1.05 s reload and flashes when ready, the
+  muzzle has two prongs that flare on fire, and there's a team stripe.
+- **Chaingun**: rebuilt. Six barrels in a shroud ring, a vented heat jacket,
+  a rear motor housing and a side ammo drum. Barrels spin up while firing and
+  coast down after release. Jacket heat is cosmetic only, with no overheat.
+  Star-shaped muzzle flash.
+- **Grenade launcher**: rebuilt. A wide bore, a four-chamber revolving
+  cylinder, a pump grip and a stock. The existing reload timer drives one
+  cylinder step and a pump rack. The fired chamber stays dark as it turns away
+  and the fresh round brightens as it arrives. There is no ammo mechanic.
+- **Every weapon**: a 0.25 s switch (old weapon drops, new one rises), bob
+  driven by movement (a stride on foot, a low glide while skiing, a float in
+  the air), and per-weapon recoil read from the cooldown (heavy shove for the
+  disc, fast jitter for the chaingun, a big slow kick for grenades).
+- **Third person**: each weapon has its own held model matching its
+  first-person silhouette, replacing the shared dark box.
+
+## Rounds
+
+Discs have a bright rim, a dark hub and two rim studs so the spin reads, plus
+a longer ribbon wake. For the chaingun, every third round is a long bright
+tracer and the rest are faint streaks. Grenades have a fuse light that blinks
+faster as detonation nears. Turret plasma has a flickering core in two halo
+shells.
+
+## Effects (`src/effects.rs`, client-only)
+
+The client watches state it already has (explosion records, rounds, shot
+counters) and adds effects that can outlive the 0.55 s blast record:
+
+- **Explosions**: a white flash, flame lobes, a shockwave ring of soft
+  segments, a rising smoke column, thrown debris, sparks, a ground-tinted dust
+  kick (grass, snow, sand) and a scorch mark that fades in 3.5 s.
+- **Generator blast**: the same layers at a larger scale. This replaces the
+  old orange bubble.
+- **Chaingun impacts**: a round that vanishes between frames and whose last
+  step crosses a surface struck that surface, so sparks, a flash and a dust
+  puff spawn there. A round that simply expires spawns nothing.
+- **Casings and flashes**: chaingun casings eject (every second round) and
+  fade in 0.9 s. Other players get third-person muzzle flashes, and grenade
+  launchers puff smoke.
+- **Grenade trail and generator wreck smoke**: these now use the darkening
+  pass.
+
+## Darkening pass (`src/scene.rs`, `fs_smoke` in `src/shaders.wgsl`)
+
+A second effect pipeline beside the additive one. It uses normal alpha
+blending, depth test on and depth write off, and no culling (the sphere mesh
+winds inward, so culling either face leaves hollow rings). It applies the same
+distance fog as lit geometry, computed per draw. Draws are sorted back to
+front and drawn after the lit pass and before the additive pass, so flames
+glow through smoke. The map shader math is unchanged. It works on WASM:
+WebGL2 supports the blend state.
+
+## Caps
+
+| Budget | Limit |
+|---|---|
+| Live particles, all kinds (fixed ring, allocated once) | 360 |
+| Bullet impacts spawned per frame | 10 |
+| Live casings | 40 |
+| Live scorch marks | 12 |
+| Additive effect draws per frame (world effects kept first) | 1,200 |
+| Smoke draws per frame (farthest dropped) | 220 |
+| Full explosion detail | within 220 m |
+| Explosions beyond 220 m | flash and one smoke puff |
+| Explosions beyond 450 m | nothing extra |
+
+## Checks
+
+- `cargo test -p peakrunner --lib effects`: blast spawning is capped and done
+  once, distant blasts stay cheap, impact detection works, the switch sequence
+  runs in order, and the chaingun spins up and coasts down.
+- `render_weapon_captures` (ignored, GPU): viewmodel states, third person,
+  rounds in flight, impacts, and explosions on Old Holler, Frostline and
+  Dustreach, written to `screenshots/weapons-after-*.png`.
+- `render_gameplay_captures`: same angles as the `before-*` set.
+- `heavy_fight_budget` (ignored, GPU, run with `--release`): 8 players, 600
+  frames. It reports peak draw counts, frame-build time and GPU render time.
+  Measured on the Mac, same probe on both builds:
+
+| | Before (`5713ef1`) | After |
+|---|---|---|
+| Peak draws | 348 lit, 299 additive | 405 lit, 277 additive, 168 smoke |
+| Frame-build time, average | 0.004 ms | 0.057 ms |
+| GPU render, median (heaviest frame) | 0.59 ms | 0.68 ms |
+| GPU render, p95 | 0.63 ms | 0.82 ms |
+
+## Not in this slice
+
+- Bloom, instanced particles and textured decals.
+- The fired grenade chamber is the only chamber visible from the default view.

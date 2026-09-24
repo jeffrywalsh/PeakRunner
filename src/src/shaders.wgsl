@@ -27,6 +27,8 @@ struct SkyUniforms {
 struct EmitUniforms {
     mvp: mat4x4<f32>,
     color: vec4<f32>,
+    // Smoke pass only: fog colour and this draw's fog amount (0..1).
+    fog: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> world: WorldUniforms;
@@ -212,6 +214,16 @@ fn fs_emit(in: EmitOut) -> @location(0) vec4<f32> {
         return vec4<f32>(emit_u.color.rgb, -emit_u.color.a * soft);
     }
     return emit_u.color;
+}
+
+// Alpha-blended effects (smoke, dust, scorch): unlike the additive pass these
+// can darken what is behind them, and they take the same distance fog as the
+// lit world so a plume sinks into haze instead of glowing through it.
+@fragment
+fn fs_smoke(in: EmitOut) -> @location(0) vec4<f32> {
+    let soft = pow(clamp(abs(in.facing), 0.0, 1.0), 1.5);
+    let rgb = mix(emit_u.color.rgb, emit_u.fog.rgb, emit_u.fog.a);
+    return vec4<f32>(rgb, emit_u.color.a * soft);
 }
 
 fn blit_uv(ndc: vec2<f32>) -> vec2<f32> {

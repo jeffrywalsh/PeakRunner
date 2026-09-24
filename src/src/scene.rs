@@ -12,7 +12,7 @@ use crate::terrain::{self, MapId};
 const SLOT: u64 = 512;
 const WORLD_SIZE: u64 = 304;
 const SKY_SIZE: u64 = 96;
-const EMIT_SIZE: u64 = 80;
+const EMIT_SIZE: u64 = 96;
 
 fn precipitation_count(map: MapId, available: usize) -> usize {
     match map { MapId::Valley => available, MapId::Raindance | MapId::BroadsideClone | MapId::StonehengeClone | MapId::SnowblindClone | MapId::DesertOfDeathClone => 0 }
@@ -55,6 +55,7 @@ struct SkyUniform {
 struct EmitUniform {
     mvp: [[f32; 4]; 4],
     color: [f32; 4],
+    fog: [f32; 4],
 }
 
 struct Mesh {
@@ -67,6 +68,7 @@ pub struct SceneGpu {
     imported: Option<crate::map_scene::MapGpu>,
     world_pipe: wgpu::RenderPipeline,
     emit_pipe: wgpu::RenderPipeline,
+    smoke_pipe: wgpu::RenderPipeline,
     sky_pipe: wgpu::RenderPipeline,
     blit_pipe: wgpu::RenderPipeline,
     world_layout: wgpu::BindGroupLayout,
@@ -131,7 +133,8 @@ impl SceneGpu {
         });
 
         let world_pipe = lit_pipeline(device, &shader, &world_layout, false, target_format);
-        let emit_pipe = emit_pipeline(device, &shader, &emit_layout);
+        let emit_pipe = emit_pipeline(device, &shader, &emit_layout, false);
+        let smoke_pipe = emit_pipeline(device, &shader, &emit_layout, true);
         let sky_pipe = sky_pipeline(device, &shader, &sky_layout);
         let blit_entry = if target_format.is_srgb() {
             "fs_blit_srgb"
@@ -185,6 +188,7 @@ impl SceneGpu {
             imported: None,
             world_pipe,
             emit_pipe,
+            smoke_pipe,
             sky_pipe,
             blit_pipe,
             world_layout,
@@ -272,7 +276,7 @@ impl SceneGpu {
             });
         }
 
-        let slots = 2 + frame.lit.len() + snow_draws.len() + frame.emit.len() + frame.viewmodel.len();
+        let slots = 2 + frame.lit.len() + snow_draws.len() + frame.emit.len() + frame.smoke.len() + frame.viewmodel.len();
         self.ensure_slots(device, slots as u32 + 4);
 
         let mut staging = vec![0u8; self.uniform_slots as usize * SLOT as usize];
@@ -310,7 +314,18 @@ impl SceneGpu {
             emit_offs.push(push(
                 &mut staging,
                 &mut cursor,
-                bytemuck::bytes_of(&emit_uniform(draw, frame.proj * frame.view)),
+                bytemuck::bytes_of(&emit_uniform(draw, frame.proj * frame.view, [0.0; 4])),
+            ));
+        }
+        let mut smoke_offs = Vec::with_capacity(frame.smoke.len());
+        for draw in &frame.smoke {
+            let dist = draw.model.w_axis.truncate().distance(frame.eye);
+            let fog = (1.0 - (-dist * frame.fog_density).exp()).clamp(0.0, 0.92);
+            smoke_offs.push(push(
+                &mut staging,
+                &mut cursor,
+                bytemuck::bytes_of(&emit_uniform(draw, frame.proj * frame.view,
+                    [frame.fog.x, frame.fog.y, frame.fog.z, fog])),
             ));
         }
         let vm_sun = Vec3::new(0.2, 0.8, 0.5).normalize();
@@ -371,6 +386,18 @@ impl SceneGpu {
             pass.set_index_buffer(mesh.ibo.slice(..), wgpu::IndexFormat::Uint16);
             pass.draw_indexed(0..mesh.count, 0, 0..1);
             let _ = lit_count;
+        }
+        // Darkening effects first, back to front (drawlist sorts them), then
+        // the additive pass so flames and sparks glow through the smoke.
+        if !frame.smoke.is_empty() {
+            pass.set_pipeline(&self.smoke_pipe);
+            for (i, draw) in frame.smoke.iter().enumerate() {
+                let mesh = &self.meshes[draw.mesh as usize];
+                pass.set_bind_group(2, &self.emit_bg, &[smoke_offs[i]]);
+                pass.set_vertex_buffer(0, mesh.vbo.slice(..));
+                pass.set_index_buffer(mesh.ibo.slice(..), wgpu::IndexFormat::Uint16);
+                pass.draw_indexed(0..mesh.count, 0, 0..1);
+            }
         }
         if !frame.emit.is_empty() {
             pass.set_pipeline(&self.emit_pipe);
@@ -472,10 +499,11 @@ fn world_uniform(draw: &LitDraw, vp: Mat4, cam: Vec3, sun: Vec3, fog: Vec3, dens
     }
 }
 
-fn emit_uniform(draw: &EmitDraw, vp: Mat4) -> EmitUniform {
+fn emit_uniform(draw: &EmitDraw, vp: Mat4, fog: [f32; 4]) -> EmitUniform {
     EmitUniform {
         mvp: (vp * draw.model).to_cols_array_2d(),
         color: draw.color,
+        fog,
     }
 }
 
@@ -808,18 +836,49 @@ fn lit_pipeline(
     })
 }
 
+/// Effect pipelines share the emit uniform. `smoke` is the alpha-blended,
+/// fogged variant that can darken the scene; the other stays additive.
 fn emit_pipeline(
     device: &wgpu::Device,
     shader: &wgpu::ShaderModule,
     layout: &wgpu::BindGroupLayout,
+    smoke: bool,
 ) -> wgpu::RenderPipeline {
+    let blend = if smoke {
+        wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::SrcAlpha,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+        }
+    } else {
+        wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::SrcAlpha,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+        }
+    };
+    let label = if smoke { "smoke" } else { "emit" };
     let pipe_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("emit"),
+        label: Some(label),
         bind_group_layouts: &[None, None, Some(layout)],
         immediate_size: 0,
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("emit"),
+        label: Some(label),
         layout: Some(&pipe_layout),
         vertex: wgpu::VertexState {
             module: shader,
@@ -828,6 +887,8 @@ fn emit_pipeline(
             buffers: &[Some(vertex_layout())],
         },
         primitive: wgpu::PrimitiveState {
+            // No culling: the sphere mesh winds inward, and culling either
+            // side leaves a hollow ring where a puff meets a wall.
             cull_mode: None,
             ..Default::default()
         },
@@ -835,22 +896,11 @@ fn emit_pipeline(
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module: shader,
-            entry_point: Some("fs_emit"),
+            entry_point: Some(if smoke { "fs_smoke" } else { "fs_emit" }),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba8Unorm,
-                blend: Some(wgpu::BlendState {
-                    color: wgpu::BlendComponent {
-                        src_factor: wgpu::BlendFactor::SrcAlpha,
-                        dst_factor: wgpu::BlendFactor::One,
-                        operation: wgpu::BlendOperation::Add,
-                    },
-                    alpha: wgpu::BlendComponent {
-                        src_factor: wgpu::BlendFactor::One,
-                        dst_factor: wgpu::BlendFactor::One,
-                        operation: wgpu::BlendOperation::Add,
-                    },
-                }),
+                blend: Some(blend),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
@@ -1328,7 +1378,27 @@ mod shader_check {
                         world.players.push(p);
                     }
                 }
-                let mut frame = crate::drawlist::build_frame(&world, width as f32 / height as f32, 0.0);
+                // Develop client-side effects (smoke, debris, sparks, barrel
+                // spin, heat) up to the captured moment, as a live client would.
+                let mut fx = crate::effects::Effects::new();
+                let aspect = width as f32 / height as f32;
+                if name.contains("blast") {
+                    let target = world.explosions[0].age;
+                    for k in 0..12 {
+                        world.explosions[0].age = target * k as f32 / 12.0;
+                        crate::drawlist::build_frame_with(&world, aspect, target / 12.0, &mut fx);
+                    }
+                    world.explosions[0].age = target;
+                }
+                if name == "chaingun-shot" {
+                    let keep = world.players[0].cooldown;
+                    for _ in 0..70 {
+                        world.players[0].cooldown = 0.05;
+                        crate::drawlist::build_frame_with(&world, aspect, 1.0 / 60.0, &mut fx);
+                    }
+                    world.players[0].cooldown = keep;
+                }
+                let mut frame = crate::drawlist::build_frame_with(&world, aspect, 0.0, &mut fx);
                 if name.starts_with("characters") {
                     let target=world.players[0].pos+Vec3::Y*0.95;
                     frame.eye=target+Vec3::new(0.,0.5,-5.3);
@@ -1405,6 +1475,279 @@ mod shader_check {
         );
         validator.validate(&module).expect("wgsl validate");
         }
+    }
+
+    /// Weapon visuals: every viewmodel state, third-person models, rounds in
+    /// flight, chaingun impacts and layered explosions on three maps. Writes
+    /// `screenshots/weapons-after-*.png`. Run with --ignored --nocapture.
+    #[test]
+    #[ignore = "requires a GPU adapter"]
+    fn render_weapon_captures() {
+        use super::*;
+        use crate::sim::{Disc, Explosion, MatchState, Team, World};
+        pollster::block_on(async {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+            let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await.expect("GPU adapter");
+            let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.expect("GPU device");
+            let mut scene = SceneGpu::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+            std::fs::create_dir_all("screenshots").unwrap();
+            let (width, height) = (1280u32, 800u32);
+            let aspect = width as f32 / height as f32;
+            let mut save = |frame: &crate::drawlist::DrawFrame, name: &str| {
+                let mut encoder = device.create_command_encoder(&Default::default());
+                scene.render(&device, &queue, &mut encoder, width, height, frame);
+                let stride = (width * 4).div_ceil(256) * 256;
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some("capture"), size: (stride * height) as u64,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+                encoder.copy_texture_to_buffer(scene.color.as_image_copy(),
+                    wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0, bytes_per_row: Some(stride), rows_per_image: Some(height) } },
+                    wgpu::Extent3d { width, height, depth_or_array_layers: 1 });
+                queue.submit([encoder.finish()]);
+                let (tx, rx) = std::sync::mpsc::channel();
+                buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| { tx.send(r).unwrap(); });
+                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                rx.recv().unwrap().unwrap();
+                let mapped = buffer.slice(..).get_mapped_range().unwrap();
+                let pixels: Vec<u8> = mapped.chunks(stride as usize).flat_map(|row| row[..width as usize * 4].iter().copied()).collect();
+                let path = format!("screenshots/weapons-after-{name}.png");
+                let mut png = png::Encoder::new(std::fs::File::create(&path).unwrap(), width, height);
+                png.set_color(png::ColorType::Rgba);
+                png.set_depth(png::BitDepth::Eight);
+                png.write_header().unwrap().write_image_data(&pixels).unwrap();
+                println!("wrote {path}");
+            };
+            let fresh = |map: MapId| {
+                let mut w = World::new();
+                w.set_map(map);
+                w.start_match(true);
+                w.players.truncate(1);
+                w.state = MatchState::Playing;
+                w.players[0].yaw = std::f32::consts::PI;
+                w.players[0].pitch = -0.12;
+                w
+            };
+            let dt = 1.0 / 60.0;
+            let develop = |w: &World, fx: &mut crate::effects::Effects, frames: usize| {
+                for _ in 0..frames { crate::drawlist::build_frame_with(w, aspect, dt, fx); }
+            };
+
+            // Viewmodels: idle, firing, mid reload or cycle, mid switch.
+            for (weapon, label) in [(0u8, "disc"), (1, "chaingun"), (2, "grenade")] {
+                let reload = crate::sim::weapon_reload(weapon);
+                let mut w = fresh(MapId::Raindance);
+                w.players[0].weapon = weapon;
+                let mut fx = crate::effects::Effects::new();
+                develop(&w, &mut fx, 30);
+                save(&crate::drawlist::build_frame_with(&w, aspect, 0.0, &mut fx), &format!("vm-{label}-idle"));
+                // Firing: the chaingun needs a spun-up, heated barrel first.
+                if weapon == 1 {
+                    for f in 0..90 {
+                        w.players[0].cooldown = reload - (f % 4) as f32 * 0.018;
+                        w.players[0].shots += (f % 4 == 0) as u32;
+                        develop(&w, &mut fx, 1);
+                    }
+                    w.players[0].cooldown = reload - 0.012;
+                } else {
+                    w.players[0].shots += 1;
+                    w.players[0].cooldown = reload - 0.02;
+                    develop(&w, &mut fx, 1);
+                }
+                save(&crate::drawlist::build_frame_with(&w, aspect, 0.0, &mut fx), &format!("vm-{label}-firing"));
+                if weapon == 1 {
+                    // Released: the barrels coast down while the jacket cools.
+                    w.players[0].cooldown = 0.0;
+                    develop(&w, &mut fx, 15);
+                    save(&crate::drawlist::build_frame_with(&w, aspect, 0.0, &mut fx), "vm-chaingun-spindown");
+                } else {
+                    w.players[0].cooldown = reload * 0.45;
+                    develop(&w, &mut fx, 1);
+                    save(&crate::drawlist::build_frame_with(&w, aspect, 0.0, &mut fx), &format!("vm-{label}-reload"));
+                }
+                w.players[0].cooldown = 0.0;
+                develop(&w, &mut fx, 30);
+                w.players[0].weapon = (weapon + 1) % 3;
+                develop(&w, &mut fx, 10);
+                save(&crate::drawlist::build_frame_with(&w, aspect, 0.0, &mut fx), &format!("vm-{label}-switch"));
+            }
+
+            // Third-person weapons, one of each, posed for the camera.
+            {
+                let mut w = fresh(MapId::Raindance);
+                let origin = w.players[0].pos;
+                for i in 0..3 {
+                    let mut p = w.players[0].clone();
+                    p.pos = origin + Vec3::new((i as f32 - 1.0) * 1.6, 0.0, 0.0);
+                    p.yaw = [0.55, 1.2, 2.6][i];
+                    p.team = if i == 1 { Team::Glacier } else { Team::Ember };
+                    p.weapon = i as u8;
+                    p.net_id = 50 + i as u32;
+                    w.players.push(p);
+                }
+                let mut frame = crate::drawlist::build_frame_with(&w, aspect, 0.0, &mut crate::effects::Effects::new());
+                let target = origin + Vec3::Y * 1.0;
+                frame.eye = target + Vec3::new(0.6, 0.4, -4.2);
+                frame.view = Mat4::look_at_rh(frame.eye, target, Vec3::Y);
+                frame.proj = crate::drawlist::clip_correct(Mat4::perspective_rh(45f32.to_radians(), aspect, 0.1, 2500.0));
+                frame.inv_vp = (frame.proj * frame.view).inverse();
+                frame.viewmodel.clear();
+                save(&frame, "thirdperson");
+            }
+
+            // Rounds in flight: disc crossing the view, grenade with its fuse
+            // lit, turret plasma, all staged a few metres ahead.
+            {
+                let mut w = fresh(MapId::Raindance);
+                w.players[0].pos.y += 10.0;
+                let (eye, dir, _) = w.camera();
+                let side = dir.cross(Vec3::Y).normalize();
+                w.discs.push(Disc { pos: eye + dir * 5.0 - Vec3::Y * 0.9 + side * 0.5, vel: side * 95.0, team: Team::Ember,
+                    owner: 0, life: 4.88, kind: 0, spin: 1.1 });
+                w.discs.push(Disc { pos: eye + dir * 3.2 - Vec3::Y * 0.4 - side * 1.1, vel: dir * 30.0 + Vec3::Y * 3.0,
+                    team: Team::Ember, owner: 0, life: 0.2, kind: 2, spin: 0.7 });
+                w.discs.push(Disc { pos: eye + dir * 9.0 + Vec3::Y * 0.6 - side * 2.5, vel: -dir * 80.0 + side * 10.0,
+                    team: Team::Glacier, owner: usize::MAX, life: 2.93, kind: 3, spin: 0.0 });
+                w.players[0].weapon = 2;
+                save(&crate::drawlist::build_frame_with(&w, aspect, 0.0, &mut crate::effects::Effects::new()), "rounds-in-flight");
+            }
+
+            // Chaingun stream into the ground: real fired rounds, tracers and
+            // impact sparks and dust, detected the way a live client sees them.
+            {
+                let mut w = fresh(MapId::Raindance);
+                w.players[0].pos.y += 10.0;
+                w.players[0].weapon = 1;
+                w.input.weapon = 1;
+                w.players[0].pitch = -0.55;
+                let mut fx = crate::effects::Effects::new();
+                w.input.fire = true;
+                for _ in 0..50 {
+                    w.tick(dt);
+                    w.players[0].pos.y = w.players[0].pos.y.max(0.0);
+                    develop(&w, &mut fx, 1);
+                }
+                save(&crate::drawlist::build_frame_with(&w, aspect, 0.0, &mut fx), "chaingun-impacts");
+            }
+
+            // Layered explosions on grass, snow and sand: early (flash and
+            // flames over fresh smoke) and late (smoke, debris, scorch only).
+            for (map, label) in [(MapId::Raindance, "holler"), (MapId::SnowblindClone, "frostline"), (MapId::DesertOfDeathClone, "dustreach")] {
+                for (kind, what) in [(2u8, "grenade"), (4, "generator")] {
+                    let mut w = fresh(map);
+                    let size = crate::terrain::info(map).size;
+                    let stand = Vec3::new(size * 0.5 + 40.0, 0.0, size * 0.5 - 120.0);
+                    let ground = crate::terrain::height_on(map, stand.x, stand.z);
+                    w.players[0].pos = Vec3::new(stand.x, ground + 6.0, stand.z);
+                    w.players[0].yaw = 0.0;
+                    w.players[0].pitch = -0.2;
+                    let (eye, dir, _) = w.camera();
+                    let flat = Vec3::new(dir.x, 0.0, dir.z).normalize();
+                    let spot = eye + flat * if kind == 4 { 34.0 } else { 20.0 };
+                    let floor = crate::terrain::height_on(map, spot.x, spot.z);
+                    let pos = Vec3::new(spot.x, floor + if kind == 4 { 2.0 } else { 0.3 }, spot.z);
+                    let radius = if kind == 4 { crate::sim::GENERATOR_BLAST_RADIUS } else { 9.0 };
+                    let mut fx = crate::effects::Effects::new();
+                    for (age, when) in [(0.3f32, "early"), (1.0, "late")] {
+                        while fx_age(&w) < age {
+                            let next = fx_age(&w) + dt;
+                            w.explosions.retain(|e| e.age < 0.55);
+                            if next < 0.55 {
+                                if w.explosions.is_empty() { w.explosions.push(Explosion { pos, age: 0.0, max_r: radius, kind }); }
+                                w.explosions[0].age = next;
+                            } else { w.explosions.clear(); }
+                            w.time += dt;
+                            develop(&w, &mut fx, 1);
+                            if next >= 0.55 && w.explosions.is_empty() { w.smoke.clear(); }
+                            set_fx_age(&mut w, next);
+                        }
+                        let mut frame = crate::drawlist::build_frame_with(&w, aspect, 0.0, &mut fx);
+                        frame.viewmodel.clear();
+                        save(&frame, &format!("blast-{what}-{label}-{when}"));
+                    }
+                }
+            }
+        });
+        // Simulated time since the staged blast, kept outside the explosion
+        // record because that record is dropped at 0.55 s.
+        fn fx_age(w: &crate::sim::World) -> f32 { w.flyby }
+        fn set_fx_age(w: &mut crate::sim::World, age: f32) { w.flyby = age; }
+    }
+
+    /// Eight players in one fight: chaingun streams into the ground, discs and
+    /// grenades landing, bots doing their own thing. Reports peak draw counts,
+    /// CPU frame-build time and GPU render time. Run with --release --ignored.
+    #[test]
+    #[ignore = "timing probe; requires a GPU adapter"]
+    fn heavy_fight_budget() {
+        use super::*;
+        use crate::sim::{Disc, MatchState, Team, World};
+        let mut w = World::new();
+        w.set_map(MapId::Raindance);
+        w.start_match(true);
+        w.state = MatchState::Playing;
+        let me = w.player_id;
+        let origin = w.players[me].pos;
+        while w.players.len() < 8 { let p = w.players[0].clone(); w.players.push(p); }
+        for i in 0..8 {
+            let p = &mut w.players[i];
+            p.alive = true;
+            p.net_id = i as u32 + 1;
+            p.team = if i % 2 == 0 { Team::Ember } else { Team::Glacier };
+            if i != me { p.pos = origin + Vec3::new((i as f32 - 3.5) * 6.0, 0.0, -24.0 - (i % 2) as f32 * 7.0); }
+            p.weapon = (i % 3) as u8;
+        }
+        let dt = 1.0 / 60.0;
+        let mut fx = crate::effects::Effects::new();
+        let (mut peak_lit, mut peak_emit, mut peak_smoke, mut total) = (0, 0, 0, std::time::Duration::ZERO);
+        let mut heaviest: Option<crate::drawlist::DrawFrame> = None;
+        let frames = 600;
+        for f in 0..frames {
+            let (eye, dir, _) = w.camera();
+            for i in 0..8 {
+                if i == me { continue; }
+                let p = w.players[i].clone();
+                let from = p.pos + Vec3::Y * 1.2;
+                let spot = eye + Vec3::new(dir.x, 0.0, dir.z).normalize_or_zero() * (18.0 + (i * 3) as f32)
+                    + Vec3::X * ((f % 40) as f32 - 20.0) * 0.4;
+                let target = Vec3::new(spot.x, crate::terrain::height_on(w.map, spot.x, spot.z), spot.z);
+                let aim = (target - from).normalize_or_zero();
+                let (kind, every, speed, life) = match i % 3 { 1 => (1u8, 5, 420.0, 1.2), 0 => (0, 63, 95.0, 5.0), _ => (2, 51, 48.0, 2.0) };
+                if (f + i * 7) % every == 0 {
+                    w.discs.push(Disc { pos: from, vel: aim * speed, team: p.team, owner: i, life, kind, spin: 0.0 });
+                    w.players[i].shots += 1;
+                }
+            }
+            w.tick(dt);
+            let start = std::time::Instant::now();
+            let frame = crate::drawlist::build_frame_with(&w, 1.6, dt, &mut fx);
+            total += start.elapsed();
+            let weight = frame.lit.len() + frame.emit.len() + frame.smoke.len();
+            peak_lit = peak_lit.max(frame.lit.len());
+            peak_emit = peak_emit.max(frame.emit.len());
+            peak_smoke = peak_smoke.max(frame.smoke.len());
+            if heaviest.as_ref().is_none_or(|h| h.lit.len() + h.emit.len() + h.smoke.len() < weight) { heaviest = Some(frame); }
+        }
+        println!("peak draws: lit {peak_lit} emit {peak_emit} smoke {peak_smoke}; build avg {:.3} ms",
+            total.as_secs_f64() * 1000.0 / frames as f64);
+        let frame = heaviest.unwrap();
+        pollster::block_on(async {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+            let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await.expect("GPU adapter");
+            let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.expect("GPU device");
+            let mut scene = SceneGpu::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+            let mut times = Vec::new();
+            for k in 0..80 {
+                let start = std::time::Instant::now();
+                let mut encoder = device.create_command_encoder(&Default::default());
+                scene.render(&device, &queue, &mut encoder, 1280, 800, &frame);
+                queue.submit([encoder.finish()]);
+                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                if k >= 20 { times.push(start.elapsed().as_secs_f64() * 1000.0); }
+            }
+            times.sort_by(f64::total_cmp);
+            println!("heaviest frame ({} lit, {} emit, {} smoke): render median {:.2} ms, p95 {:.2} ms",
+                frame.lit.len(), frame.emit.len(), frame.smoke.len(), times[times.len() / 2], times[times.len() * 95 / 100]);
+        });
     }
 
     #[test]

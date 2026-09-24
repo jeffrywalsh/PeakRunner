@@ -248,7 +248,7 @@ impl Online {
             }
         }
         // Extrapolate only visuals between snapshots, never resolve local hits.
-        for d in &mut world.discs { d.pos += d.vel * dt; d.spin += dt * 18.0; }
+        for d in &mut world.discs { d.pos += d.vel * dt; d.spin += dt * 18.0; d.life -= dt; }
         for e in &mut world.explosions { e.age += dt; }
         for p in &mut world.smoke { p.age += dt; }
         for f in &mut world.flags {

@@ -571,7 +571,9 @@ never changes compatibility. Load-timing probe:
 Socket tests need local TCP/UDP permission. The ignored eight-client load test is:
 `cargo test -p peakrunner-server --lib eight_clients_sustain_movement_and_all_weapons -- --ignored`.
 GPU capture tests are also explicitly ignored by default; run relevant captures
-when changing rendering. Unit tests must not poll real macOS mouse state from
+when changing rendering. Weapon visuals and effect caps: `docs/weapon-visuals.md`
+(`render_weapon_captures`, and `heavy_fight_budget` with `--release` for draw
+counts and GPU time). Unit tests must not poll real macOS mouse state from
 parallel test threads (see `src/mouse.rs`).
 
 Native visual QA uses `examples/launch_smoke.rs`, which must forward BOTH eframe
