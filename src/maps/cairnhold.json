@@ -94,5 +94,6 @@
       "cloud_scale": 1.6,
       "sun_size": 0.03
     }
-  }
+  },
+  "water": {"centre": [1024, 1024], "mirror": true, "channel": 2, "bodies": [{"name": "Peat Burn", "x": 816, "z": 928, "rx": 22, "rz": 15, "yaw": -30, "depth": 2.8, "flow": [0.6, 0.35], "color": [0.1, 0.18, 0.22]}]}
 }

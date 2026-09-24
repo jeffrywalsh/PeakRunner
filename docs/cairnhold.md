@@ -229,3 +229,18 @@ From `research/playability-survey/proposal.md` and the visual audit
 Cairnhold scatters original props from `scripts/assets/props.py` (theme `cairnhold`): leaning standing stones and boulder scree (solid), heather mounds and grass tufts (render-only). The committed pack has 24 standing stone, 40 boulder, 1300 heather, 2400 tuft. That adds 42,636 render triangles and 1,800 solid ones (prop budget 2,500). Big props come in mirrored pairs, stay at least 80 m from each flag and 28 m off the ski lanes, and sink into the ground. The baked terrain shade map `shade.rg` (`scripts/assets/terrain_shade.py`) shadows the ground under structures, hulls and big props for the map's sun, plus terrain self-shadow and occlusion. About 5.7% of the tile is in shadow. See `docs/map-pipeline.md`.
 
 **Cover and ground layer.** 20 mirrored cover pieces (12 rock cluster, 8 stone wall; 4 crouch-height, 16 full-height) stand 36–62 m beside the ski lanes and around the control points, blocking movement and shots. The grass layer adds 8025 clumps in 115 meadow patches (80,005 render-only triangles). Scenery: 24 standing stone, 40 boulder, 1900 heather. In total props add 129,805 render and 3,384 solid triangles (budget 4,000).
+
+## Water
+
+Two mirrored ponds, the **Peat Burn**, sit at (816, 928) and its mirror (1232, 1120): ellipses 22 × 15 m, turned −30°, with a 0.7 m/s current, carved
+into the terrain by `scripts/assets/water_bodies.py` from the map definition's
+`"water"` entry. The bed shelves from ankle depth at the shore through waist
+depth to 2.7 m at the centre (about 1,140 m² each), a crest one grid step wide
+holds the water in, and the banks take the soil splat. They are real
+`water_volumes`: they slow walkers, brake skiers hard, float swimmers and cost
+extra jet energy (see `docs/map-pipeline.md`). They are 93 m from the nearest lane, in the midfield flanks, so they are a
+choice beside the route, not a block across it; flags, spawns, capture rings
+and holes are all well clear (checked by `water_checks.assert_ponds`). The
+underwater tint and surface are a dark peaty slate. No prop, cover piece or bot route is placed in
+the water, and the legacy render-only plane is off.
+

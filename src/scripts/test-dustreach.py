@@ -921,6 +921,29 @@ class PropsAndShade(unittest.TestCase):
         from assets import prop_checks
         prop_checks.check_pack(self, Path(__file__).resolve().parent.parent/'assets/maps/dustreach')
 
+class Water(unittest.TestCase):
+    """Mirrored ponds carved into the terrain (assets/water_bodies.py, water_checks.py)."""
+    PACK = Path(__file__).resolve().parent.parent/'assets/maps/dustreach'
+
+    def test_ponds_are_carved_clear_and_mirrored(self):
+        from assets import water_checks
+        rows = water_checks.assert_ponds(self, self.PACK, 2, 2.6, 3.8)
+        for r in rows: print('water', r)
+
+    def test_legacy_plane_is_off(self):
+        import json
+        m = json.loads((self.PACK/'map.json').read_text())
+        self.assertFalse(m['water_enabled'])
+        for v in m['water_volumes']: self.assertLessEqual(len(v['polygon']), 64)
+
+    def test_no_solid_prop_stands_in_water(self):
+        import json
+        from assets import water_bodies
+        m = json.loads((self.PACK/'map.json').read_text())
+        solid = [(b[0], b[1], b[2]) for b in m['props']['big']]+[(c[0], c[1], c[2]) for c in m['props']['cover']]
+        for x, y, z in solid:
+            for v in m['water_volumes']:
+                self.assertFalse(water_bodies.contains(v, x, z) and y < v['surface']+1.0, (x, y, z, v['surface']))
 
 if __name__ == '__main__':
     unittest.main()

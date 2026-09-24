@@ -17,7 +17,9 @@
 //! (airborne, pitched down, firing), `land@T` (falling until `T` seconds,
 //! then grounded: a hard landing) or `switch@T` (disc launcher until `T`,
 //! then chaingun). The landing and switch play through the client's normal
-//! frame-to-frame animation tracker.
+//! frame-to-frame animation tracker. `splash@T` treats `y` as a water
+//! surface: the player skis along it 2 m up until `T` seconds, then drops
+//! in at 22 m/s, so the entry splash plays through the normal effects path.
 //! `QA_POINTS="Beacon:1010,120,860:drain;West:900,100,1000"` stages temporary
 //! control points (`name:x,y,z[:drain][:rRADIUS]`) on any map, `QA_POINT_STATE="0=1/0.4/0/c"`
 //! forces point `index=owner/progress/capturing[/c for contested]` (`-` = none),
@@ -27,7 +29,7 @@ use peakrunner_core::sim::{Team, World};
 use std::sync::OnceLock;
 
 #[derive(Clone, Copy)]
-enum StagedPose { Stand, Dive, Land(f32), Switch(f32) }
+enum StagedPose { Stand, Dive, Land(f32), Switch(f32), Splash(f32) }
 
 struct Overrides { equipment: Vec<(usize, f32, f32)>, down: Vec<u8>, boom: Vec<u8>, boom_at: f32, kit_heal: bool, players: Vec<(String, Team, Vec3, bool, StagedPose)>, started: std::time::Instant, carry_at: f32 }
 
@@ -61,7 +63,8 @@ fn parse() -> Option<&'static Overrides> {
             let pose = match parts.get(3) {
                 None => StagedPose::Stand,
                 Some(&"dive") => StagedPose::Dive,
-                Some(_) => at("land@").map(StagedPose::Land).or_else(|| at("switch@").map(StagedPose::Switch)).unwrap_or(StagedPose::Stand),
+                Some(_) => at("land@").map(StagedPose::Land).or_else(|| at("switch@").map(StagedPose::Switch))
+                    .or_else(|| at("splash@").map(StagedPose::Splash)).unwrap_or(StagedPose::Stand),
             };
             o.players.push((name.to_string(), team, Vec3::new(xyz[0], xyz[1], xyz[2]), carries, pose));
         }
@@ -119,6 +122,10 @@ pub fn apply(world: &mut World) {
             }
             StagedPose::Land(t) => if now < t { p.on_ground = false; p.vel = Vec3::new(0.0, -28.0, 0.0); },
             StagedPose::Switch(t) => p.weapon = if now < t { 0 } else { 1 },
+            StagedPose::Splash(t) => {
+                p.on_ground = false; p.skiing = true; p.vel = Vec3::new(22.0, -2.0, 0.0);
+                p.pos.y += if now < t { 2.0 } else { -0.6 };
+            }
         }
         if *carries && carry_now {
             let enemy = team.other();

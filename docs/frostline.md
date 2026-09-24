@@ -298,3 +298,18 @@ human match; bots don't use the void or the points' drain tactics.
 Frostline scatters original props from `scripts/assets/props.py` (theme `frostline`): snow-capped rocks and large ice shards (solid), pine saplings, small ice shards and frost tufts (render-only). The committed pack has 44 snow rock, 284 ice shard, 200 sapling, 1800 tuft. That adds 21,089 render triangles and 1,680 solid ones (prop budget 2,500). Big props come in mirrored pairs, stay at least 80 m from each flag and 28 m off the ski lanes, and sink into the ground. The baked terrain shade map `shade.rg` (`scripts/assets/terrain_shade.py`) shadows the ground under structures, hulls and big props for the map's sun, plus terrain self-shadow and occlusion. About 24.7% of the tile is in shadow. See `docs/map-pipeline.md`.
 
 **Cover and ground layer.** 16 mirrored cover pieces (8 ice ridge, 8 rock cluster; 8 crouch-height, 8 full-height) stand 36–62 m beside the ski lanes and around the control points, blocking movement and shots. The grass layer adds 7987 clumps in 132 meadow patches (80,000 render-only triangles). Scenery: 44 snow rock, 344 ice shard, 260 sapling. In total props add 99,368 render and 2,808 solid triangles (budget 4,000).
+
+## Water
+
+Two mirrored ponds, the **Meltwater Pool**, sit at (880, 752) and its mirror (1168, 1296): ellipses 20 × 16 m, turned 10°, carved
+into the terrain by `scripts/assets/water_bodies.py` from the map definition's
+`"water"` entry. The bed shelves from ankle depth at the shore through waist
+depth to 2.5 m at the centre (about 1,090 m² each), a crest one grid step wide
+holds the water in, and the banks take the ice crust splat. They are real
+`water_volumes`: they slow walkers, brake skiers hard, float swimmers and cost
+extra jet energy (see `docs/map-pipeline.md`). They are 77 m from the nearest lane, on each station's flank; two mirrored pines on the banks were dropped, so they are a
+choice beside the route, not a block across it; flags, spawns, capture rings
+and holes are all well clear (checked by `water_checks.assert_ponds`). The
+underwater tint is glacial cyan. No prop, cover piece or bot route is placed in
+the water, and the legacy render-only plane is off.
+

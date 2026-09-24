@@ -130,6 +130,15 @@ class Terrain:
         ix = min(max(int(x/self.step), 0), 255); iz = min(max(int(z/self.step), 0), 255)
         return self.w[iz, ix]
 
+    def under_water(self, x, z, y):
+        """True when ground height `y` at (x, z) is under, or within a metre of,
+        water. `water` is None, one legacy height for the whole map, or a list
+        of manifest water volumes (see assets/water_bodies.py)."""
+        if self.water is None: return False
+        if isinstance(self.water, (int, float)): return y < self.water+1.0
+        from assets import water_bodies
+        return any(y < v['surface']+1.0 and water_bodies.contains(v, x, z) for v in self.water)
+
     def near_hole(self, x, z):
         ix = min(max(int(x/self.step), 0), 255); iz = min(max(int(z/self.step), 0), 255)
         return bool(self.cut[iz, ix])
@@ -549,7 +558,7 @@ def scatter(kit, theme, seed, terrain, protect):
         if is_big and protect.flag_distance(x, z) < BASE_CLEAR+foot: return None
         if not _slope_ok(kind, terrain.slope(x, z)) or not _terrain_ok(kind, terrain, x, z): return None
         y = _ground(terrain, x, z, foot)
-        if terrain.water is not None and y < terrain.water+1.0: return None
+        if terrain.under_water(x, z, y): return None
         return y
 
     def build(target, kind, mats, x, y, z, size, yaw, solid, shape):
@@ -673,7 +682,7 @@ def place_cover(kit, entries, rng, terrain, protect, centre, big, mesh, casters,
             if protect.lane_distance(px, pz) < LANE_HALF_WIDTH+2: return False
             if protect.flag_distance(px, pz) < BASE_CLEAR: return False
             if terrain.slope(px, pz) > COVER_SLOPE[kind]: return False
-            if terrain.water is not None and terrain.height(px, pz) < terrain.water+1.0: return False
+            if terrain.under_water(px, pz, terrain.height(px, pz)): return False
         if any(math.hypot(x-sx, z-sz) < sr+reach+COVER_GAP for sx, sz, sr in solids): return False
         if any(math.hypot(x-p['x'], z-p['z']) < COVER_SPACING for p in cover): return False
         return True

@@ -2822,6 +2822,29 @@
     }
   ],
   "cnh_asset": "cnh-tower-v1",
+  "water_enabled": false,
+  "water_volumes": [
+    {
+      "surface": 54.0,
+      "rect": [
+        0.0,
+        872.0,
+        2048.0,
+        1040.0
+      ],
+      "depth": 22.0,
+      "flow": [
+        0.8,
+        0.0
+      ],
+      "color": [
+        0.16,
+        0.26,
+        0.2
+      ]
+    }
+  ],
+  "water_source_sha256": "f9bc358badb02255d1b66980fe86d367294645c07fae2783ec4b0d176592ab66",
   "materials": [
     "meadow",
     "rock",
@@ -3569,7 +3592,7 @@
         0.45
       ]
     ],
-    "source_sha256": "4e1754a02ef595789ad12a274ca568b3f47f14935f930f72f5014d8cd82860d6"
+    "source_sha256": "f2615a5af34d64512f5fa2903a1876d10080abe15cfa74615b69f9678c27aaa5"
   },
   "terrain_shade": {
     "size": 1024,

@@ -17,6 +17,7 @@ from assets import landing_pad
 from assets import pack_writer
 from assets import turret_arcs
 from assets import cnh_tower
+from assets import water_bodies
 
 ROOT = Path(__file__).resolve().parent.parent
 loader = importlib.util.spec_from_file_location('kit', ROOT/'scripts/build-original-map.py')
@@ -58,6 +59,7 @@ def build(output, bake=True):
             anchors={name: [mesh.point(p) for p in value] if isinstance(value, list) else mesh.point(value)
                      for name, value in anchors.items()}))
     grid = terrain_grid(spec)
+    water, water_volumes = water_bodies.apply(spec, grid)
     # Capture & Hold towers, standing on the levelled plateau at each point.
     control_points = []
     for c in spec.get('control_points', []):
@@ -69,7 +71,8 @@ def build(output, bake=True):
         control_points.append({'id': c['id'], 'name': c['name'], 'pos': [c['x'], ground, c['z']],
                                'radius': cnh_tower.RING, 'ctf_active': False})
     heights = bytearray(struct.pack('<65536H', *[round(float(v)*32) for v in grid.ravel()]))
-    weights = bytearray(tower_complex_terrain.weights(grid).tobytes())
+    weights = bytearray(water_bodies.wet_banks(tower_complex_terrain.weights(grid), grid, water, water_volumes,
+                                               spec['water']['channel']).tobytes())
     if sys.byteorder != 'little': mesh.vertices.byteswap(); mesh.collision.byteswap()
     shared = kit.base_pack(); old = shared['manifest']
     textures = bytearray(shared['textures'])
@@ -95,6 +98,8 @@ def build(output, bake=True):
         exact_spawns=True, spawn_points=spawn_points, holes=[], entities=turret_arcs.assign(mesh.entities, flags), instances=instances, ambient_emitters=[],
         sky={'visibleDistance':'2500','fogDistance':'1500','fogColor':'0.74 0.80 0.88'},
         control_points=control_points, look=spec['look'],
+        water_enabled=False, water_volumes=water_volumes,
+        water_source_sha256=pack_writer.source_hash(water_bodies.__file__),
         cnh_asset_sha256=pack_writer.source_hash(cnh_tower.__file__),
         asset_sha256=pack_writer.source_hash(tower_complex.__file__),
         pad_asset_sha256=pack_writer.source_hash(landing_pad.__file__),
@@ -102,7 +107,8 @@ def build(output, bake=True):
         material_source_sha256=pack_writer.source_hash(tower_complex_materials.__file__),
         provenance='PeakRunner original tower-complex geometry, original procedural terrain and original material kit; no extracted assets or external height data',
         definition_sha256=pack_writer.source_hash(ROOT/'maps/tower-complex.json'))
-    pack_writer.add_props_and_shade(kit, files, manifest, 'tower-complex', spec['seed'], [], flags, spawn_points, control_points)
+    pack_writer.add_props_and_shade(kit, files, manifest, 'tower-complex', spec['seed'], [], flags, spawn_points, control_points,
+                                    water=water_volumes)
     pack_writer.write_pack(output, files, manifest)
     print(f'Built {spec["name"]}: {len(mesh.collision)//9} solid triangles'
           + (f', {lightmap["pages"]} lightmap pages in {bake_seconds} s' if lightmap else ', unbaked'))

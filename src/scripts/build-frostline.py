@@ -28,6 +28,7 @@ from assets import frostline_station
 from assets import frostline_terrain
 from assets import pack_writer
 from assets import turret_arcs
+from assets import water_bodies
 from assets import structure_kit
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -237,6 +238,7 @@ def build(output, bake=True):
         control_points.append(entry)
     point_triangles = len(mesh.collision)//9-base_triangles-beacon_triangles
     grid = terrain_grid(definition)
+    water, water_volumes = water_bodies.apply(definition, grid)
     before = len(mesh.collision)//9
     anchors = frostline_cavern.build(mesh, grid)
     lid_render, lid_collision = frostline_cavern.lid(grid)
@@ -244,10 +246,13 @@ def build(output, bake=True):
     instances.append(dict(asset=frostline_cavern.ASSET_ID, position=list(anchors['centre']), yaw=0,
                           anchors={k: list(v) for k, v in anchors.items()}))
     mesh.origin = (0, 0, 0); mesh.yaw = 0
-    pines = trees(definition, grid)
+    # No pine stands in the meltwater pools or on their banks; pairs stay mirrored.
+    pines = [p for p in trees(definition, grid)
+             if not any(water_bodies.radius_t(b, p[0], p[2]) < 1.0+water_bodies.BANK for b in water)]
     frostline_flora.build(mesh, pines)
     heights = bytearray(struct.pack('<65536H', *[round(float(v)*32) for v in grid.ravel()]))
-    weights = frostline_terrain.weights(grid).tobytes()
+    weights = water_bodies.wet_banks(frostline_terrain.weights(grid), grid, water, water_volumes,
+                                     definition['water']['channel']).tobytes()
     # The cavern roof collides like the ground it replaces. It is appended
     # after baking (below) so it keeps the terrain shading path.
     mesh.collision.extend(lid_collision)
@@ -273,7 +278,8 @@ def build(output, bake=True):
     manifest.update(version=1, id=definition['id'], name=definition['name'], flags=flags, spawns=spawns,
         exact_spawns=True, spawn_points=spawn_points, holes=holes(definition), entities=turret_arcs.assign(mesh.entities, flags),
         instances=instances, ambient_emitters=[], sky=dict(FOG), trees=len(pines),
-        control_points=control_points, look=LOOK,
+        control_points=control_points, look=LOOK, water_enabled=False, water_volumes=water_volumes,
+        water_source_sha256=pack_writer.source_hash(water_bodies.__file__),
         cnh_asset_sha256=pack_writer.source_hash(cnh_tower.__file__),
         asset_sha256=pack_writer.source_hash(frostline_station.__file__),
         beacon_asset_sha256=pack_writer.source_hash(frostline_beacon.__file__),
@@ -286,7 +292,7 @@ def build(output, bake=True):
                    'no extracted assets or external height data',
         definition_sha256=pack_writer.source_hash(ROOT/'maps/frostline.json'))
     pack_writer.add_props_and_shade(kit, files, manifest, 'frostline', definition['seed'], manifest['holes'], flags, spawn_points,
-                                    control_points)
+                                    control_points, water=water_volumes)
     pack_writer.write_pack(output, files, manifest)
     print(f'Built {definition["name"]}: {len(mesh.collision)//9} solid triangles '
           f'({base_triangles//2} per base, {beacon_triangles} beacon and centre tower, {point_triangles} flank towers, '

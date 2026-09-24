@@ -11,5 +11,6 @@
     {"id": "beacon", "name": "Beacon", "centre": true, "ctf_active": true, "drain": {"radius": 60, "rate": 10}},
     {"id": "west-col", "name": "West Col", "x": 896, "z": 1024},
     {"id": "east-col", "name": "East Col", "x": 1152, "z": 1024}
-  ]
+  ],
+  "water": {"centre": [1024, 1024], "mirror": true, "channel": 2, "bodies": [{"name": "Meltwater Pool", "x": 880, "z": 752, "rx": 20, "rz": 16, "yaw": 10, "depth": 2.6, "color": [0.2, 0.42, 0.5]}]}
 }

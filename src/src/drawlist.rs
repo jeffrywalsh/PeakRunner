@@ -76,6 +76,11 @@ pub(crate) fn view_camera(world: &World) -> (Vec3, Vec3, f32) {
     qa_flycam_override().unwrap_or_else(|| world.camera())
 }
 
+/// The QA fly-camera's position, when `QA_FLYCAM` is set.
+pub(crate) fn qa_flycam_eye() -> Option<Vec3> {
+    qa_flycam_override().map(|(p, _, _)| p)
+}
+
 fn qa_flycam_override() -> Option<(Vec3, Vec3, f32)> {
     let raw = std::env::var("QA_FLYCAM").ok()?;
     let v: Vec<f32> = raw.split(',').filter_map(|s| s.trim().parse().ok()).collect();

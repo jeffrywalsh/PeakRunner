@@ -269,3 +269,18 @@ Supersedes the cistern, storehouse and spawn dimensions above (asset
 Dustreach scatters original props from `scripts/assets/props.py` (theme `dustreach`): sandstone boulders (solid), dry scrub, dune grass and bleached bones (render-only). The committed pack has 48 boulder, 700 scrub, 3200 tuft, 40 bones. That adds 35,103 render triangles and 1,728 solid ones (prop budget 2,500). Big props come in mirrored pairs, stay at least 80 m from each flag and 28 m off the ski lanes, and sink into the ground. The baked terrain shade map `shade.rg` (`scripts/assets/terrain_shade.py`) shadows the ground under structures, hulls and big props for the map's sun, plus terrain self-shadow and occlusion. About 1.7% of the tile is in shadow. See `docs/map-pipeline.md`.
 
 **Cover and ground layer.** 22 mirrored cover pieces (10 ruin wall, 4 rock cluster, 8 crates; 8 crouch-height, 14 full-height) stand 36–62 m beside the ski lanes and around the control points, blocking movement and shots. The grass layer adds 7995 clumps in 100 meadow patches (80,006 render-only triangles). Scenery: 48 boulder, 1000 scrub, 40 bones. In total props add 111,950 render and 2,784 solid triangles (budget 4,000).
+
+## Water
+
+Two mirrored ponds, the **Oasis**, sit at (848, 672) and its mirror (1200, 1376): ellipses 28 × 22 m, turned 35°, carved
+into the terrain by `scripts/assets/water_bodies.py` from the map definition's
+`"water"` entry. The bed shelves from ankle depth at the shore through waist
+depth to 3.2 m at the centre (about 1,980 m² each), a crest one grid step wide
+holds the water in, and the banks take the ochre (wet sand) splat. They are real
+`water_volumes`: they slow walkers, brake skiers hard, float swimmers and cost
+extra jet energy (see `docs/map-pipeline.md`). They are 125 m from the nearest lane, on each citadel's flank, clear of the sewer, so they are a
+choice beside the route, not a block across it; flags, spawns, capture rings
+and holes are all well clear (checked by `water_checks.assert_ponds`). The
+underwater tint is turquoise. No prop, cover piece or bot route is placed in
+the water, and the legacy render-only plane is off.
+

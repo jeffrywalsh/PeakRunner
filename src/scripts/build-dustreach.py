@@ -27,6 +27,7 @@ from assets import dustreach_sewer
 from assets import dustreach_terrain
 from assets import pack_writer
 from assets import turret_arcs
+from assets import water_bodies
 from assets import structure_kit
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -223,6 +224,7 @@ def build(output, bake=True):
     mesh = kit.Mesh(); mesh.lamps = []
     flags, spawns, spawn_points, instances, base_triangles = build_structures(definition, mesh)
     grid = terrain_grid(definition)
+    water, water_volumes = water_bodies.apply(definition, grid)
     before = len(mesh.collision)//9
     sewer, sewer_lamps = dustreach_sewer.build(mesh, grid)
     mesh.lamps.extend(sewer_lamps)
@@ -238,7 +240,8 @@ def build(output, bake=True):
     # after baking (below) so it keeps the terrain shading path.
     mesh.collision.extend(lid_collision)
     heights = bytearray(struct.pack('<65536H', *[round(float(v)*32) for v in grid.ravel()]))
-    weights = dustreach_terrain.weights(grid).tobytes()
+    weights = water_bodies.wet_banks(dustreach_terrain.weights(grid), grid, water, water_volumes,
+                                     definition['water']['channel']).tobytes()
     if sys.byteorder != 'little': mesh.vertices.byteswap(); mesh.collision.byteswap()
     shared = kit.base_pack(); old = shared['manifest']
     textures = bytearray(shared['textures'])
@@ -266,6 +269,8 @@ def build(output, bake=True):
         gate_asset_sha256=pack_writer.source_hash(dustreach_gate.__file__),
         sewer_asset_sha256=pack_writer.source_hash(dustreach_sewer.__file__),
         control_points=control_points, look=definition['look'],
+        water_enabled=False, water_volumes=water_volumes,
+        water_source_sha256=pack_writer.source_hash(water_bodies.__file__),
         cnh_asset_sha256=pack_writer.source_hash(cnh_tower.__file__),
         structure_kit_sha256=pack_writer.source_hash(structure_kit.__file__),
         terrain_source_sha256=pack_writer.source_hash(dustreach_terrain.__file__),
@@ -275,7 +280,7 @@ def build(output, bake=True):
                    'no external height data, no recordings',
         definition_sha256=pack_writer.source_hash(ROOT/'maps/dustreach.json'))
     pack_writer.add_props_and_shade(kit, files, manifest, 'dustreach', definition['seed'], manifest['holes'], flags, spawn_points,
-                                    control_points)
+                                    control_points, water=water_volumes)
     pack_writer.write_pack(output, files, manifest)
     print(f'Built {definition["name"]}: {len(mesh.collision)//9} solid triangles '
           f'({base_triangles//2} per citadel, '

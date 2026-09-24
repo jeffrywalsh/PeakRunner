@@ -23,6 +23,7 @@ from assets import cairnhold_terrain
 from assets import cnh_tower
 from assets import pack_writer
 from assets import turret_arcs
+from assets import water_bodies
 from assets import structure_kit
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -160,6 +161,7 @@ def build(output, bake=True):
                                    for k, v in anchors.items()}))
     ring_triangles = len(mesh.collision)//9-base_triangles
     grid, holes = terrain_grid(definition)
+    water, water_volumes = water_bodies.apply(definition, grid)
     # Capture & Hold towers: the centre one on the Ring's dais (its 12 m ring
     # is the dais), the flank pair on their levelled plateaus.
     control_points = []
@@ -175,7 +177,8 @@ def build(output, bake=True):
         control_points.append({'id': c['id'], 'name': c['name'], 'pos': [c['x'], ground, c['z']],
                                'radius': cnh_tower.RING, 'ctf_active': False})
     heights = bytearray(struct.pack('<65536H', *[round(float(v)*32) for v in grid.ravel()]))
-    weights = cairnhold_terrain.weights(grid).tobytes()
+    weights = water_bodies.wet_banks(cairnhold_terrain.weights(grid), grid, water, water_volumes,
+                                     definition['water']['channel']).tobytes()
     if sys.byteorder != 'little': mesh.vertices.byteswap(); mesh.collision.byteswap()
     shared = kit.base_pack(); old = shared['manifest']
     textures = bytearray(shared['textures'])
@@ -200,6 +203,8 @@ def build(output, bake=True):
         instances=instances, ambient_emitters=[],
         sky={'visibleDistance': '2500', 'fogDistance': '1500', 'fogColor': definition['fog_color']},
         control_points=control_points, look=definition['look'],
+        water_enabled=False, water_volumes=water_volumes,
+        water_source_sha256=pack_writer.source_hash(water_bodies.__file__),
         cnh_asset_sha256=pack_writer.source_hash(cnh_tower.__file__),
         asset_sha256=pack_writer.source_hash(cairnhold_base.__file__),
         ring_asset_sha256=pack_writer.source_hash(cairnhold_ring.__file__),
@@ -209,7 +214,8 @@ def build(output, bake=True):
         provenance='PeakRunner original Cairnhold geometry, original procedural terrain and original material kit; '
                    'no extracted assets or external height data',
         definition_sha256=pack_writer.source_hash(ROOT/'maps/cairnhold.json'))
-    pack_writer.add_props_and_shade(kit, files, manifest, 'cairnhold', definition['seed'], holes, flags, spawn_points, control_points)
+    pack_writer.add_props_and_shade(kit, files, manifest, 'cairnhold', definition['seed'], holes, flags, spawn_points, control_points,
+                                    water=water_volumes)
     pack_writer.write_pack(output, files, manifest)
     print(f'Built {definition["name"]}: {len(mesh.collision)//9} solid triangles '
           f'({base_triangles//2} per base, {ring_triangles} Ring, {len(mesh.collision)//9-base_triangles-ring_triangles} '

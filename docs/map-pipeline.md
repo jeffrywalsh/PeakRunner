@@ -158,7 +158,8 @@ Design checklist (each item has bitten us once):
 - **Water:** the legacy `water` plane is render-only. Water that slows players
   goes in the manifest's `water_volumes` (up to 32): each has `surface` (world
   y), exactly one footprint (`rect` `[x0, z0, x1, z1]` or `polygon`
-  `[[x, z], ...]`, 3–64 points, convex for correct surface rendering), optional
+  `[[x, z], ...]`, 3–64 points, convex or star-shaped about its centroid: the
+  surface is fanned from the centroid), optional
   `depth` (volume ends that far below the surface), `flow` `[x, z]` m/s (a
   current, at most 30), and `color` (linear RGB 0–1, used for the underwater
   tint). See `crates/core/src/water.rs`. In the shared sim, horizontal drag
@@ -173,6 +174,22 @@ Design checklist (each item has bitten us once):
   slowdown is the point, and make sure every basin has a shore a wader can walk
   out of. `QA_WATER=surface,x0,z0,x1,z1[,flow_x,flow_z];...` stages volumes in
   a local match for previews.
+  **Placing ponds:** declare bodies in the map definition's `"water"` entry
+  (`centre`, `mirror`, splat `channel` for the wet bank, and `bodies`: ellipses
+  with `x`, `z`, `rx`, `rz`, optional `yaw`, `depth`, `flow`, `color`), then call
+  `water_bodies.apply(definition, grid)` right after the terrain grid is made,
+  `water_bodies.wet_banks(...)` on the splat weights, write the returned
+  `water_volumes` into the manifest with `water_enabled: false`, and pass them to
+  `add_props_and_shade(..., water=...)` so no prop lands in the water. The
+  carver sets the surface from the ground round the ellipse, shelves the bed
+  from ankle depth at the shore through waist depth to the full depth, raises a
+  crest at least one grid step wide outside the shore, and traces the outline
+  along the finished shoreline so no water hangs past the bank. Put ponds off
+  the ski lanes where they make a choice (existing ponds sit 77–125 m from the
+  lanes). Suites call `water_checks.assert_ponds(...)` (depth, dry edge,
+  clearance from flags, spawns, rings, holes and lanes, mirrored size) and the
+  core test `every_maps_water_slows_skiers_who_can_jet_out` skis into every
+  declared volume with the real movement code.
 - **Pads:** optional `landing_pad` with named `deploy_slots` anchors for future
   player-placed turrets and vehicles.
 - **Props and terrain shade:** after the lightmap bake, call

@@ -59,6 +59,13 @@ fn layer_mix(uv:vec2<f32>,w:vec4<f32>,l:vec4<i32>)->vec4<f32> {
 }
 @fragment fn fs_map(v: Out) -> @location(0) vec4<f32> {
     var color=textureSample(images,samp,v.uv,i32(v.layer.x));
+    // Water volumes with a colour carry it packed in the otherwise unused
+    // lightmap uv: x = r*256 + g, y = b + 1 (0 means no tint).
+    if (v.layer.y == -3.0 && v.lmuv.y > 0.5) {
+        let r=floor(v.lmuv.x/256.0); let g=v.lmuv.x-r*256.0; let b=v.lmuv.y-1.0;
+        let tint=clamp(vec3<f32>(r,g,b)/255.0*2.2,vec3<f32>(0.0),vec3<f32>(1.0));
+        color=vec4<f32>(mix(color.rgb,tint,0.6),color.a);
+    }
     var n=normalize(v.normal);
     let dist=distance(u.eye.xyz,v.world);
     if (v.layer.y == -2.0) {

@@ -335,3 +335,18 @@ for the whole map. 13 lightmap pages. Captures:
 Tower Complex scatters original props from `scripts/assets/props.py` (theme `tower-complex`): rock outcrops of two or three boulders on the hills (solid), scrub and grass tufts (render-only). The committed pack has 26 outcrop, 700 scrub, 3200 tuft. That adds 33,963 render triangles and 2,304 solid ones (prop budget 2,500). Big props come in mirrored pairs, stay at least 80 m from each flag and 28 m off the ski lanes, and sink into the ground. The baked terrain shade map `shade.rg` (`scripts/assets/terrain_shade.py`) shadows the ground under structures, hulls and big props for the map's sun, plus terrain self-shadow and occlusion. About 1.9% of the tile is in shadow. See `docs/map-pipeline.md`.
 
 **Cover and ground layer.** 20 mirrored cover pieces (10 debris, 10 rock cluster; 10 crouch-height, 10 full-height) stand 36–62 m beside the ski lanes and around the control points, blocking movement and shots. The grass layer adds 8024 clumps in 100 meadow patches (80,006 render-only triangles). Scenery: 28 outcrop, 1000 scrub. In total props add 111,230 render and 3,864 solid triangles (budget 4,000).
+
+## Water
+
+Two mirrored ponds, the **Westfall Tarn**, sit at (784, 896) and its mirror (1264, 1152): ellipses 26 × 20 m, turned 20°, carved
+into the terrain by `scripts/assets/water_bodies.py` from the map definition's
+`"water"` entry. The bed shelves from ankle depth at the shore through waist
+depth to 3.45 m at the centre (about 1,760 m² each), a crest one grid step wide
+holds the water in, and the banks take the soil splat. They are real
+`water_volumes`: they slow walkers, brake skiers hard, float swimmers and cost
+extra jet energy (see `docs/map-pipeline.md`). They are 85 m from the nearest ski lane, off the Westfall flank, so they are a
+choice beside the route, not a block across it; flags, spawns, capture rings
+and holes are all well clear (checked by `water_checks.assert_ponds`). The
+underwater tint is blue-green. No prop, cover piece or bot route is placed in
+the water, and the legacy render-only plane is off.
+

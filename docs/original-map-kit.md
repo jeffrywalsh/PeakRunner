@@ -373,3 +373,17 @@ walking route makes the flag too easy to reach.
 Old Holler scatters original props from `scripts/assets/props.py` (theme `old-holler`): meadow boulders and fallen logs (solid), moss tufts and ferns (render-only). The committed pack has 48 boulder, 16 log, 4200 tuft, 900 fern. That adds 29,560 render triangles and 1,920 solid ones (prop budget 2,500). Big props come in mirrored pairs, stay at least 80 m from each flag and 28 m off the ski lanes, and sink into the ground. The baked terrain shade map `shade.rg` (`scripts/assets/terrain_shade.py`) shadows the ground under structures, hulls and big props for the map's sun, plus terrain self-shadow and occlusion. About 0.9% of the tile is in shadow. See `docs/map-pipeline.md`.
 
 **Cover and ground layer.** 22 mirrored cover pieces (8 log pile, 6 stone wall, 8 rock cluster; 14 crouch-height, 8 full-height) stand 36–62 m beside the ski lanes and around the control points, blocking movement and shots. The grass layer adds 8003 clumps in 95 meadow patches (80,007 render-only triangles). Scenery: 48 boulder, 16 log, 1300 fern. In total props add 99,567 render and 3,288 solid triangles (budget 4,000).
+
+## Water
+
+Old Holler's flooded ravine is real water: one `water_volumes` rect
+(`build-raindance.py` `ravine_water`) at the kit's water height, y 54, across
+the ravine's full width (x 0–2048, z 872–1040), about 20 m deep at the
+deepest point, with a gentle 0.8 m/s current running east along it and a
+murky green tint. It replaces the legacy render-only plane, which is now off;
+the ravine keeps the original kit splat, which already reads as wet banks. Every route between the
+flags crosses it, deliberately: take the bridge, jet over, or wade and swim
+slowly. Flags, spawns and holes are far from the water, and the Crossing's
+capture ring stands on its platform well above it. No prop or cover piece
+stands in the water.
+

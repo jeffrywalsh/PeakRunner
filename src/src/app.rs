@@ -513,7 +513,8 @@ impl eframe::App for PeakRunnerApp {
         }
         // Eye below a water surface: a murky tint over the view.
         if self.mode == Mode::Play {
-            let eye = self.world.camera().0;
+            // A QA fly-camera below the surface tints like a player's eye would.
+            let eye = crate::drawlist::qa_flycam_eye().unwrap_or(self.world.camera().0);
             if let Some(c) = peakrunner_core::water::eye_under(self.world.map, &self.world.staged_water, eye) {
                 let [r, g, b] = c.map(|v| (v * 255.0) as u8);
                 ui.painter().rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(r, g, b, 120));

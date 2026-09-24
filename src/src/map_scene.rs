@@ -83,13 +83,22 @@ impl MapGpu {
             bytes.extend_from_slice(bytemuck::cast_slice(&vertex));
         }
         // Declared water volumes (and QA-staged ones): a flat surface fanned
-        // from the first outline point, with the same translucent water pass.
+        // from the outline's centroid, so star-shaped shorelines traced round a
+        // pond's centre (scripts/assets/water_bodies.py) fill correctly as well
+        // as convex ones. Same translucent water pass.
         let staged=peakrunner_core::water::qa_staged();
         for volume in pack.manifest.water_volumes.iter().chain(&staged) {
             let outline=volume.outline();
-            for k in 1..outline.len().saturating_sub(1) {
-                for q in [outline[0],outline[k],outline[k+1]] {
-                    let vertex=[q[0],volume.surface,q[1],0.,1.,0.,q[0]/32.0,q[1]/32.0,0.,0.,pack.manifest.water_layer as f32,-3.];
+            let n=outline.len().max(1) as f32;
+            let centre=[outline.iter().map(|q|q[0]).sum::<f32>()/n,outline.iter().map(|q|q[1]).sum::<f32>()/n];
+            // Surface tint from the volume's colour, packed for map.wgsl.
+            let tint=volume.color.map_or([0.,0.],|c| {
+                let b=|v:f32|(v.clamp(0.,1.)*255.).round();
+                [b(c[0])*256.+b(c[1]),b(c[2])+1.]
+            });
+            for k in 0..outline.len() {
+                for q in [centre,outline[k],outline[(k+1)%outline.len()]] {
+                    let vertex=[q[0],volume.surface,q[1],0.,1.,0.,q[0]/32.0,q[1]/32.0,tint[0],tint[1],pack.manifest.water_layer as f32,-3.];
                     bytes.extend_from_slice(bytemuck::cast_slice(&vertex));
                 }
             }

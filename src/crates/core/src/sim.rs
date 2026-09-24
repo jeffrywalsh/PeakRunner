@@ -5721,4 +5721,73 @@ mod water_tests {
         let speed = world.discs.first().map_or(0.0, |d| d.vel.length());
         assert!(speed < 95.0 * 0.15, "the disc is dragged down: {speed}");
     }
+
+    /// Every map's declared water: a skier coming off the bank at 20 m/s is
+    /// braked hard, floats instead of sinking, and can jet back out.
+    #[test]
+    fn every_maps_water_slows_skiers_who_can_jet_out() {
+        let maps = [MapId::Raindance, MapId::BroadsideClone, MapId::StonehengeClone,
+                    MapId::SnowblindClone, MapId::DesertOfDeathClone];
+        for map in maps {
+            let volumes = crate::water::volumes(map);
+            assert!(!volumes.is_empty(), "{map:?} declares water");
+            for (i, v) in volumes.iter().enumerate() {
+                // Centre and the direction a skier comes in from.
+                let ground = |q: Vec2| crate::terrain::support_on(map, Vec3::new(q.x, 2000.0, q.y)).0;
+                let (centre, dir) = match (&v.rect, &v.polygon) {
+                    // A long channel: come in across it above its deepest point.
+                    (Some(r), _) => {
+                        let z = (r[1] + r[3]) / 2.0;
+                        let x = (0..100).map(|k| 200.0 + k as f32 * 16.0)
+                            .min_by(|a, b| ground(Vec2::new(*a, z)).total_cmp(&ground(Vec2::new(*b, z)))).unwrap();
+                        (Vec2::new(x, z), Vec2::new(0.0, 1.0))
+                    }
+                    (_, Some(p)) => {
+                        let n = p.len() as f32;
+                        (Vec2::new(p.iter().map(|q| q[0]).sum::<f32>() / n, p.iter().map(|q| q[1]).sum::<f32>() / n),
+                         Vec2::new(1.0, 0.0))
+                    }
+                    _ => unreachable!(),
+                };
+                let mut shore = centre;
+                while ground(shore) < v.surface + 0.1 { shore += dir; }
+                let start = shore + dir * 6.0;
+                let mut world = World::new();
+                world.set_map(map);
+                world.start_match(true);
+                world.players.truncate(1);
+                world.player_id = 0;
+                world.network_inputs.clear();
+                let p = &mut world.players[0];
+                p.is_bot = false; p.remote = false; p.alive = true; p.health = 100.0; p.energy = ENERGY_MAX;
+                p.pos = Vec3::new(start.x, ground(start) + PLAYER_RADIUS, start.y);
+                p.vel = Vec3::new(-dir.x * 20.0, 0.0, -dir.y * 20.0);
+                p.on_ground = true;
+                world.input.jump = true;
+                world.input.jump_prev = true;
+                let mut wettest: f32 = 0.0;
+                for _ in 0..(2.5 / STEP) as usize {
+                    world.step_players(STEP);
+                    wettest = wettest.max(crate::water::immersion(map, &[], world.players[0].pos).0);
+                }
+                let v2 = world.players[0].vel;
+                let speed = Vec2::new(v2.x, v2.z).length();
+                assert!(wettest > 0.4, "{map:?} volume {i}: the skier reached deep water ({wettest:.2})");
+                assert!(speed < 8.0, "{map:?} volume {i}: water braked the skier to {speed:.1} m/s");
+                for _ in 0..(2.0 / STEP) as usize { world.step_players(STEP); }
+                let (wet, _) = crate::water::immersion(map, &[], world.players[0].pos);
+                assert!(wet < 1.0, "{map:?} volume {i}: floats, not sunk ({wet:.2})");
+                world.input.jump = false;
+                world.players[0].energy = ENERGY_MAX;
+                world.input.jet = true;
+                let mut t = 0.0;
+                while crate::water::immersion(map, &[], world.players[0].pos).0 > 0.0 {
+                    world.step_players(STEP);
+                    t += STEP;
+                    assert!(t < 3.0, "{map:?} volume {i}: could not jet out");
+                }
+                println!("{map:?} volume {i}: deepest immersion {wettest:.2}, speed {speed:.1} m/s after 2.5 s, jet out {t:.2} s");
+            }
+        }
+    }
 }

@@ -18,6 +18,7 @@ import sys
 from assets import cnh_tower
 from assets import pack_writer
 from assets import turret_arcs
+from assets import water_bodies
 from assets import raindance_base
 from assets import raindance_materials
 from assets import raindance_structures
@@ -104,6 +105,21 @@ def control_point(mesh, cp, d):
     return {'id': cp['id'], 'name': cp['name'], 'pos': [x, y, z], 'radius': cnh_tower.RING, 'ctf_active': False}
 
 
+# The flooded ravine is real water: the whole ravine (every cell below the
+# surface lies in z 880-1024, running the full width of the map) slows and
+# floats players, with a gentle current along it. Its surface is the kit's
+# water height, so it matches the ravine carved into the terrain.
+RAVINE = [0.0, 872.0, 2048.0, 1040.0]
+RAVINE_FLOW = [0.8, 0.0]
+RAVINE_COLOR = [0.16, 0.26, 0.20]
+
+
+def ravine_water(d):
+    surface = float(d['environment']['water_height'])
+    return {'surface': surface, 'rect': list(RAVINE), 'depth': 22.0,
+            'flow': list(RAVINE_FLOW), 'color': list(RAVINE_COLOR)}
+
+
 def build(output, bake=True):
     if output.exists(): raise ValueError(f'Refusing to overwrite {output}; use a new output directory')
     d = spec()
@@ -166,6 +182,7 @@ def build(output, bake=True):
         mesh.box(((rear_end-32)/2, -.27, 30), (rear_end+32, .6, 4), 'concrete')
         for x in [-21, 21]: mesh.box((x, -.27, -40), (22, .6, 24), 'concrete')
         mesh.box((0, -.27, -54), (64, .6, 4), 'grate')
+    water_volumes = [ravine_water(d)]
     if sys.byteorder != 'little': mesh.vertices.byteswap(); mesh.collision.byteswap()
     textures = bytearray(kit.base_textures(d['seed']))
     manifest = kit.layer_manifest(d['environment']['water_height'])
@@ -184,6 +201,8 @@ def build(output, bake=True):
         look=LOOK,
         ambient_emitters=[[1000, 100, 940, .35, 200, 2000]], entities=turret_arcs.assign(mesh.entities, flags), instances=mesh.instances,
         control_points=points, cnh_asset=cnh_tower.ASSET_ID,
+        water_enabled=False, water_volumes=water_volumes,
+        water_source_sha256=pack_writer.source_hash(water_bodies.__file__),
         materials=list(kit.MATERIALS), asset_catalog=list(kit.ASSETS),
         provenance='PeakRunner original procedural kit v2 (cleaned Raindance); no extracted assets',
         base_asset=raindance_base.ASSET_ID, structures_asset=raindance_structures.ASSET_ID,
@@ -192,7 +211,7 @@ def build(output, bake=True):
         material_source_sha256=pack_writer.source_hash(raindance_materials.__file__),
         definition_sha256=pack_writer.source_hash(ROOT/'maps/raindance.json'))
     pack_writer.add_props_and_shade(kit, files, manifest, 'old-holler', d['seed'], holes, flags, spawn_points, points,
-                                    water=d['environment']['water_height'])
+                                    water=water_volumes)
     pack_writer.write_pack(output, files, manifest)
     print(f'Built {d["name"]}: {len(mesh.collision)//9} solid triangles ({base_triangles//2} per base), '
           f'{len(files["vertices.bin"])//144} render triangles, {len(mesh.entities)} equipment objects'

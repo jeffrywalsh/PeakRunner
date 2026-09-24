@@ -93,5 +93,6 @@
       "cloud_scale": 2.2,
       "sun_size": 0.026
     }
-  }
+  },
+  "water": {"centre": [1024, 1024], "mirror": true, "channel": 2, "bodies": [{"name": "Oasis", "x": 848, "z": 672, "rx": 28, "rz": 22, "yaw": 35, "depth": 3.2, "color": [0.1, 0.36, 0.38]}]}
 }
