@@ -24,12 +24,24 @@ loader = importlib.util.spec_from_file_location('kit', ROOT/'scripts/build-origi
 kit = importlib.util.module_from_spec(loader)
 loader.loader.exec_module(kit)
 
+def summits(spec):
+    """Each listed summit plus its point-symmetric partner through the
+    midpoint of the two bases, so both teams get the same high ground."""
+    (rx, _, rz), (bx, _, bz) = [b['position'] for b in spec['bases']]
+    cx, cz = (rx+bx)/2, (rz+bz)/2
+    out = []
+    for s in spec.get('summits', []):
+        out.append((s['x'], s['z'], s['height'], s['radius']))
+        out.append((2*cx-s['x'], 2*cz-s['z'], s['height'], s['radius']))
+    return out
+
 def terrain_grid(spec):
     """Original rolling terrain (see assets/tower_complex_terrain.py)."""
     return tower_complex_terrain.heights([b['position'] for b in spec['bases']], spec['seed'],
                                          pads=[(p['position'][0], p['position'][2], p['position'][1])
                                                for p in spec.get('pads', [])],
-                                         points=[(c['x'], c['z']) for c in spec.get('control_points', [])])
+                                         points=[(c['x'], c['z']) for c in spec.get('control_points', [])],
+                                         summits=summits(spec))
 
 def terrain_height(x, z, grid):
     """Bilinear sample of the grid, matching the engine's heightfield lookup."""

@@ -96,13 +96,14 @@ def _blur(h, passes=2):
     return h
 
 
-def heights(bases, seed, deck_y=240.0, pads=(), points=()):
+def heights(bases, seed, deck_y=240.0, pads=(), points=(), summits=()):
     """256x256 heights in metres (row = z cell, column = x cell).
 
     `pads` are (x, z, deck_y) landing pads: the ground under each stays
     PAD_CLEARANCE below its deck. `points` are (x, z) Capture & Hold tower
     sites: the ground is levelled into a gentle plateau there so the ring is
-    walkable."""
+    walkable. `summits` are (x, z, height, radius) tall hills raised before
+    erosion, so they grow shoulders and spurs rather than standing as spikes."""
     z, x = np.mgrid[0:N, 0:N].astype(np.float64)*STEP
     (rx, rz), (bx, bz) = [(b[0], b[2]) for b in bases]
     cx, cz = (rx+bx)/2, (rz+bz)/2
@@ -131,6 +132,13 @@ def heights(bases, seed, deck_y=240.0, pads=(), points=()):
     # Outer edge: climb into bounding hills beyond the play space.
     edge = np.maximum(np.abs(x-1024), np.abs(z-1024))
     h = h+70*_smooth(780, 1010, edge)
+    # Tall summits: broad domes with a partial domain warp, so their outlines
+    # curve with the hills while their centres stay where they were placed,
+    # and ridged spurs run down their shoulders.
+    for k, (sx, sz, height, radius) in enumerate(summits):
+        d = np.hypot((x-sx)+.35*(wx-x), (z-sz)+.35*(wz-z))/radius
+        spur = _fbm(x+k*613, z-k*389, radius*.9, 3, seed+31, ridged=True)
+        h = h+height*np.exp(-d*d)*(.78+.44*spur)+.18*height*np.exp(-d*d/4)
 
     h = _blur(_erode(h), 1)
 

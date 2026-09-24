@@ -62,6 +62,36 @@
       "z": 1096
     }
   ],
+  "summits": [
+    {
+      "name": "Midfield flank",
+      "x": 1400,
+      "z": 984,
+      "height": 52,
+      "radius": 120
+    },
+    {
+      "name": "Approach flank",
+      "x": 1320,
+      "z": 800,
+      "height": 110,
+      "radius": 115
+    },
+    {
+      "name": "Rear summit",
+      "x": 1040,
+      "z": 1480,
+      "height": 110,
+      "radius": 140
+    },
+    {
+      "name": "Outer shoulder",
+      "x": 1400,
+      "z": 1240,
+      "height": 68,
+      "radius": 125
+    }
+  ],
   "look": {
     "exposure": 1.05,
     "ambient_sky": [
@@ -99,5 +129,28 @@
       "cloud_scale": 1.2
     }
   },
-  "water": {"centre": [1024, 1024], "mirror": true, "channel": 2, "bodies": [{"name": "Westfall Tarn", "x": 784, "z": 896, "rx": 26, "rz": 20, "yaw": 20, "depth": 3.5, "color": [0.12, 0.3, 0.34]}]}
+  "water": {
+    "centre": [
+      1024,
+      1024
+    ],
+    "mirror": true,
+    "channel": 2,
+    "bodies": [
+      {
+        "name": "Westfall Tarn",
+        "x": 784,
+        "z": 896,
+        "rx": 26,
+        "rz": 20,
+        "yaw": 20,
+        "depth": 3.5,
+        "color": [
+          0.12,
+          0.3,
+          0.34
+        ]
+      }
+    ]
+  }
 }
