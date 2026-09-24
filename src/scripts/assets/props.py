@@ -14,7 +14,11 @@ Rules (docs/map-pipeline.md):
   (flag to flag, flag to each control point), stay `BASE_CLEAR` from each flag
   so base approaches stay open, and never exceed
   `PROP_COLLISION_TRIS` per map.
-* Small props (tufts, ferns, heather, scrub, saplings, bones) are render-only.
+* Cover (walls, log piles, rock clusters, ruins, crates, ice ridges, debris)
+  is solid and deliberate: mirrored pieces beside the ski lanes and around
+  control points that block movement and shots (see `place_cover`).
+* Small props (ferns, heather, scrub, saplings, bones) and the grass layer
+  (`ground_layer`) are render-only.
 * Nothing lands in protected space: under or near any existing collision
   geometry (bases, towers, bridges, pads, trees), terrain holes (bunker cuts,
   sewer and cavern mouths, trenches) and their neighbours, around flags, spawn
@@ -30,9 +34,21 @@ import random
 
 import numpy as np
 
-SOURCE_VERSION = 4
-# Solid triangles all of a map's props may add (outside the per-base budget).
-PROP_COLLISION_TRIS = 2500
+SOURCE_VERSION = 5
+# Solid triangles all of a map's props (scenery plus cover) may add, outside
+# the per-base budget.
+PROP_COLLISION_TRIS = 4000
+# Of which scenery (boulders, outcrops, logs, stones) may take at most this;
+# the rest is kept for cover.
+SCENERY_COLLISION_TRIS = 2500
+# Render-only triangles for the ground layer (grass clumps and meadow patches).
+GROUND_TRIS = 80000
+# Cover: deliberate solid pieces beside the ski lanes and around control points.
+COVER_OFFSETS = (36.0, 48.0, 62.0) # metres to the side of a lane's centre line
+COVER_SPACING = 30.0               # between any two cover pieces
+COVER_GAP = 4.0                    # walkable gap to any other solid prop
+CROUCH = (1.25, 1.5)               # crouch-cover height range
+FULL = (2.6, 3.6)                  # full-cover height range
 LANE_HALF_WIDTH = 28.0
 MARGIN_BIG = 8.0
 MARGIN_SMALL = 4.0
@@ -45,25 +61,40 @@ EDGE = 48.0
 OCC_CELL = 2.0
 
 # kind: (material(s), count, size range, solid). Counts are targets; big
-# counts are pairs (each placement is mirrored).
+# counts are pairs (each placement is mirrored). `cover` entries are
+# (kind, material(s), pairs, length range, height class) and are placed as
+# deliberate mirrored cover spots; `ground` is the grass layer (material,
+# clump size range).
 THEMES = {
     'old-holler': dict(
         big=[('boulder', 'rock', 24, (1.3, 3.0)), ('log', 'bark', 8, (3.0, 6.0))],
-        small=[('tuft', 'moss', 4200, (.55, 1.1)), ('fern', 'leaf', 900, (.8, 1.5))]),
+        cover=[('log_pile', 'bark', 4, (4.0, 6.0), 'crouch'), ('rock_cluster', 'rock', 4, (1.6, 2.2), 'full'),
+               ('stone_wall', ('rock', 'moss'), 3, (6.0, 9.0), 'crouch')],
+        small=[('fern', 'leaf', 1300, (.8, 1.5))],
+        ground=('moss', (.55, 1.15))),
     'tower-complex': dict(
         big=[('outcrop', 'rock', 22, (2.2, 4.6))],
-        small=[('scrub', 'leaf', 700, (.8, 1.6)), ('tuft', 'moss', 3200, (.5, 1.0))]),
+        cover=[('rock_cluster', 'rock', 5, (1.8, 2.4), 'full'), ('debris', ('panel', 'trim'), 5, (3.5, 5.0), 'crouch')],
+        small=[('scrub', 'leaf', 1000, (.8, 1.6))],
+        ground=('moss', (.5, 1.05))),
     'cairnhold': dict(
         big=[('standing_stone', 'concrete', 12, (3.0, 5.5)), ('boulder', 'rock', 20, (1.2, 2.6))],
-        small=[('heather', 'moss', 1300, (.7, 1.4)), ('tuft', 'leaf', 2400, (.5, 1.0))]),
+        cover=[('stone_wall', ('concrete', 'moss'), 5, (7.0, 11.0), 'crouch'),
+               ('stone_wall', ('concrete', 'moss'), 3, (5.0, 7.0), 'full'), ('rock_cluster', 'rock', 6, (1.6, 2.2), 'full')],
+        small=[('heather', 'moss', 1900, (.7, 1.4))],
+        ground=('leaf', (.5, 1.05))),
     'frostline': dict(
         big=[('snow_rock', ('rock', 'meadow'), 22, (1.5, 3.4)), ('ice_shard', 'soil', 12, (2.6, 5.0))],
-        small=[('sapling', ('leaf', 'bark'), 200, (2.0, 4.0)), ('ice_shard', 'soil', 260, (.6, 1.6)),
-               ('tuft', 'moss', 1800, (.45, .9))]),
+        cover=[('ice_ridge', ('soil', 'meadow'), 5, (6.0, 9.0), 'full'),
+               ('rock_cluster', ('rock', 'meadow'), 4, (1.4, 2.0), 'crouch')],
+        small=[('sapling', ('leaf', 'bark'), 260, (2.0, 4.0)), ('ice_shard', 'soil', 320, (.6, 1.6))],
+        ground=('moss', (.45, .95))),
     'dustreach': dict(
         big=[('boulder', 'rock', 24, (1.4, 3.4))],
-        small=[('scrub', 'moss', 700, (.7, 1.4)), ('tuft', 'soil', 3200, (.6, 1.2)),
-               ('bones', 'bark', 40, (1.2, 2.2))]),
+        cover=[('ruin_wall', 'rock', 5, (6.0, 10.0), 'full'), ('crates', 'bark', 4, (2.6, 4.0), 'crouch'),
+               ('rock_cluster', 'rock', 2, (1.6, 2.2), 'full')],
+        small=[('scrub', 'moss', 1000, (.7, 1.4)), ('bones', 'bark', 40, (1.2, 2.2))],
+        ground=('soil', (.6, 1.25))),
 }
 
 
@@ -305,9 +336,169 @@ def bones(mesh, rng, size, mat, solid=False):
     return n
 
 
+def clump(mesh, rng, size, mat, solid=False):
+    """A dense grass clump: 8-12 blades from one root, read as a patch at eye level."""
+    blades = rng.randint(8, 12)
+    for _ in range(blades):
+        a = rng.uniform(0, math.tau); off = rng.uniform(0, size*.45)
+        bx, bz = off*math.cos(a), off*math.sin(a)
+        lean = rng.uniform(.15, .55); h = size*rng.uniform(.6, 1.1); w = size*.09
+        tx, tz = bx+lean*h*math.cos(a), bz+lean*h*math.sin(a)
+        px, pz = -math.sin(a)*w, math.cos(a)*w
+        mesh.triangle([(bx-px, -.05, bz-pz), (bx+px, -.05, bz+pz), (tx, h, tz)], mat, False)
+    return blades
+
+
 BUILDERS = dict(boulder=boulder, outcrop=outcrop, snow_rock=snow_rock, standing_stone=standing_stone,
                 log=log, ice_shard=ice_shard, tuft=tuft, fern=fern, heather=heather, scrub=scrub,
-                sapling=sapling, bones=bones)
+                sapling=sapling, bones=bones, clump=clump)
+
+
+# ---- Cover ------------------------------------------------------------------
+# Cover pieces are solid, low-poly and sit on the terrain: every box reaches
+# COVER_SINK below the lowest ground under it, so no edge hovers and nothing
+# leaves a gap a player could slip under. Pieces are built in a local frame
+# whose long axis is x; `ground(lx, lz)` gives the terrain height there relative
+# to the piece's origin. Each builder returns its half extents (hx, hz).
+COVER_SINK = .5
+SEGMENT = 2.5
+
+
+def _ground_span(ground, x0, x1, hz):
+    ys = [ground(x, z) for x in (x0, (x0+x1)/2, x1) for z in (-hz, 0.0, hz)]
+    return min(ys), max(ys)
+
+
+def _wall_run(mesh, ground, length, height, thick, mat, heights=None):
+    """A wall along local x in ~2.5 m segments, each from below its lowest
+    ground to `height` above its highest ground."""
+    n = max(1, round(length/SEGMENT)); seg = length/n
+    tops = []
+    for i in range(n):
+        x0 = -length/2+i*seg; x1 = x0+seg
+        lo, hi = _ground_span(ground, x0, x1, thick/2)
+        h = height if heights is None else heights[i]
+        top = hi+h; bottom = lo-COVER_SINK
+        # Segments overlap by 5 cm so the joints never open.
+        mesh.box(((x0+x1)/2, (top+bottom)/2, 0), (seg+.05, top-bottom, thick), mat, True)
+        tops.append((x0, x1, top))
+    return tops
+
+
+def stone_wall(mesh, rng, length, height, ground, mats):
+    stone, cap = mats if isinstance(mats, tuple) else (mats, mats)
+    thick = .9
+    tops = _wall_run(mesh, ground, length, height, thick, stone)
+    # Mossy capstones, render-only, sunk into the wall top so no face is coplanar.
+    for x0, x1, top in tops:
+        x = x0+.3
+        while x < x1-.3:
+            w = rng.uniform(.45, .8)
+            # Raised 4 cm off the joint and staggered, so no capstone face is
+            # coplanar with its neighbour's or the wall's.
+            mesh.box((min(x+w/2, x1-.25), top+.04+rng.uniform(0, .03), rng.uniform(-.05, .05)), (w, .22, thick+.1+rng.uniform(0, .04)), cap, False)
+            x += w+rng.uniform(.05, .2)
+    return length/2, thick/2
+
+
+def ruin_wall(mesh, rng, length, height, ground, mats):
+    thick = 1.1
+    n = max(1, round(length/SEGMENT))
+    # Broken sandstone: every segment still gives full cover at chest height.
+    heights = [height*rng.uniform(.62, 1.0) for _ in range(n)]
+    heights[rng.randrange(n)] = height
+    _wall_run(mesh, ground, length, height, thick, mats, heights)
+    for _ in range(4):
+        lx = rng.uniform(-length/2, length/2); lz = rng.choice((-1, 1))*rng.uniform(.9, 1.6)
+        s = rng.uniform(.3, .6)
+        mesh.box((lx, ground(lx, lz)+s*.3, lz), (s, s*.8, s), mats, False)
+    return length/2, thick/2
+
+
+def log_pile(mesh, rng, length, height, ground, mats):
+    r = height/3.3
+    lo, hi = _ground_span(ground, -length/2, length/2, 2*r)
+    base = hi-.1
+    for z in (-r*.95, r*.95):
+        top = base+2*r-.15
+        mesh.box((0, (top+lo-COVER_SINK)/2, z), (length, top-(lo-COVER_SINK), 2*r), mats, True)
+    top_log = base+2*r-.35
+    mesh.box((rng.uniform(-.3, .3), top_log+r, 0), (length*.85, 2*r, 2*r), mats, True)
+    return length/2, 2*r
+
+
+def crates(mesh, rng, length, height, ground, mats):
+    s = min(1.35, length/2)
+    count = max(2, round(length/s))
+    lo, hi = _ground_span(ground, -length/2, length/2, s/2)
+    for i in range(count):
+        x = -length/2+s/2+i*(length-s)/max(count-1, 1)
+        top = hi+s
+        mesh.box((x, (top+lo-COVER_SINK)/2, rng.uniform(-.1, .1)), (s, top-(lo-COVER_SINK), s), mats, True)
+    if height > s*1.5:
+        mesh.box((-length/2+s/2+.1, hi+s*1.5-.02, 0), (s*.95, s, s*.95), mats, True)
+    return length/2, s/2+.1
+
+
+def debris(mesh, rng, length, height, ground, mats):
+    plate, trim = mats
+    thick = 1.0
+    _wall_run(mesh, ground, length, height, thick, plate)
+    # A second, lower plate leaning against the first, and render-only ribs.
+    lo, hi = _ground_span(ground, -length/4, length/4, 1.8)
+    mesh.box((length*.15, (hi+height*.55+lo-COVER_SINK)/2, .95), (length*.5, hi+height*.55-(lo-COVER_SINK), .6), plate, True)
+    for i in range(3):
+        x = -length/2+(i+.5)*length/3
+        mesh.box((x, ground(x, 0)+height*.5, 0), (.18, height+.1, thick+.12), trim, False)
+    return length/2, 1.3
+
+
+def ice_ridge(mesh, rng, length, height, ground, mats):
+    ice, snow = mats
+    thick = 1.4
+    n = max(1, round(length/SEGMENT))
+    heights = [height*rng.uniform(.82, 1.0) for _ in range(n)]
+    tops = _wall_run(mesh, ground, length, height, thick, ice, heights)
+    for x0, x1, top in tops:
+        mesh.box(((x0+x1)/2, top-.03, 0), (x1-x0+.02, .16, thick+.08), snow, False)
+        ice_shard(_Offset(mesh, ((x0+x1)/2, top-.3, rng.uniform(-.3, .3))), rng, rng.uniform(.8, 1.5), ice, False)
+    return length/2, thick/2
+
+
+def rock_cluster(mesh, rng, size, height, ground, mats):
+    rock, snow = mats if isinstance(mats, tuple) else (mats, None)
+    lo, hi = _ground_span(ground, -size*1.6, size*1.6, size)
+    lift = hi-lo
+    parts = [(0.0, 0.0, size, height+lift), (size*.75, rng.uniform(-.25, .25)*size, size*.8, (height+lift)*.8),
+             (-size*.7, rng.uniform(-.25, .25)*size, size*.75, (height+lift)*.72)]
+    for ox, oz, r, h in parts:
+        # Offsets stay under the radii, so the rocks overlap and no wedge gap
+        # opens. Each rock drops to the lowest ground under its own footprint
+        # (its hull flares to about 1.2 r), so no edge floats on a slope.
+        low = min(ground(ox+1.25*r*math.cos(a), oz+1.25*r*math.sin(a)) for a in (k*math.tau/8 for k in range(8)))
+        low = min(low, ground(ox, oz))
+        # The hull's widest ring sits at a quarter of its height; put it just
+        # under the lowest ground so no bulge overhangs a downhill side, and
+        # stretch the rock so its top still reaches h.
+        H = (h-low+.1)/.75
+        base = low-.25*H-.1
+        _hull(_Offset(mesh, (ox, base, oz)), rng, r, H, rock, True)
+        if snow: _hull(_Offset(mesh, (ox, base+H*.62, oz)), rng, r*.6, H*.2, snow, False, lon=6, sink=0)
+    return size*1.7, size*1.1
+
+
+class _Offset:
+    """Mesh proxy that shifts local points by a fixed offset."""
+    def __init__(self, mesh, offset): self.mesh, self.o = mesh, offset
+    def _p(self, p): return (p[0]+self.o[0], p[1]+self.o[1], p[2]+self.o[2])
+    def triangle(self, pts, mat, solid=True): self.mesh.triangle([self._p(p) for p in pts], mat, solid)
+    def quad(self, a, b, c, d, mat, solid=True): self.mesh.quad(*(self._p(p) for p in (a, b, c, d)), mat, solid)
+
+
+COVER_BUILDERS = dict(stone_wall=stone_wall, ruin_wall=ruin_wall, log_pile=log_pile, crates=crates,
+                      debris=debris, ice_ridge=ice_ridge, rock_cluster=rock_cluster)
+# Steepest ground each cover kind may stand on.
+COVER_SLOPE = dict(stone_wall=22, ruin_wall=20, log_pile=16, crates=14, debris=18, ice_ridge=22, rock_cluster=32)
 # Rough footprint radius factor (x size) used for sinking and spacing.
 FOOT = dict(boulder=1.1, outcrop=1.9, snow_rock=1.1, standing_stone=.35, log=.55, ice_shard=.35,
             tuft=.4, fern=1.0, heather=.7, scrub=.6, sapling=.4, bones=.8)
@@ -383,12 +574,21 @@ def scatter(kit, theme, seed, terrain, protect):
             build(pair, kind, mats, x, ya, z, size, yaw, True, shape)
             build(pair, kind, mats, mx, yb, mz, size, yaw+math.pi, True, shape)
             # The budget is a hard limit: a pair that would exceed it is dropped.
-            if (len(mesh.collision)+len(pair.collision))//9 > PROP_COLLISION_TRIS: break
+            if (len(mesh.collision)+len(pair.collision))//9 > SCENERY_COLLISION_TRIS: break
             mesh.vertices.extend(pair.vertices); mesh.collision.extend(pair.collision)
             casters.vertices.extend(pair.vertices)
             big += [(x, z, kind, size, ya), (mx, mz, kind, size, yb)]
             count += 1
         placed[kind] = placed.get(kind, 0)+count*2
+
+    cover = place_cover(kit, spec.get('cover', ()), rng, terrain, protect, (cx, cz), big, mesh, casters, placed)
+    # Small props and grass keep off the footprint of every solid prop.
+    blocked = [(x, z, FOOT[kind]*size+.5) for x, z, kind, size, _ in big]
+    blocked += [(c['x'], c['z'], max(c['hx'], c['hz'])+.8) for c in cover]
+
+    def clear_of_solids(x, z):
+        return all(math.hypot(x-bx, z-bz) >= r for bx, bz, r in blocked)
+
     for kind, mats, count, (smin, smax) in spec['small']:
         # Small props grow in patches, so a player at ground level sees
         # vegetation around them rather than one tuft per hectare.
@@ -405,11 +605,149 @@ def scatter(kit, theme, seed, terrain, protect):
                 x, z = px+r*math.cos(a), pz+r*math.sin(a)
                 size = rng.uniform(smin, smax); yaw = rng.uniform(0, math.tau); shape = rng.getrandbits(32)
                 y = valid(kind, x, z, size, False)
-                if y is None: continue
+                if y is None or not clear_of_solids(x, z): continue
                 build(mesh, kind, mats, x, y, z, size, yaw, False, shape)
                 n += 1
         placed[kind] = placed.get(kind, 0)+n
+
+    ground_tris = 0
+    if 'ground' in spec:
+        mat, (smin, smax) = spec['ground']
+        before = len(mesh.vertices)
+        clumps, patches = ground_layer(mesh, rng, mat, smin, smax, valid, clear_of_solids, protect, build)
+        ground_tris = (len(mesh.vertices)-before)//36
+        placed['clump'] = clumps; placed['meadow_patch'] = patches
     summary = dict(theme=theme, version=SOURCE_VERSION, counts=placed,
                    render_triangles=len(mesh.vertices)//36, solid_triangles=len(mesh.collision)//9,
-                   big=[[round(x, 2), round(y, 2), round(z, 2), kind, round(size, 2)] for x, z, kind, size, y in big])
+                   ground_triangles=ground_tris,
+                   big=[[round(x, 2), math.floor(y*100)/100, round(z, 2), kind, round(size, 2)] for x, z, kind, size, y in big],
+                   cover=[[round(c['x'], 2), round(c['y'], 2), round(c['z'], 2), c['kind'], round(c['length'], 2),
+                           round(c['height'], 2), round(c['yaw'], 4), round(c['hx'], 2), round(c['hz'], 2)] for c in cover])
     return mesh.vertices.tobytes(), mesh.collision.tobytes(), casters.vertices.tobytes(), summary
+
+
+def _cover_candidates(protect, rng):
+    """Spots beside each ski lane (both sides, several offsets) and in a ring
+    around each control point, where a player wants something to duck behind."""
+    out = []
+    for (ax, az), (bx, bz) in protect.lanes:
+        dx, dz = bx-ax, bz-az; length = math.hypot(dx, dz)
+        if length < 1: continue
+        ux, uz = dx/length, dz/length; px, pz = -uz, ux
+        k = max(4, int(length/45))
+        for i in range(k):
+            t = .12+.76*(i+.5)/k
+            for side in (-1, 1):
+                for off in COVER_OFFSETS:
+                    j = rng.uniform(-8, 8)
+                    x = ax+dx*t+px*side*off+ux*j; z = az+dz*t+pz*side*off+uz*j
+                    # Walls face down the lane, towards the fire coming along it.
+                    out.append((x, z, math.atan2(px, pz)))
+    for cx, cz in protect.interest[2:]:
+        for k in range(8):
+            a = k*math.tau/8+rng.uniform(-.2, .2); r = rng.uniform(34, 46)
+            out.append((cx+r*math.cos(a), cz+r*math.sin(a), a+math.pi/2))
+    rng.shuffle(out)
+    return out
+
+
+def place_cover(kit, entries, rng, terrain, protect, centre, big, mesh, casters, placed):
+    """Mirrored cover pieces at candidate spots. Returns the placed pieces."""
+    cx, cz = centre
+    cover = []
+    if not entries: return cover
+    candidates = _cover_candidates(protect, rng)
+    solids = [(x, z, FOOT[kind]*size) for x, z, kind, size, _ in big]
+
+    def ground_fn(x0, y0, z0, yaw):
+        c, s = math.cos(yaw), math.sin(yaw)
+        return lambda lx, lz: terrain.height(x0+lx*c+lz*s, z0-lx*s+lz*c)-y0
+
+    def fits(x, z, yaw, reach, kind):
+        if not (EDGE+reach <= x <= 2048-EDGE-reach and EDGE+reach <= z <= 2048-EDGE-reach): return False
+        c, s = math.cos(yaw), math.sin(yaw)
+        for lx in (-reach, 0.0, reach):
+            px, pz = x+lx*c, z-lx*s
+            if terrain.near_hole(px, pz) or protect.occupied(px, pz, MARGIN_BIG): return False
+            if protect.in_circle(px, pz, 2.0): return False
+            if protect.lane_distance(px, pz) < LANE_HALF_WIDTH+2: return False
+            if protect.flag_distance(px, pz) < BASE_CLEAR: return False
+            if terrain.slope(px, pz) > COVER_SLOPE[kind]: return False
+            if terrain.water is not None and terrain.height(px, pz) < terrain.water+1.0: return False
+        if any(math.hypot(x-sx, z-sz) < sr+reach+COVER_GAP for sx, sz, sr in solids): return False
+        if any(math.hypot(x-p['x'], z-p['z']) < COVER_SPACING for p in cover): return False
+        return True
+
+    queue = []
+    for kind, mats, pairs, (lmin, lmax), cls in entries:
+        queue += [(kind, mats, (lmin, lmax), cls)]*pairs
+    order = list(range(len(queue)))
+    rng.shuffle(order)
+    counts = {}
+    used = set()
+    for qi in order:
+        kind, mats, (lmin, lmax), cls = queue[qi]
+        length = rng.uniform(lmin, lmax)
+        height = rng.uniform(*(CROUCH if cls == 'crouch' else FULL))
+        shape = rng.getrandbits(32)
+        reach = length/2+1.5 if kind != 'rock_cluster' else length*1.8
+        for ci, (x, z, yaw) in enumerate(candidates):
+            if ci in used: continue
+            mx, mz, myaw = 2*cx-x, 2*cz-z, yaw+math.pi
+            if math.hypot(x-mx, z-mz) < 60: continue
+            if not fits(x, z, yaw, reach, kind): continue
+            if not fits(mx, mz, myaw, reach, kind): continue
+            pair = kit.Mesh(); pieces = []
+            for px, pz, pyaw in ((x, z, yaw), (mx, mz, myaw)):
+                y = min(terrain.height(px, pz), _ground(terrain, px, pz, reach*.6))
+                pair.origin = (px, y, pz); pair.yaw = pyaw
+                hx, hz = COVER_BUILDERS[kind](pair, random.Random(shape), length, height, ground_fn(px, y, pz, pyaw), mats)
+                pieces.append(dict(x=px, y=y, z=pz, kind=kind, length=length, height=height, yaw=pyaw, hx=hx, hz=hz))
+            if (len(mesh.collision)+len(pair.collision))//9 > PROP_COLLISION_TRIS: return cover
+            mesh.vertices.extend(pair.vertices); mesh.collision.extend(pair.collision)
+            casters.vertices.extend(pair.vertices)
+            cover += pieces
+            used.add(ci)
+            counts[kind] = counts.get(kind, 0)+2
+            break
+    for k, v in counts.items(): placed['cover_'+k] = v
+    return cover
+
+
+def ground_layer(mesh, rng, mat, smin, smax, valid, clear_of_solids, protect, build):
+    """Grass where players fight: dense meadow patches along the ski lanes and
+    around flags and control points, and lighter clumps everywhere else, up
+    to GROUND_TRIS triangles. Returns (clumps, patches)."""
+    start = len(mesh.vertices)
+    budget = GROUND_TRIS*36
+    clumps = patches = 0
+
+    def weight(x, z):
+        near = max(math.exp(-protect.lane_distance(x, z)/80), math.exp(-protect.interest_distance(x, z)/300))
+        return .12+.88*near
+
+    def plant(x, z):
+        nonlocal clumps
+        size = rng.uniform(smin, smax); yaw = rng.uniform(0, math.tau); shape = rng.getrandbits(32)
+        y = valid('tuft', x, z, size, False)
+        if y is None or not clear_of_solids(x, z): return
+        build(mesh, 'clump', mat, x, y, z, size, yaw, False, shape)
+        clumps += 1
+
+    # Meadow patches take roughly two thirds of the budget.
+    for _ in range(40000):
+        if len(mesh.vertices)-start >= budget*.66: break
+        x, z = rng.uniform(EDGE, 2048-EDGE), rng.uniform(EDGE, 2048-EDGE)
+        if rng.random() > weight(x, z)**1.5: continue
+        if valid('tuft', x, z, smax, False) is None: continue
+        radius = rng.uniform(4.0, 9.0); patches += 1
+        # About one clump per 2.5 square metres inside a patch.
+        for _ in range(int(math.pi*radius*radius/2.5)):
+            a = rng.uniform(0, math.tau); r = radius*math.sqrt(rng.random())
+            plant(x+r*math.cos(a), z+r*math.sin(a))
+    for _ in range(200000):
+        if len(mesh.vertices)-start >= budget: break
+        x, z = rng.uniform(EDGE, 2048-EDGE), rng.uniform(EDGE, 2048-EDGE)
+        if rng.random() > weight(x, z): continue
+        plant(x, z)
+    return clumps, patches

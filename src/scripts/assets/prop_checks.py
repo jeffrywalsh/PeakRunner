@@ -46,6 +46,11 @@ def check_pack(test, pack_dir):
         c = tri.mean(0)
         test.assertGreaterEqual(protect.lane_distance(float(c[0]), float(c[2])), props.LANE_HALF_WIDTH-4, c)
 
+    check_cover(test, pack, m, protect, terrain)
+    # Ground layer: the grass budget is spent, and never exceeded.
+    test.assertGreaterEqual(p['ground_triangles'], props.GROUND_TRIS*.9)
+    test.assertLessEqual(p['ground_triangles'], props.GROUND_TRIS+64)
+
     # Shade map: present, hashed, right size, with real shadow and occlusion.
     shade = (pack/'shade.rg').read_bytes()
     test.assertEqual(m['files']['shade.rg'], hashlib.sha256(shade).hexdigest())
@@ -55,3 +60,65 @@ def check_pack(test, pack_dir):
     test.assertGreater(float(a[..., 0].mean()), 170, 'most ground is lit')
     test.assertLess(int(a[..., 1].min()), 245, 'no ambient occlusion anywhere')
     test.assertEqual(m['terrain_shade']['size'], terrain_shade.SIZE)
+
+
+MIN_COVER = 12
+
+
+def _local(c, lx, lz):
+    """World (x, z) of a point in a cover piece's local frame (long axis x)."""
+    yaw = c[6]; co, s = math.cos(yaw), math.sin(yaw)
+    return c[0]+lx*co+lz*s, c[2]-lx*s+lz*co
+
+
+def check_cover(test, pack_dir, m, protect, terrain):
+    """Deliberate cover (props.place_cover): enough pieces, mirrored, clear of
+    lanes and protected space, blocks a crouching shot, and never traps a
+    player standing beside it."""
+    from assets import route_checks
+    cover = m['props']['cover']
+    flags = m['flags']; cps = m.get('control_points', [])
+    spawns = [s for team in m.get('spawn_points', []) for s in team]
+    test.assertGreaterEqual(len(cover), MIN_COVER)
+    test.assertEqual(len(cover) % 2, 0)
+    cx = (flags[0][0]+flags[1][0])/2; cz = (flags[0][2]+flags[1][2])/2
+    for a, b in zip(cover[0::2], cover[1::2]):
+        test.assertEqual((a[3], a[4], a[5]), (b[3], b[4], b[5]))
+        test.assertAlmostEqual(a[0]+b[0], 2*cx, delta=.05); test.assertAlmostEqual(a[2]+b[2], 2*cz, delta=.05)
+    pk = route_checks.Pack(pack_dir)
+    for c in cover:
+        x, _, z, kind, length, height, yaw, hx, hz = c
+        for lx in (-hx, 0.0, hx):
+            px, pz = _local(c, lx, 0)
+            test.assertGreaterEqual(protect.lane_distance(px, pz), props.LANE_HALF_WIDTH, c)
+            for f in flags: test.assertGreaterEqual(math.hypot(px-f[0], pz-f[2]), props.BASE_CLEAR, c)
+            for s in spawns: test.assertGreaterEqual(math.hypot(px-s[0], pz-s[2]), props.SPAWN_CLEAR, c)
+            for q in cps:
+                test.assertGreaterEqual(math.hypot(px-q['pos'][0], pz-q['pos'][2]), q.get('radius', 12)+props.RING_CLEAR, c)
+            test.assertFalse(terrain.near_hole(px, pz), c)
+        # A shot at crouch height across the piece's short axis is stopped.
+        g = pk.terrain(x, z)
+        for lz in (-(hz+3.0),):
+            ax, az = _local(c, 0, lz); bx, bz = _local(c, 0, -lz)
+            starts = np.array([[ax, g+.9, az]]); ends = np.array([[bx, g+.9, bz]])
+            test.assertTrue(pk.blocked(starts, ends, r=2)[0], f'{kind} at {x:.0f},{z:.0f} does not stop a shot')
+        # Nobody standing beside it is trapped: every standable spot one metre
+        # outside its footprint can walk three metres straight away from it.
+        for k in range(16):
+            a = k*math.tau/16
+            ox, oz = math.cos(a), math.sin(a)
+            # A point on the footprint's outline, pushed a metre out along the
+            # face (or corner) normal: where a player can stand against it.
+            scale = 1/max(abs(ox)/max(hx, .1), abs(oz)/max(hz, .1))
+            bx, bz = ox*scale, oz*scale
+            nx = math.copysign(1, ox) if abs(bx) >= hx-1e-6 else 0.0
+            nz = math.copysign(1, oz) if abs(bz) >= hz-1e-6 else 0.0
+            nl = math.hypot(nx, nz); nx, nz = nx/nl, nz/nl
+            lx, lz = bx+nx*1.0, bz+nz*1.0
+            px, pz = _local(c, lx, lz); qx, qz = _local(c, lx+nx*3, lz+nz*3)
+            ground = pk.terrain(px, pz)
+            ys = [y for y in route_checks.floors(pk, px, pz) if abs(y-ground) < 1.5]
+            for y in ys:
+                qy = pk.terrain(qx, qz)
+                test.assertTrue(route_checks.path_clear(pk, [(px, y, pz), (qx, max(y, qy), qz)]),
+                                f'player trapped beside {kind} at {px:.1f},{pz:.1f}')
