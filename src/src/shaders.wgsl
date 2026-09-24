@@ -39,6 +39,8 @@ struct EmitUniforms {
 @group(2) @binding(0) var<uniform> emit_u: EmitUniforms;
 @group(3) @binding(0) var scene_tex: texture_2d<f32>;
 @group(3) @binding(1) var scene_samp: sampler;
+@group(3) @binding(2) var bloom_tex: texture_2d<f32>;
+@group(3) @binding(3) var<uniform> bloom_u: vec4<f32>;
 
 struct LitIn {
     @location(0) pos: vec3<f32>,
@@ -160,7 +162,10 @@ fn fs_world(in: LitOut) -> @location(0) vec4<f32> {
     let density = select(0.0072, world.pad0, world.pad0 > 0.0);
     let fog = clamp(1.0 - exp(-dist * density), 0.0, 0.92);
     col = mix(col, world.fog, fog);
-    return vec4<f32>(col, 1.0);
+    // Bloom mask (glow = 1 - alpha): self-lit parts such as visors, thruster
+    // housings and turret emitters glow; faint emit (snow motes) does not.
+    let glow = clamp((world.emit - 0.2) / 0.8, 0.0, 1.0) * (1.0 - fog);
+    return vec4<f32>(col, 1.0 - glow);
 }
 
 struct FullOut {
@@ -197,9 +202,10 @@ fn fs_sky(in: FullOut) -> @location(0) vec4<f32> {
     let cover = smoothstep(0.48, 0.76, cloud) * smoothstep(0.03, 0.22, h);
     col = mix(col, vec3<f32>(0.68, 0.67, 0.62), cover * 0.65);
     let sun_d = max(dot(dir, sky.sun), 0.0);
-    col = col + vec3<f32>(1.0, 0.86, 0.62) * pow(sun_d, 180.0) * 1.6;
+    let disc = pow(sun_d, 180.0);
+    col = col + vec3<f32>(1.0, 0.86, 0.62) * disc * 1.6;
     col = col + vec3<f32>(1.0, 0.55, 0.28) * pow(sun_d, 6.0) * 0.18;
-    return vec4<f32>(col, 1.0);
+    return vec4<f32>(col, 1.0 - clamp(disc * 1.2, 0.0, 1.0));
 }
 
 struct EmitOut {
@@ -240,14 +246,21 @@ fn blit_uv(ndc: vec2<f32>) -> vec2<f32> {
     return vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
 }
 
+// Screen-blend the blurred glow over the scene (x: intensity; 0 = bloom off),
+// so highlights brighten without hard clipping. The HUD is drawn after this.
+fn composite(uv: vec2<f32>) -> vec3<f32> {
+    let c = textureSample(scene_tex, scene_samp, uv).rgb;
+    let b = clamp(textureSample(bloom_tex, scene_samp, uv).rgb * bloom_u.x, vec3<f32>(0.0), vec3<f32>(1.0));
+    return c + b - c * b;
+}
+
 @fragment
 fn fs_blit(in: FullOut) -> @location(0) vec4<f32> {
-    let c = textureSample(scene_tex, scene_samp, blit_uv(in.ndc));
-    return vec4<f32>(c.rgb, 1.0);
+    return vec4<f32>(composite(blit_uv(in.ndc)), 1.0);
 }
 
 @fragment
 fn fs_blit_srgb(in: FullOut) -> @location(0) vec4<f32> {
-    let c = textureSample(scene_tex, scene_samp, blit_uv(in.ndc)).rgb;
+    let c = composite(blit_uv(in.ndc));
     return vec4<f32>(pow(max(c, vec3<f32>(0.0)), vec3<f32>(2.2)), 1.0);
 }

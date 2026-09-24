@@ -6,7 +6,7 @@
 //! the 0.55 s blast record, thrown debris and casings, impact sparks, scorch
 //! marks, plus the viewmodel's switch/bob/spin/heat animation. Every pool is a
 //! fixed-size ring allocated once, so a busy fight never allocates per spark.
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec2, Vec3};
 use peakrunner_core::sim::{MatchState, World};
 use peakrunner_core::terrain::{self, MapId};
 
@@ -157,7 +157,12 @@ pub struct Effects {
     clock: f32,
     seed: std::cell::Cell<u32>,
     map: Option<MapId>,
+    /// Each player's water immersion last frame, for splash-on-entry.
+    wet: Vec<f32>,
+    wake_clock: f32,
     pub anim: ViewAnim,
+    /// Third-person landing and weapon-switch cues, per player.
+    pub players: crate::player_model::AnimTracker,
 }
 
 impl Default for Effects { fn default() -> Self { Self::new() } }
@@ -166,7 +171,7 @@ impl Effects {
     pub fn new() -> Self {
         Self { parts: vec![Particle::DEAD; MAX_PARTICLES], next: 0, seen_blasts: Vec::with_capacity(64),
             prev_bullets: Vec::with_capacity(128), cur_bullets: Vec::with_capacity(128), matched: Vec::with_capacity(128),
-            shots: Vec::with_capacity(16), clock: 0.0, seed: std::cell::Cell::new(0x9E37_79B9), map: None, anim: ViewAnim::default() }
+            shots: Vec::with_capacity(16), clock: 0.0, seed: std::cell::Cell::new(0x9E37_79B9), map: None, wet: Vec::with_capacity(16), wake_clock: 0.0, anim: ViewAnim::default(), players: Default::default() }
     }
 
     fn rand(&self) -> f32 {
@@ -194,6 +199,7 @@ impl Effects {
 
     /// Advance everything by `dt` and pick up new explosions, impacts and shots.
     pub fn update(&mut self, world: &World, eye: Vec3, dt: f32) {
+        self.players.update(&world.players, dt);
         if self.map != Some(world.map) {
             // A new map or round: nothing lingers from the last one.
             self.parts.fill(Particle::DEAD);
@@ -234,6 +240,7 @@ impl Effects {
             self.impacts(world, eye, dt);
             self.watch_shots(world, eye);
         }
+        self.water(world, eye, dt);
         if let Some(p) = world.players.get(world.player_id) { self.anim.update(p, dt); }
     }
 
@@ -296,6 +303,42 @@ impl Effects {
             self.spawn(Particle { kind: Kind::Debris, pos: pos + Vec3::Y * 0.3, vel: d * s, normal: Vec3::Y,
                 age: 0.0, life: 1.1 + self.rand() * 0.5, size: 0.12 + self.rand() * 0.14 * scale, grow: 0.0,
                 color: c, alpha: 1.0, spin: self.rand() * 6.3, drag: 0.3, gravity: 20.0 });
+        }
+    }
+
+    /// Splash when a player enters water (scaled by speed) and a light wake
+    /// while they move through it.
+    fn water(&mut self, world: &World, eye: Vec3, dt: f32) {
+        const SPRAY: [f32; 3] = [0.82, 0.88, 0.92];
+        self.wet.resize(world.players.len(), 0.0);
+        self.wake_clock += dt;
+        let wake_now = self.wake_clock > 0.09;
+        if wake_now { self.wake_clock = 0.0; }
+        for (i, pl) in world.players.iter().enumerate() {
+            let (wet, volume) = if pl.alive {
+                peakrunner_core::water::immersion(world.map, &world.staged_water, pl.pos)
+            } else { (0.0, None) };
+            let was = std::mem::replace(&mut self.wet[i], wet);
+            let Some(volume) = volume else { continue };
+            if pl.pos.distance(eye) > DETAIL_RANGE { continue; }
+            let at = Vec3::new(pl.pos.x, volume.surface + 0.05, pl.pos.z);
+            let speed = pl.vel.length();
+            if was <= 0.0 && wet > 0.0 && speed > 2.0 {
+                let strength = (speed / 25.0).clamp(0.3, 2.0);
+                for _ in 0..(6.0 * strength) as usize {
+                    let d = self.rand_dir(0.55);
+                    self.spawn(Particle { kind: Kind::Spark, pos: at, vel: d * (4.0 + self.rand() * 6.0) * strength,
+                        normal: Vec3::Y, age: 0.0, life: 0.5 + self.rand() * 0.3, size: 0.07, grow: 0.0,
+                        color: SPRAY, alpha: 0.9, spin: 0.0, drag: 0.6, gravity: 16.0 });
+                }
+                for _ in 0..(2.0 * strength).ceil() as usize {
+                    let d = self.rand_dir(0.0) * Vec3::new(1.0, 0.2, 1.0);
+                    self.puff(at, d * 2.5 * strength + Vec3::Y * 1.5, SPRAY, 0.35, 0.5 * strength, 1.6 * strength, 0.7);
+                }
+            } else if wake_now && wet > 0.0 && wet < 0.95 && Vec2::new(pl.vel.x, pl.vel.z).length() > 3.0 {
+                let back = -Vec3::new(pl.vel.x, 0.0, pl.vel.z).normalize_or_zero();
+                self.puff(at + back * 0.6, back * 1.2 + Vec3::Y * 0.4, SPRAY, 0.22, 0.35, 1.1, 0.55);
+            }
         }
     }
 

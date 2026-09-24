@@ -57,6 +57,22 @@ const BOT_SEARCH_BUDGET: usize = 40_000;
 /// Re-plan at least this often, and when a bot makes no progress this long.
 const BOT_REPLAN_SECONDS: f32 = 6.0;
 const BOT_STUCK_SECONDS: f32 = 2.5;
+/// Flyers: horizontal distance at which they hand back to the ground route.
+const BOT_FLY_HANDOVER: f32 = 30.0;
+/// Flyers: cruise height above the highest ground ahead.
+const BOT_FLY_CLEARANCE: f32 = 28.0;
+/// Flyers: how far a target below can be for a dive.
+const BOT_DIVE_RANGE: f32 = 90.0;
+/// Flyers: jet again once the tank refills past this, coast below the floor.
+const BOT_FLY_REFILL: f32 = 45.0;
+const BOT_FLY_EMPTY: f32 = 8.0;
+/// Flyers: height a single tank reliably climbs; higher goals take the route.
+const BOT_FLY_CLIMB: f32 = 30.0;
+/// Flyers: a flyer on the ground route takes off again only beyond this.
+const BOT_FLY_TAKEOFF: f32 = 320.0;
+/// Flyers: within this of a goal out of climbing reach, land and take the
+/// route from the open field (routes from under a floating base fail).
+const BOT_FLY_CLIMB_RANGE: f32 = 260.0;
 /// Classic `velInheritFactor`. Without this the disc runs away and you cannot disc jump.
 const DISC_INHERIT: f32 = 0.75;
 pub const DISC_RELOAD: f32 = 1.05;
@@ -228,6 +244,9 @@ pub struct Player {
     /// Links this bot got stuck on recently; its routes avoid them.
     #[serde(skip)]
     bot_avoid: Vec<(u32, u32)>,
+    /// Flyers: crossing high on jet arcs instead of following a ground route.
+    #[serde(skip)]
+    bot_fly: bool,
     coyote: f32,
 }
 
@@ -299,6 +318,9 @@ pub struct World {
     /// Control points, with state. Sent whole in snapshots.
     pub points: Vec<crate::control::Point>,
     control_defs: Vec<crate::control::Definition>,
+    /// Extra water volumes beside the map's own: QA staging (`QA_WATER`) and
+    /// tests. Empty in normal play.
+    pub staged_water: Vec<crate::water::Volume>,
     cnh_acc: [f32; 2],
     network_inputs: Vec<Input>,
     predicting: bool,
@@ -411,6 +433,7 @@ impl World {
             mode: crate::map_catalog::SupportedMode::Ctf,
             points: Vec::new(),
             control_defs: Vec::new(),
+            staged_water: crate::water::qa_staged(),
             cnh_acc: [0.0; 2],
             network_inputs: Vec::new(),
             predicting: false,
@@ -978,8 +1001,39 @@ impl World {
             }
 
             self.players[i].bot_goal = goal;
-            if !direct {
-                if let Some(g) = nav { self.follow_route(i, g, goal); }
+            // Flyers cross high instead of following the ground route, dive on
+            // targets below them, and hand back to the route for the landing.
+            let flyer = profile.style == crate::bot_nav::MoveStyle::Flyer;
+            let flying = self.players[i].bot_fly;
+            // Only take off under open sky: indoors, the route leads out first.
+            let open_sky = flyer && (flying || crate::map_pack::on(map).map_or(true, |pack| {
+                pack.sweep(pos + Vec3::Y * 0.5, pos + Vec3::Y * 20.0, PLAYER_RADIUS).is_none()
+            }));
+            let dive = open_sky && seen.is_some_and(|(d, j)| d < BOT_DIVE_RANGE && pos.y > self.players[j].pos.y + 6.0);
+            let flat = Vec2::new(goal.x - pos.x, goal.z - pos.z).length();
+            // Hysteresis: once landed on the route, take off again only when
+            // well away from the goal, so it doesn't flip at the boundary.
+            // Near the goal the route owns the approach (its jet climbs must
+            // not be interrupted), so a landed flyer only takes off again far out.
+            let far = if flying { BOT_FLY_HANDOVER } else { BOT_FLY_TAKEOFF };
+            // Keep flying until level with the goal, so it lands at deck height
+            // (a floating base) rather than under it.
+            // A goal well above it nearby (a floating deck) is out of reach of
+            // one tank: take the route's pads and ledges up instead of hovering
+            // under the hull.
+            let out_of_reach = flat < BOT_FLY_CLIMB_RANGE && pos.y + BOT_FLY_CLIMB < goal.y;
+            let fly = open_sky && (dive || (!direct && !out_of_reach
+                && (flat > far || (flying && (pos.y - goal.y).abs() > 10.0))));
+            if fly {
+                let p = &mut self.players[i];
+                p.bot_fly = true;
+                p.bot_link = None;
+                p.bot_path.clear();
+            } else {
+                self.players[i].bot_fly = false;
+                if !direct {
+                    if let Some(g) = nav { self.follow_route(i, g, goal); }
+                }
             }
 
             // Aim at the visible target with this personality's lead and
@@ -997,7 +1051,9 @@ impl World {
                 let dir = (at - (pos + Vec3::Y * 1.4)).normalize_or_zero();
                 if dir.length_squared() > 0.1 {
                     self.players[i].yaw = (-dir.x).atan2(-dir.z) + aim_err.x;
-                    self.players[i].pitch = (dir.y.asin() + aim_err.y).clamp(-0.7, 0.7);
+                    // Flyers can aim steeply down onto a target below.
+                    let down = if profile.style == crate::bot_nav::MoveStyle::Flyer { -1.3 } else { -0.7 };
+                    self.players[i].pitch = (dir.y.asin() + aim_err.y).clamp(down, 0.7);
                 }
                 if let Some(d) = dist {
                     self.players[i].weapon = if d < 28.0 { 1 } else { 0 };
@@ -1200,6 +1256,9 @@ impl World {
                     p.coyote = 0.0;
                 }
                 p.skiing = jump_held && p.on_ground && (steep || hop <= 0.01);
+                // How much of the body is under water (0 = dry: nothing below changes).
+                let (wet, wet_volume) = crate::water::immersion(map, &self.staged_water, p.pos);
+                let jet_cost = if wet >= crate::water::DEEP {crate::water::JET_ENERGY_FACTOR} else {1.0};
 
                 p.jetting = false;
                 if jet && p.energy >= MIN_JET_ENERGY {
@@ -1233,7 +1292,7 @@ impl World {
                     p.on_ground = false;
                     p.skiing = false;
                     p.coyote = 0.0;
-                    p.energy = (p.energy - ENERGY_JET * dt).max(0.0);
+                    p.energy = (p.energy - ENERGY_JET * jet_cost * dt).max(0.0);
                 } else {
                     p.energy = (p.energy + ENERGY_REGEN * dt).min(ENERGY_MAX);
                 }
@@ -1244,8 +1303,9 @@ impl World {
                     // Approach the desired walking speed; releasing ski brakes
                     // progressively instead of instantly deleting route momentum.
                     let horizontal = Vec3::new(p.vel.x, 0.0, p.vel.z);
-                    let delta = wish * WALK_MAX - horizontal;
-                    let accel = if horizontal.length() > WALK_MAX || wish.length_squared() < 0.01 {
+                    let walk_max = WALK_MAX * (1.0 - crate::water::WADE_SLOW * wet);
+                    let delta = wish * walk_max - horizontal;
+                    let accel = if horizontal.length() > walk_max || wish.length_squared() < 0.01 {
                         GROUND_BRAKE
                     } else { WALK_ACCEL };
                     p.vel += delta.clamp_length_max(accel * dt);
@@ -1257,6 +1317,10 @@ impl World {
                     if !p.jetting {
                         steer_horizontal(p, wish, AIR_ACCEL, WALK_MAX, dt);
                     }
+                }
+                if let (true, Some(volume)) = (wet > 0.0, wet_volume) {
+                    let g = gravity_for_speed(Vec2::new(p.vel.x, p.vel.z).length());
+                    crate::water::apply(&mut p.vel, wet, p.skiing, volume, g, dt);
                 }
                 apply_speed_limits(p, dt);
 
@@ -1323,6 +1387,62 @@ impl World {
         }
     }
 
+    /// A flyer's steering while crossing high: (wish, jet, ski).
+    ///
+    /// Cruises `BOT_FLY_CLEARANCE` above the highest ground over the next
+    /// 120 m, pulsing the jet between a full tank and empty (energy refills
+    /// while it coasts), and climbs over a structure ahead. Near the goal it
+    /// glides down a slope onto it; above a visible target it dives.
+    fn fly_controls(&mut self, i: usize, target_in_view: bool) -> (Vec3, bool, bool) {
+        let map = self.map;
+        let p = &self.players[i];
+        let (pos, vel, goal, energy, on_ground) = (p.pos, p.vel, p.bot_goal, p.energy, p.on_ground);
+        let target = p.bot_target.and_then(|j| self.players.get(j)).map(|o| o.pos);
+        let to = goal - pos;
+        let horiz = Vec3::new(to.x, 0.0, to.z);
+        let flat = horiz.length();
+        let dir = if flat > 0.5 { horiz / flat } else { Vec3::ZERO };
+        let height = |x: f32, z: f32| crate::terrain::height_on(map, x, z);
+        let below_me = pos.y - height(pos.x, pos.z);
+        // Dive: fall onto a target below, braking with the jet near the ground.
+        if let Some(t) = target.filter(|t| target_in_view && pos.y > t.y + 6.0) {
+            let at = Vec3::new(t.x - pos.x, 0.0, t.z - pos.z).normalize_or_zero();
+            let stop = vel.y * vel.y / (2.0 * (JET_ACCEL - GRAVITY));
+            let brake = vel.y < -10.0 && below_me < stop + 4.0 && energy >= MIN_JET_ENERGY;
+            return (at, brake, false);
+        }
+        let mut ground = height(pos.x, pos.z);
+        for k in 1..=4 {
+            let s = pos + dir * (30.0 * k as f32).min(flat);
+            ground = ground.max(height(s.x, s.z));
+        }
+        // Far out: clear the ground ahead and never cruise below the goal
+        // (a floating base's deck). Over the last 150 m: glide down onto it.
+        let glide = goal.y + 4.0 + (flat - BOT_FLY_HANDOVER).max(0.0) * 0.3;
+        let cruise = if flat > 150.0 {
+            (ground + BOT_FLY_CLEARANCE).max(goal.y + 10.0)
+        } else {
+            glide.max(ground + 8.0)
+        };
+        let horiz_speed = Vec2::new(vel.x, vel.z).length();
+        let reach = (horiz_speed + 10.0).min(40.0);
+        let blocked = crate::map_pack::on(map).is_some_and(|pack| {
+            pack.sweep(pos + Vec3::Y * 0.5, pos + Vec3::Y * 0.5 + dir * reach, PLAYER_RADIUS).is_some()
+        });
+        // Pulse: jet from a full tank down to empty, then coast to refill.
+        let mut coast = self.players[i].bot_saving;
+        if energy < BOT_FLY_EMPTY { coast = true; } else if energy > BOT_FLY_REFILL { coast = false; }
+        self.players[i].bot_saving = coast;
+        let low = pos.y < cruise;
+        let jet = !coast && energy >= MIN_JET_ENERGY && (low || blocked || horiz_speed < 18.0);
+        // A wall ahead (a courtyard, a hull): stop pushing into it and climb
+        // straight up on a full tank until the way is clear.
+        let wish = if blocked { Vec3::ZERO } else { dir };
+        // Grounded while refilling: ski on toward the goal.
+        let ski = on_ground && coast && !blocked;
+        (wish, jet, ski)
+    }
+
     fn bot_wish(&mut self, i: usize) -> (f32, f32, bool, bool, bool, bool) {
         use crate::bot_nav::{Link, MoveStyle};
         let p = &self.players[i];
@@ -1360,7 +1480,12 @@ impl World {
         }
         let r = self.rng();
         let horiz_speed = Vec2::new(vel.x, vel.z).length();
-        let (jet, ski) = match link {
+        let fly = self.players[i].bot_fly;
+        let (jet, ski) = if fly {
+            let (w, jet, ski) = self.fly_controls(i, target_in_view);
+            wish = w;
+            (jet, ski)
+        } else { match link {
             // Climbs: wait for a tank first, then jet until a coast would
             // carry it over the waypoint, braking horizontally near the end.
             Some(Link::Jet) => {
@@ -1415,7 +1540,7 @@ impl World {
                 let uphill = to.y > 5.0;
                 (energy >= MIN_JET_ENERGY && (!on_ground || uphill), true)
             }
-        };
+        } };
         // Jetters fight from the air when they have the energy for it.
         let jet = jet || (profile.style == MoveStyle::Jetter && target_in_view && energy > 30.0 && r < 0.6);
         let mx = wish.dot(right).clamp(-1.0, 1.0);
@@ -1550,6 +1675,15 @@ impl World {
                 d.spin += sdt * 42.0;
                 let grav = if d.kind == 2 { 1.0 } else { 0.0 };
                 d.vel.y -= GRAVITY * grav * sdt;
+                // Water: bullets and plasma fizzle out; discs and grenades
+                // slow hard but still explode on contact or fuse.
+                if crate::water::at(map, &self.staged_water, d.pos).is_some() {
+                    if d.kind == 1 || d.kind == 3 {
+                        dead = true;
+                        break;
+                    }
+                    d.vel *= (-crate::water::PROJECTILE_DRAG * sdt).exp();
+                }
                 let next = d.pos + d.vel * sdt;
                 let mut hit = obstacle_hit(map, &self.pillars, d.pos, next, if d.kind==3 {0.45} else {SHOT_RADIUS});
                 // Keep the actual boundary impact height, rather than moving
@@ -3577,6 +3711,7 @@ fn make_player(team: Team, bot: bool, pos: Vec3, yaw: f32, role: BotRole) -> Pla
         bot_aim: Vec2::ZERO,
         bot_kit: false,
         bot_avoid: Vec::new(),
+        bot_fly: false,
         coyote: 0.0,
     }
 }
@@ -5360,6 +5495,47 @@ mod bot_soak_metrics {
         None
     }
 
+    /// A lone flyer (the Hawk archetype): (seconds to the enemy flag, share
+    /// of the run spent airborne), or `None` if it never got there.
+    pub(crate) fn flyer_run(map: MapId, ember: bool, limit: f32) -> Option<(f32, f32)> {
+        crate::bot_nav::graph(map);
+        let mut w = World::new();
+        w.set_map(map);
+        w.start_match(ember);
+        let team = w.players[0].team;
+        let mut bot = make_player(team, true, w.players[0].pos, w.players[0].yaw, BotRole::Offense);
+        bot.bot_profile = *crate::bot_nav::ARCHETYPES.iter().find(|a| a.style == crate::bot_nav::MoveStyle::Flyer).unwrap();
+        w.players = vec![bot];
+        let target = w.flags[team.other().idx()].home;
+        let mut air = 0u32;
+        for s in 0..(limit / STEP) as u32 {
+            w.players[0].health = 100.0;
+            w.tick(STEP);
+            let p = &w.players[0];
+            if !p.on_ground { air += 1; }
+            if p.carrying.is_some() || (p.alive && p.pos.distance(target) < 6.0) {
+                return Some((s as f32 * STEP, air as f32 / (s + 1) as f32));
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn flyers_cross_every_map_mostly_airborne() {
+        let mut missed = Vec::new();
+        for map in MAPS {
+            for ember in [true, false] {
+                let r = flyer_run(map, ember, 240.0);
+                println!("{map:?} {} flyer: {r:?}", if ember { "ember" } else { "glacier" });
+                match r {
+                    Some((_, air)) if air >= 0.4 => {}
+                    _ => missed.push((map, ember, r)),
+                }
+            }
+        }
+        assert!(missed.is_empty(), "flyers that never arrived or stayed grounded: {missed:?}");
+    }
+
     #[test]
     fn a_lone_bot_reaches_the_enemy_flag_on_every_map() {
         let mut missed = Vec::new();
@@ -5382,5 +5558,167 @@ mod bot_soak_metrics {
                 reach[0].map(|t| t.round()), reach[1].map(|t| t.round()), cost[0], cost[1], 8);
             // (seven bots plus the player's slot, also bot-driven)
         }
+    }
+}
+
+#[cfg(test)]
+mod water_tests {
+    use super::*;
+    use crate::water::Volume;
+
+    /// A flat-ish spot on the Valley fixture, with a lone local player on it.
+    fn solo_on_ground() -> (World, Vec3) {
+        let mut world = World::new();
+        world.set_map(MapId::Raindance);
+        world.start_match(true);
+        world.players.truncate(1);
+        let map = world.map;
+        assert_eq!(map, MapId::Raindance);
+        let mut spot = Vec3::new(512.0, 0.0, 512.0);
+        let ground = |x: f32, z: f32, from: f32| crate::terrain::support_on(map, Vec3::new(x, from, z)).0;
+        'find: for x in (300..1700).step_by(20) {
+            for z in (300..1700).step_by(20) {
+                let (x, z) = (x as f32, z as f32);
+                let h0 = ground(x, z, 2000.0);
+                let flat = (-6..=6).step_by(2).all(|a| (-6..=6).step_by(2).all(|b| {
+                    let (sx, sz) = (x + a as f32 * 4.0, z + b as f32 * 4.0);
+                    (ground(sx, sz, h0 + 3.0) - h0).abs() < 0.8 && (ground(sx, sz, 2000.0) - h0).abs() < 0.8
+                }));
+                if flat { spot = Vec3::new(x, h0, z); break 'find; }
+            }
+        }
+        assert!(spot.y != 0.0, "found a flat spot");
+        world.player_id = 0;
+        world.network_inputs.clear();
+        let p = &mut world.players[0];
+        p.is_bot = false;
+        p.remote = false;
+        p.alive = true;
+        p.health = 100.0;
+        p.energy = ENERGY_MAX;
+        p.pos = spot + Vec3::Y * PLAYER_RADIUS;
+        p.vel = Vec3::ZERO;
+        p.yaw = std::f32::consts::FRAC_PI_2;
+        p.on_ground = true;
+        (world, spot)
+    }
+
+    fn pool(surface: f32, at: Vec3) -> Volume {
+        Volume {surface, rect: Some([at.x - 300.0, at.z - 300.0, at.x + 300.0, at.z + 300.0]), ..Default::default()}
+    }
+
+    /// Horizontal speed after `secs`, entering at `speed` along +x.
+    fn coast(depth: Option<f32>, speed: f32, ski: bool, secs: f32) -> f32 {
+        let (mut world, spot) = solo_on_ground();
+        if let Some(d) = depth { world.staged_water.push(pool(spot.y + d, spot)); }
+        world.players[0].vel = Vec3::new(speed, 0.0, 0.0);
+        world.input.jump = ski;
+        world.input.jump_prev = ski;
+        for _ in 0..(secs / STEP).round() as usize { world.step_players(STEP); }
+        let v = world.players[0].vel;
+        Vec2::new(v.x, v.z).length()
+    }
+
+    #[test]
+    fn water_drag_grows_with_depth_and_brakes_skiers() {
+        // Ankle, waist and swim depth in metres above the bed.
+        let depths = [("dry", None), ("ankle", Some(0.3)), ("waist", Some(1.1)), ("swim", Some(3.0))];
+        let mut ski_after_1 = Vec::new();
+        for (name, d) in depths {
+            let (s1, s3) = (coast(d, 30.0, true, 1.0), coast(d, 30.0, true, 3.0));
+            let (w1, w3) = (coast(d, 8.0, false, 1.0), coast(d, 8.0, false, 3.0));
+            println!("{name}: ski 30 m/s -> {s1:.1} after 1 s, {s3:.1} after 3 s; coast 8 m/s -> {w1:.2}, {w3:.2}");
+            ski_after_1.push(s1);
+        }
+        assert!(ski_after_1[1] < ski_after_1[0] * 0.8, "ankle water brakes a skier: {ski_after_1:?}");
+        assert!(ski_after_1[2] < ski_after_1[1] && ski_after_1[3] < ski_after_1[2], "{ski_after_1:?}");
+        assert!(ski_after_1[3] < 8.0, "swimming kills ski speed: {ski_after_1:?}");
+    }
+
+    #[test]
+    fn wading_slows_walking() {
+        let walk = |depth: Option<f32>| {
+            let (mut world, spot) = solo_on_ground();
+            if let Some(d) = depth { world.staged_water.push(pool(spot.y + d, spot)); }
+            world.input.move_z = 1.0;
+            for _ in 0..120 { world.step_players(STEP); }
+            let v = world.players[0].vel;
+            Vec2::new(v.x, v.z).length()
+        };
+        let (dry, waist) = (walk(None), walk(Some(1.1)));
+        println!("walk top speed dry {dry:.2}, waist-deep {waist:.2}");
+        assert!((dry - WALK_MAX).abs() < 0.8 && waist < dry * 0.8 && waist > 3.0, "{dry} {waist}");
+    }
+
+    #[test]
+    fn a_swimmer_floats_and_can_jet_out() {
+        let (mut world, spot) = solo_on_ground();
+        let surface = spot.y + 6.0;
+        world.staged_water.push(pool(surface, spot));
+        for _ in 0..600 { world.step_players(STEP); }
+        let (wet, _) = crate::water::immersion(world.map, &world.staged_water, world.players[0].pos);
+        assert!(wet > 0.5 && wet < 1.0, "floats partly submerged, not on the bed: {wet}");
+        let eye = world.players[0].pos.y + crate::terrain::EYE;
+        assert!((eye - surface).abs() < 1.0, "eye near the surface: {eye} vs {surface}");
+        world.players[0].energy = ENERGY_MAX;
+        world.input.jet = true;
+        let mut t = 0.0;
+        while crate::water::immersion(world.map, &world.staged_water, world.players[0].pos).0 > 0.0 {
+            world.step_players(STEP);
+            t += STEP;
+            assert!(t < 3.0, "could not jet out");
+        }
+        println!("jet out of deep water in {t:.2} s, energy left {:.1}", world.players[0].energy);
+    }
+
+    #[test]
+    fn dry_movement_is_unchanged_by_distant_water() {
+        let run = |water: bool| {
+            let (mut world, spot) = solo_on_ground();
+            if water { world.staged_water.push(pool(spot.y + 5.0, spot + Vec3::new(1400.0, 0.0, 1400.0))); }
+            let mut trace = Vec::new();
+            for tick in 0..900 {
+                world.input.move_z = if tick % 200 < 150 { 1.0 } else { 0.0 };
+                world.input.jump = tick % 300 > 150;
+                world.input.jet = tick % 240 > 200;
+                world.step_players(STEP);
+                let p = &world.players[0];
+                trace.push((p.pos, p.vel, p.energy.to_bits()));
+            }
+            trace
+        };
+        assert_eq!(run(false), run(true));
+    }
+
+    #[test]
+    fn prediction_matches_the_server_in_water() {
+        let run = |predicting: bool| {
+            let (mut world, spot) = solo_on_ground();
+            world.staged_water.push(Volume {flow: [2.0, -1.0], ..pool(spot.y + 1.4, spot)});
+            world.predicting = predicting;
+            world.players[0].vel = Vec3::new(25.0, 0.0, 3.0);
+            world.input.jump = true;
+            for tick in 0..300 {
+                world.input.jet = tick > 200;
+                world.step_players(STEP);
+            }
+            let p = &world.players[0];
+            (p.pos, p.vel, p.energy.to_bits())
+        };
+        assert_eq!(run(true), run(false));
+    }
+
+    #[test]
+    fn projectiles_slow_or_fizzle_under_water() {
+        let (mut world, spot) = solo_on_ground();
+        world.staged_water.push(pool(spot.y + 40.0, spot));
+        let start = spot + Vec3::new(0.0, 20.0, 0.0);
+        world.discs.push(Disc {pos: start, vel: Vec3::new(0.0, 0.0, -95.0), team: Team::Ember, owner: 0, life: 3.0, kind: 0, spin: 0.0});
+        world.discs.push(Disc {pos: start, vel: Vec3::new(0.0, 0.0, -420.0), team: Team::Ember, owner: 0, life: 1.0, kind: 1, spin: 0.0});
+        world.step_discs(STEP);
+        assert_eq!(world.discs.len(), 1, "the bullet fizzles");
+        for _ in 0..30 { world.step_discs(STEP); }
+        let speed = world.discs.first().map_or(0.0, |d| d.vel.length());
+        assert!(speed < 95.0 * 0.15, "the disc is dragged down: {speed}");
     }
 }

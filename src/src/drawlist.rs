@@ -205,7 +205,7 @@ pub fn build_frame_with(world: &World, aspect: f32, dt: f32, fx: &mut Effects) -
         }
         // Articulated armor; dead players collapse briefly, then vanish.
         crate::player_model::push_player(&mut lit, &mut emit, p, world.time,
-            eye.distance_squared(p.pos) < PLAYER_DETAIL_RANGE * PLAYER_DETAIL_RANGE);
+            eye.distance_squared(p.pos) < PLAYER_DETAIL_RANGE * PLAYER_DETAIL_RANGE, fx.players.motion(p.net_id));
     }
 
     for d in &world.discs {

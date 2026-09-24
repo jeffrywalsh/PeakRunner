@@ -13,6 +13,11 @@
 //! 5): the hull drops to zero, the generator blast plays, and the wreck and
 //! announcement follow through the normal paths. `QA_KIT=heal` shows the local
 //! player mid-way through a repair kit.
+//! An optional fourth field stages a pose for animation captures: `dive`
+//! (airborne, pitched down, firing), `land@T` (falling until `T` seconds,
+//! then grounded: a hard landing) or `switch@T` (disc launcher until `T`,
+//! then chaingun). The landing and switch play through the client's normal
+//! frame-to-frame animation tracker.
 //! `QA_POINTS="Beacon:1010,120,860:drain;West:900,100,1000"` stages temporary
 //! control points (`name:x,y,z[:drain][:rRADIUS]`) on any map, `QA_POINT_STATE="0=1/0.4/0/c"`
 //! forces point `index=owner/progress/capturing[/c for contested]` (`-` = none),
@@ -21,7 +26,10 @@ use glam::Vec3;
 use peakrunner_core::sim::{Team, World};
 use std::sync::OnceLock;
 
-struct Overrides { equipment: Vec<(usize, f32, f32)>, down: Vec<u8>, boom: Vec<u8>, boom_at: f32, kit_heal: bool, players: Vec<(String, Team, Vec3, bool)>, started: std::time::Instant, carry_at: f32 }
+#[derive(Clone, Copy)]
+enum StagedPose { Stand, Dive, Land(f32), Switch(f32) }
+
+struct Overrides { equipment: Vec<(usize, f32, f32)>, down: Vec<u8>, boom: Vec<u8>, boom_at: f32, kit_heal: bool, players: Vec<(String, Team, Vec3, bool, StagedPose)>, started: std::time::Instant, carry_at: f32 }
 
 fn parse() -> Option<&'static Overrides> {
     static CELL: OnceLock<Option<Overrides>> = OnceLock::new();
@@ -44,12 +52,18 @@ fn parse() -> Option<&'static Overrides> {
         }
         for item in pl.iter().flat_map(|s| s.split(';')) {
             let parts: Vec<_> = item.split(':').collect();
-            if parts.len() != 3 { continue; }
+            if parts.len() != 3 && parts.len() != 4 { continue; }
             let xyz: Vec<f32> = parts[2].split(',').filter_map(|v| v.trim().parse().ok()).collect();
             if xyz.len() != 3 { continue; }
             let team = if parts[1] == "0" { Team::Ember } else { Team::Glacier };
             let (name, carries) = match parts[0].strip_suffix('*') { Some(n) => (n, true), None => (parts[0], false) };
-            o.players.push((name.to_string(), team, Vec3::new(xyz[0], xyz[1], xyz[2]), carries));
+            let at = |tag: &str| parts[3].strip_prefix(tag).and_then(|t| t.parse().ok());
+            let pose = match parts.get(3) {
+                None => StagedPose::Stand,
+                Some(&"dive") => StagedPose::Dive,
+                Some(_) => at("land@").map(StagedPose::Land).or_else(|| at("switch@").map(StagedPose::Switch)).unwrap_or(StagedPose::Stand),
+            };
+            o.players.push((name.to_string(), team, Vec3::new(xyz[0], xyz[1], xyz[2]), carries, pose));
         }
         Some(o)
     }).as_ref()
@@ -87,7 +101,8 @@ pub fn apply(world: &mut World) {
     }
     let Some(template) = world.players.get(world.player_id).cloned() else { return; };
     let carry_now = o.started.elapsed().as_secs_f32() >= o.carry_at;
-    for (k, (name, team, pos, carries)) in o.players.iter().enumerate() {
+    let now = o.started.elapsed().as_secs_f32();
+    for (k, (name, team, pos, carries, pose)) in o.players.iter().enumerate() {
         let id = 60_000 + k as u32;
         let slot = match world.players.iter().position(|p| p.net_id == id) {
             Some(i) => i,
@@ -95,6 +110,16 @@ pub fn apply(world: &mut World) {
         };
         let p = &mut world.players[slot];
         p.net_id = id; p.name = name.clone(); p.team = *team; p.pos = *pos; p.vel = Vec3::ZERO; p.alive = true;
+        p.on_ground = true; p.jetting = false; p.skiing = false;
+        match *pose {
+            StagedPose::Stand => {}
+            StagedPose::Dive => {
+                p.on_ground = false; p.vel = Vec3::new(0.0, -24.0, -12.0); p.pitch = -1.0; p.weapon = 0;
+                p.cooldown = peakrunner_core::sim::weapon_reload(0) - 0.03;
+            }
+            StagedPose::Land(t) => if now < t { p.on_ground = false; p.vel = Vec3::new(0.0, -28.0, 0.0); },
+            StagedPose::Switch(t) => p.weapon = if now < t { 0 } else { 1 },
+        }
         if *carries && carry_now {
             let enemy = team.other();
             p.carrying = Some(enemy);

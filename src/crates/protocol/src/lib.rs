@@ -21,12 +21,14 @@ pub fn game_protocol() -> String {
         // sim) and the Capture & Hold mode.
         // arc1: fixed turrets face the field with a limited field of fire beyond
         // 15 m (equipment::Definition::in_arc), so open doorways need no baffles.
-        Some(pack) => format!("{PROTOCOL}:equipment5:blast3:chat2:names1:ping1:fov1:muzzle1:kit1:cnh1:arc1:maps6:{}:{}:{}:{}:{}",pack.fingerprint,
+        // water1: manifest water volumes slow movement and projectiles in the
+        // shared sim (crate::water).
+        Some(pack) => format!("{PROTOCOL}:equipment5:blast3:chat2:names1:ping1:fov1:muzzle1:kit1:cnh1:arc1:water1:maps6:{}:{}:{}:{}:{}",pack.fingerprint,
             map_pack::on(MapId::BroadsideClone).expect("Tower Complex").fingerprint,
             map_pack::on(MapId::StonehengeClone).expect("Cairnhold").fingerprint,
             map_pack::on(MapId::SnowblindClone).expect("Frostline").fingerprint,
             map_pack::on(MapId::DesertOfDeathClone).expect("Dustreach").fingerprint),
-        None => format!("{PROTOCOL}:equipment5:blast3:chat2:names1:ping1:fov1:muzzle1:kit1:cnh1:arc1"),
+        None => format!("{PROTOCOL}:equipment5:blast3:chat2:names1:ping1:fov1:muzzle1:kit1:cnh1:arc1:water1"),
     }
 }
 
@@ -93,6 +95,7 @@ mod tests {
         assert_eq!(state.score,[120,45]);
         assert!(super::game_protocol().contains(":cnh1"));
         assert!(super::game_protocol().contains(":arc1"));
+        assert!(super::game_protocol().contains(":water1"));
     }
     #[test]
     fn chat_cannot_supply_identity_or_frag_outcomes() {

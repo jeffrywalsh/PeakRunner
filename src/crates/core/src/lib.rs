@@ -9,6 +9,7 @@ pub mod interior_survey;
 pub mod map_catalog;
 pub mod equipment;
 pub mod control;
+pub mod water;
 pub mod combat;
 pub mod feed;
 pub mod names;

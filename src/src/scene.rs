@@ -15,6 +15,38 @@ const SLOT: u64 = 512;
 /// rebuilds its pipelines when this changes; unsupported adapters stay at 1x.
 pub static MSAA_WANTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 const MSAA_SAMPLES: u32 = 4;
+/// Bloom from the settings: 0 off, 1 low, 2 high (see `bloom_settings`).
+pub static BLOOM_LEVEL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
+/// Blur levels allocated below the scene: 1/2, 1/4, ... 1/32 size.
+const BLOOM_LEVELS: usize = 5;
+
+/// Bloom level in effect: `QA_BLOOM=off|low|high` (QA captures, which run on
+/// in-memory settings) overrides the saved setting.
+fn bloom_level() -> u8 {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        static QA: std::sync::OnceLock<Option<u8>> = std::sync::OnceLock::new();
+        let qa = QA.get_or_init(|| match std::env::var("QA_BLOOM").ok()?.as_str() {
+            "off" => Some(0),
+            "low" => Some(1),
+            "high" => Some(2),
+            _ => None,
+        });
+        if let Some(level) = qa {
+            return *level;
+        }
+    }
+    BLOOM_LEVEL.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// (blur levels used, composite intensity) for a bloom setting; 0 levels = off.
+pub fn bloom_settings(level: u8) -> (usize, f32) {
+    match level {
+        0 => (0, 0.0),
+        1 => (4, 0.7),
+        _ => (5, 1.1),
+    }
+}
 const WORLD_SIZE: u64 = 304;
 const SKY_SIZE: u64 = 96;
 const EMIT_SIZE: u64 = 96;
@@ -107,6 +139,178 @@ pub struct SceneGpu {
     grass_albedo_view: wgpu::TextureView,
     grass_normal_view: wgpu::TextureView,
     grass_sampler: wgpu::Sampler,
+    bloom: Bloom,
+}
+
+/// Glow pipelines and the half-to-1/32 blur chain. Level 0 (half size) ends up
+/// holding the whole blurred glow, which the blit screen-blends over the scene.
+struct Bloom {
+    layout: wgpu::BindGroupLayout,
+    prefilter: wgpu::RenderPipeline,
+    down: wgpu::RenderPipeline,
+    up: wgpu::RenderPipeline,
+    params: wgpu::Buffer,
+    /// Samples the resolved scene colour.
+    scene_bg: wgpu::BindGroup,
+    /// (texture, view, bind group sampling this level), largest first.
+    levels: Vec<(wgpu::Texture, wgpu::TextureView, wgpu::BindGroup)>,
+}
+
+impl Bloom {
+    fn new(device: &wgpu::Device) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("bloom"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("bloom.wgsl").into()),
+        });
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("bloom"),
+            entries: &[texture_entry(0), wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            }],
+        });
+        let pipe_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("bloom"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let make = |entry: &str, additive: bool| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(entry),
+                layout: Some(&pipe_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_bloom"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some(entry),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        blend: additive.then_some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent::REPLACE,
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let prefilter = make("fs_prefilter", false);
+        let down = make("fs_down", false);
+        let up = make("fs_up", true);
+        let params = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("bloom params"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let placeholder = device.create_texture(&bloom_texture_desc(1, 1));
+        let view = placeholder.create_view(&Default::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+        let scene_bg = bloom_group(device, &layout, &view, &sampler);
+        Self { layout, prefilter, down, up, params, scene_bg, levels: Vec::new() }
+    }
+
+    /// Rebuild the chain for a new scene size.
+    fn resize(&mut self, device: &wgpu::Device, sampler: &wgpu::Sampler, scene: &wgpu::TextureView, width: u32, height: u32) {
+        self.scene_bg = bloom_group(device, &self.layout, scene, sampler);
+        self.levels = (0..BLOOM_LEVELS)
+            .map(|i| {
+                let texture = device.create_texture(&bloom_texture_desc((width >> (i + 1)).max(1), (height >> (i + 1)).max(1)));
+                let view = texture.create_view(&Default::default());
+                let bg = bloom_group(device, &self.layout, &view, sampler);
+                (texture, view, bg)
+            })
+            .collect();
+    }
+
+    fn pass<'a>(encoder: &'a mut wgpu::CommandEncoder, target: &wgpu::TextureView, clear: bool) -> wgpu::RenderPass<'a> {
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("bloom"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: if clear { wgpu::LoadOp::Clear(wgpu::Color::BLACK) } else { wgpu::LoadOp::Load },
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        })
+    }
+
+    /// Glow prefilter, downsample to `count` levels, then upsample back into
+    /// level 0. With `count` 0 only level 0 is cleared (bloom off).
+    fn run(&self, encoder: &mut wgpu::CommandEncoder, count: usize) {
+        let count = count.min(self.levels.len());
+        if count == 0 {
+            if let Some(level) = self.levels.first() {
+                Self::pass(encoder, &level.1, true);
+            }
+            return;
+        }
+        {
+            let mut pass = Self::pass(encoder, &self.levels[0].1, true);
+            pass.set_pipeline(&self.prefilter);
+            pass.set_bind_group(0, &self.scene_bg, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        for i in 1..count {
+            let mut pass = Self::pass(encoder, &self.levels[i].1, true);
+            pass.set_pipeline(&self.down);
+            pass.set_bind_group(0, &self.levels[i - 1].2, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        for i in (1..count).rev() {
+            let mut pass = Self::pass(encoder, &self.levels[i - 1].1, false);
+            pass.set_pipeline(&self.up);
+            pass.set_bind_group(0, &self.levels[i].2, &[]);
+            pass.draw(0..3, 0..1);
+        }
+    }
+}
+
+fn bloom_texture_desc(width: u32, height: u32) -> wgpu::TextureDescriptor<'static> {
+    wgpu::TextureDescriptor {
+        label: Some("bloom"),
+        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    }
+}
+
+fn bloom_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, view: &wgpu::TextureView, sampler: &wgpu::Sampler) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bloom"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(view) },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
+        ],
+    })
 }
 
 impl SceneGpu {
@@ -137,6 +341,17 @@ impl SceneGpu {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                texture_entry(2),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: NonZeroU64::new(16),
+                    },
                     count: None,
                 },
             ],
@@ -179,8 +394,10 @@ impl SceneGpu {
         );
         let sky_bg = uniform_group(device, &sky_layout, &uniform, SKY_SIZE);
         let emit_bg = uniform_group(device, &emit_layout, &uniform, EMIT_SIZE);
-        let (color, color_view, depth, depth_view, blit_bg, msaa) =
-            make_target(device, &blit_layout, &sampler, 4, 4, 1);
+        let (color, color_view, depth, depth_view, msaa) = make_target(device, 4, 4, 1);
+        let mut bloom = Bloom::new(device);
+        bloom.resize(device, &sampler, &color_view, 4, 4);
+        let blit_bg = blit_group(device, &blit_layout, &color_view, &bloom, &sampler);
 
         let mut snow = Vec::new();
         let mut rng = 0x91A2u32;
@@ -230,6 +447,7 @@ impl SceneGpu {
             grass_albedo_view,
             grass_normal_view,
             grass_sampler,
+            bloom,
         }
     }
 
@@ -281,13 +499,14 @@ impl SceneGpu {
         let width = width.max(1);
         let height = height.max(1);
         if self.size != (width, height) {
-            let (color, color_view, depth, depth_view, blit_bg, msaa) =
-                make_target(device, &self.blit_layout, &self.sampler, width, height, self.samples);
+            let (color, color_view, depth, depth_view, msaa) =
+                make_target(device, width, height, self.samples);
+            self.bloom.resize(device, &self.sampler, &color_view, width, height);
+            self.blit_bg = blit_group(device, &self.blit_layout, &color_view, &self.bloom, &self.sampler);
             self.color = color;
             self.color_view = color_view;
             self.depth = depth;
             self.depth_view = depth_view;
-            self.blit_bg = blit_bg;
             self.msaa = msaa;
             self.size = (width, height);
         }
@@ -491,6 +710,17 @@ impl SceneGpu {
                 pass.draw_indexed(0..mesh.count, 0, 0..1);
             }
         }
+
+        let (levels, intensity) = bloom_settings(bloom_level());
+        queue.write_buffer(&self.bloom.params, 0, bytemuck::cast_slice(&[intensity, 0.0f32, 0.0, 0.0]));
+        self.bloom.run(encoder, levels);
+    }
+
+    /// Draw the scene (with bloom) into the pass the HUD will draw over.
+    pub fn composite(&self, pass: &mut wgpu::RenderPass<'_>) {
+        pass.set_pipeline(&self.blit_pipe);
+        pass.set_bind_group(3, &self.blit_bg, &[]);
+        pass.draw(0..3, 0..1);
     }
 
     fn upload_grass(&mut self, queue: &wgpu::Queue) {
@@ -780,10 +1010,27 @@ fn make_uniform(device: &wgpu::Device, slots: u32) -> wgpu::Buffer {
     })
 }
 
+fn blit_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    color_view: &wgpu::TextureView,
+    bloom: &Bloom,
+    sampler: &wgpu::Sampler,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("blit"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(color_view) },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
+            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&bloom.levels[0].1) },
+            wgpu::BindGroupEntry { binding: 3, resource: bloom.params.as_entire_binding() },
+        ],
+    })
+}
+
 fn make_target(
     device: &wgpu::Device,
-    blit_layout: &wgpu::BindGroupLayout,
-    sampler: &wgpu::Sampler,
     width: u32,
     height: u32,
     samples: u32,
@@ -792,7 +1039,6 @@ fn make_target(
     wgpu::TextureView,
     wgpu::Texture,
     wgpu::TextureView,
-    wgpu::BindGroup,
     Option<(wgpu::Texture, wgpu::TextureView)>,
 ) {
     let color = device.create_texture(&wgpu::TextureDescriptor {
@@ -826,20 +1072,6 @@ fn make_target(
         view_formats: &[],
     });
     let depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
-    let blit_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("blit"),
-        layout: blit_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&color_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(sampler),
-            },
-        ],
-    });
     let msaa = (samples > 1).then(|| {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("scene-color-msaa"),
@@ -854,7 +1086,7 @@ fn make_target(
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         (texture, view)
     });
-    (color, color_view, depth, depth_view, blit_bg, msaa)
+    (color, color_view, depth, depth_view, msaa)
 }
 
 fn lit_pipeline(
@@ -929,10 +1161,12 @@ fn emit_pipeline(
                 dst_factor: wgpu::BlendFactor::One,
                 operation: wgpu::BlendOperation::Add,
             },
+            // Alpha carries the bloom mask (glow = 1 - alpha): every additive
+            // effect (flames, flashes, plasma, sparks) adds its strength to it.
             alpha: wgpu::BlendComponent {
                 src_factor: wgpu::BlendFactor::One,
                 dst_factor: wgpu::BlendFactor::One,
-                operation: wgpu::BlendOperation::Add,
+                operation: wgpu::BlendOperation::ReverseSubtract,
             },
         }
     };
@@ -1310,9 +1544,7 @@ impl CallbackTrait for SceneCallback {
         let Some(scene) = resources.get::<SceneGpu>() else {
             return;
         };
-        pass.set_pipeline(&scene.blit_pipe);
-        pass.set_bind_group(3, &scene.blit_bg, &[]);
-        pass.draw(0..3, 0..1);
+        scene.composite(pass);
         let _ = scene.target_is_srgb;
     }
 }
@@ -1535,7 +1767,9 @@ mod shader_check {
                 rx.recv().unwrap().unwrap();
                 let mapped = buffer.slice(..).get_mapped_range().unwrap();
                 let pixels: Vec<u8> = mapped.chunks(stride as usize)
-                    .flat_map(|row| row[..width as usize * 4].iter().copied()).collect();
+                    .flat_map(|row| row[..width as usize * 4].iter().copied()).collect::<Vec<u8>>()
+                    // Alpha carries the bloom mask; captures are opaque images.
+                    .chunks_exact(4).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
                 assert!(pixels.chunks_exact(4).any(|p| p[0] > 80 && p[1] > 80), "blank render");
                 let path = format!("screenshots/{label}-{name}.png");
                 let mut encoder = png::Encoder::new(std::fs::File::create(&path).unwrap(), width, height);
@@ -1548,8 +1782,23 @@ mod shader_check {
     }
 
     #[test]
+    fn bloom_settings_scale_with_the_level_and_off_is_off() {
+        use super::{bloom_settings, BLOOM_LEVELS};
+        assert_eq!(bloom_settings(0), (0, 0.0));
+        let (low_levels, low) = bloom_settings(1);
+        let (high_levels, high) = bloom_settings(2);
+        assert!(low_levels > 0 && low_levels <= high_levels && high_levels <= BLOOM_LEVELS);
+        assert!(low > 0.0 && low < high);
+        // The blit reads the intensity as one vec4 uniform; the HUD is drawn
+        // after the blit, so it is never part of the glow.
+        let wgsl = include_str!("shaders.wgsl");
+        assert!(wgsl.contains("var<uniform> bloom_u: vec4<f32>;"));
+        assert!(wgsl.contains("fn composite("));
+    }
+
+    #[test]
     fn shaders_validate() {
-        for source in [include_str!("shaders.wgsl"), include_str!("map.wgsl")] {
+        for source in [include_str!("shaders.wgsl"), include_str!("map.wgsl"), include_str!("bloom.wgsl")] {
         let module = naga::front::wgsl::parse_str(source)
             .expect("wgsl parse");
         let mut validator = naga::valid::Validator::new(
@@ -1591,7 +1840,9 @@ mod shader_check {
                 device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
                 rx.recv().unwrap().unwrap();
                 let mapped = buffer.slice(..).get_mapped_range().unwrap();
-                let pixels: Vec<u8> = mapped.chunks(stride as usize).flat_map(|row| row[..width as usize * 4].iter().copied()).collect();
+                let pixels: Vec<u8> = mapped.chunks(stride as usize).flat_map(|row| row[..width as usize * 4].iter().copied()).collect::<Vec<u8>>()
+                    // Alpha carries the bloom mask; captures are opaque images.
+                    .chunks_exact(4).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
                 let path = format!("screenshots/players-{name}.png");
                 let mut png = png::Encoder::new(std::fs::File::create(&path).unwrap(), width, height);
                 png.set_color(png::ColorType::Rgba);
@@ -1723,7 +1974,9 @@ mod shader_check {
                 device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
                 rx.recv().unwrap().unwrap();
                 let mapped = buffer.slice(..).get_mapped_range().unwrap();
-                let pixels: Vec<u8> = mapped.chunks(stride as usize).flat_map(|row| row[..width as usize * 4].iter().copied()).collect();
+                let pixels: Vec<u8> = mapped.chunks(stride as usize).flat_map(|row| row[..width as usize * 4].iter().copied()).collect::<Vec<u8>>()
+                    // Alpha carries the bloom mask; captures are opaque images.
+                    .chunks_exact(4).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
                 let path = format!("screenshots/weapons-after-{name}.png");
                 let mut png = png::Encoder::new(std::fs::File::create(&path).unwrap(), width, height);
                 png.set_color(png::ColorType::Rgba);
@@ -1951,23 +2204,50 @@ mod shader_check {
             let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.expect("GPU device");
             let mut scene = SceneGpu::new(&device, wgpu::TextureFormat::Rgba8Unorm);
             scene.set_max_samples(supported_samples(&adapter));
-            for msaa in [false, true] {
-                MSAA_WANTED.store(msaa, std::sync::atomic::Ordering::Relaxed);
-                let mut times = Vec::new();
-                for k in 0..80 {
-                    let start = std::time::Instant::now();
-                    let mut encoder = device.create_command_encoder(&Default::default());
-                    scene.render(&device, &queue, &mut encoder, 1280, 800, &frame);
-                    queue.submit([encoder.finish()]);
-                    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-                    if k >= 20 { times.push(start.elapsed().as_secs_f64() * 1000.0); }
+            // Render plus the bloom-composite blit, as the game draws a frame.
+            for (width, height) in [(1280u32, 800u32), (1920, 1080)] {
+                let out = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("probe out"),
+                    size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                    mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT, view_formats: &[],
+                });
+                let out_view = out.create_view(&Default::default());
+                for msaa in [false, true] {
+                    MSAA_WANTED.store(msaa, std::sync::atomic::Ordering::Relaxed);
+                    for bloom in [0u8, 1, 2] {
+                        BLOOM_LEVEL.store(bloom, std::sync::atomic::Ordering::Relaxed);
+                        let mut times = Vec::new();
+                        for k in 0..80 {
+                            let start = std::time::Instant::now();
+                            let mut encoder = device.create_command_encoder(&Default::default());
+                            scene.render(&device, &queue, &mut encoder, width, height, &frame);
+                            {
+                                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                    label: Some("probe composite"),
+                                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                        view: &out_view, depth_slice: None, resolve_target: None,
+                                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                                    })],
+                                    depth_stencil_attachment: None, timestamp_writes: None,
+                                    occlusion_query_set: None, multiview_mask: None,
+                                });
+                                scene.composite(&mut pass);
+                            }
+                            queue.submit([encoder.finish()]);
+                            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                            if k >= 20 { times.push(start.elapsed().as_secs_f64() * 1000.0); }
+                        }
+                        times.sort_by(f64::total_cmp);
+                        println!("heaviest frame ({} lit, {} emit, {} smoke) {width}x{height}, {}x MSAA, bloom {bloom}: median {:.2} ms, p95 {:.2} ms",
+                            frame.lit.len(), frame.emit.len(), frame.smoke.len(), scene.samples,
+                            times[times.len() / 2], times[times.len() * 95 / 100]);
+                    }
                 }
-                times.sort_by(f64::total_cmp);
-                println!("heaviest frame ({} lit, {} emit, {} smoke), {}x MSAA: render median {:.2} ms, p95 {:.2} ms",
-                    frame.lit.len(), frame.emit.len(), frame.smoke.len(), scene.samples,
-                    times[times.len() / 2], times[times.len() * 95 / 100]);
             }
             MSAA_WANTED.store(true, std::sync::atomic::Ordering::Relaxed);
+            BLOOM_LEVEL.store(1, std::sync::atomic::Ordering::Relaxed);
         });
     }
 
@@ -2024,7 +2304,9 @@ mod shader_check {
                 rx.recv().unwrap().unwrap();
                 let mapped = buffer.slice(..).get_mapped_range().unwrap();
                 let pixels: Vec<u8> = mapped.chunks(stride as usize)
-                    .flat_map(|row| row[..w as usize * 4].iter().copied()).collect();
+                    .flat_map(|row| row[..w as usize * 4].iter().copied()).collect::<Vec<u8>>()
+                    // Alpha carries the bloom mask; captures are opaque images.
+                    .chunks_exact(4).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
                 let path = if let Ok(key)=std::env::var("QA_COLLECTION") {
                     let map=MapId::parse(&key).expect("known collection map");
                     format!("local-assets/{}/qa-{name}.png",map.key())
@@ -2161,3 +2443,4 @@ mod shader_check {
         });
     }
 }
+

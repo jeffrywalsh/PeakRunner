@@ -47,15 +47,15 @@ pub enum Cue {
     DiscFire, DiscReady, ChainShot, GrenadeFire, TurretBullet, TurretPlasma,
     BoomNear, BoomFar, GenBlast, ShieldHit, ShieldDown, HullHit, Footstep, Land,
     Switch, RepairKit, Bounce, Hit, Pain, Death, Flag, Drop, Return,
-    CaptureWin, CaptureLoss, Start, End,
+    CaptureWin, CaptureLoss, Start, End, Splash, Wade,
 }
 
-pub const CUES: [Cue; 27] = [
+pub const CUES: [Cue; 29] = [
     Cue::DiscFire, Cue::DiscReady, Cue::ChainShot, Cue::GrenadeFire, Cue::TurretBullet,
     Cue::TurretPlasma, Cue::BoomNear, Cue::BoomFar, Cue::GenBlast, Cue::ShieldHit,
     Cue::ShieldDown, Cue::HullHit, Cue::Footstep, Cue::Land, Cue::Switch, Cue::RepairKit,
     Cue::Bounce, Cue::Hit, Cue::Pain, Cue::Death, Cue::Flag, Cue::Drop, Cue::Return,
-    Cue::CaptureWin, Cue::CaptureLoss, Cue::Start, Cue::End,
+    Cue::CaptureWin, Cue::CaptureLoss, Cue::Start, Cue::End, Cue::Splash, Cue::Wade,
 ];
 
 impl Cue {
@@ -65,7 +65,8 @@ impl Cue {
             Cue::ChainShot | Cue::Footstep => 6,
             Cue::DiscFire | Cue::GrenadeFire | Cue::TurretBullet | Cue::BoomNear
             | Cue::HullHit | Cue::Bounce => 3,
-            Cue::ShieldHit => 4,
+            Cue::ShieldHit | Cue::Wade => 4,
+            Cue::Splash => 3,
             Cue::TurretPlasma | Cue::BoomFar | Cue::Land => 2,
             _ => 1,
         }
@@ -78,8 +79,8 @@ impl Cue {
             Cue::GenBlast | Cue::Hit | Cue::Pain | Cue::RepairKit | Cue::ShieldDown => 5,
             Cue::DiscFire | Cue::GrenadeFire | Cue::DiscReady | Cue::Switch => 4,
             Cue::BoomNear | Cue::BoomFar | Cue::TurretPlasma => 3,
-            Cue::ChainShot | Cue::TurretBullet | Cue::ShieldHit | Cue::HullHit | Cue::Land => 2,
-            Cue::Footstep | Cue::Bounce => 1,
+            Cue::ChainShot | Cue::TurretBullet | Cue::ShieldHit | Cue::HullHit | Cue::Land | Cue::Splash => 2,
+            Cue::Footstep | Cue::Bounce | Cue::Wade => 1,
         }
     }
     /// Distance at which a world sound fades to silence.
@@ -91,8 +92,8 @@ impl Cue {
             Cue::DiscFire | Cue::GrenadeFire | Cue::TurretPlasma => 140.0,
             Cue::ChainShot | Cue::TurretBullet => 150.0,
             Cue::ShieldHit | Cue::ShieldDown | Cue::HullHit => 110.0,
-            Cue::Footstep => 38.0,
-            Cue::Land | Cue::Bounce => 60.0,
+            Cue::Footstep | Cue::Wade => 38.0,
+            Cue::Land | Cue::Bounce | Cue::Splash => 60.0,
             _ => 120.0,
         }
     }
@@ -109,7 +110,7 @@ impl Cue {
     fn max_voices(self) -> usize {
         match self {
             Cue::ChainShot | Cue::TurretBullet => 8,
-            Cue::Footstep => 4,
+            Cue::Footstep | Cue::Wade => 4,
             Cue::ShieldHit | Cue::HullHit | Cue::Bounce => 4,
             Cue::BoomNear | Cue::BoomFar => 6,
             _ => 3,
@@ -459,6 +460,29 @@ pub fn synth(cue: Cue, variant: usize, sr: f32) -> Vec<f32> {
                 thump + scuff + clink
             })
         }
+        Cue::Splash => {
+            // Entering water: a deep, short plop (falling low sine), a
+            // filtered slap of spray and two bubbly resonances. Under 0.5 s.
+            let mut bubble = [Reso::new(420.0 + v * 40.0, 22.0, sr), Reso::new(690.0 - v * 30.0, 26.0, sr)];
+            render(sr, 0.5, |t| {
+                let x = n.next();
+                let plop = o1.tick(95.0 * (-t * 5.0).exp() + 42.0, sr) * env(t, 0.003, 0.12) * 1.3;
+                let slap = f1.bp(pink.next(), 520.0 + v * 60.0, 0.8, sr) * env(t, 0.001, 0.07) * 2.2;
+                let spray = f2.hp(x, 2400.0, 0.7, sr) * env(t, 0.004, 0.16) * 0.35;
+                let bubbles: f32 = bubble.iter_mut().map(|r| r.tick(x * (-t * 90.0).exp())).sum::<f32>() * 0.9;
+                sat(plop + slap + spray + bubbles, 1.4)
+            })
+        }
+        Cue::Wade => {
+            // A step through water: a low wet slosh, no metal clink.
+            render(sr, 0.28, |t| {
+                let x = pink.next();
+                let slosh = f1.bp(x, 300.0 + v * 35.0, 0.9, sr) * env(t, 0.012, 0.09) * 2.4;
+                let body = o1.tick(70.0 + v * 6.0, sr) * env(t, 0.004, 0.05) * 0.7;
+                let drip = f2.bp(n.next(), 1500.0 + v * 120.0, 3.0, sr) * env(t, 0.03, 0.05) * 0.4;
+                slosh + body + drip
+            })
+        }
         Cue::Land => {
             let mut clank = [Reso::new(330.0 + v * 30.0, 14.0, sr), Reso::new(760.0, 16.0, sr)];
             render(sr, 0.7, |t| {
@@ -672,6 +696,7 @@ impl Cue {
             Cue::Pain => "pain", Cue::Death => "death", Cue::Flag => "flag-taken", Cue::Drop => "flag-dropped",
             Cue::Return => "flag-returned", Cue::CaptureWin => "capture-win", Cue::CaptureLoss => "capture-loss",
             Cue::Start => "match-start", Cue::End => "match-end",
+            Cue::Splash => "splash", Cue::Wade => "wade",
         }
     }
 }
@@ -1184,6 +1209,9 @@ pub struct Director {
     indoor: bool,
     indoor_check: f32,
     variant: u32,
+    /// Water immersion last frame: local player, then others by slot.
+    wet: f32,
+    remote_wet: [f32; 16],
 }
 
 impl Default for Director { fn default() -> Self { Self::new() } }
@@ -1195,6 +1223,7 @@ impl Director {
             step_side: 1.0, remote_steps: [0.0; 16], last_heal: 0.0, alive: false, spin_rate: 0.0,
             shields: Vec::new(), healths: Vec::new(), equip_cool: Vec::new(),
             grenades: Vec::with_capacity(64), grenades_next: Vec::with_capacity(64), bounce_cool: 0.0, indoor: false, indoor_check: 0.0, variant: 0,
+            wet: 0.0, remote_wet: [0.0; 16],
         }
     }
 
@@ -1255,13 +1284,20 @@ impl Director {
         // Local body: steps, landings, weapon swaps, kits, loops.
         let speed = me.vel.length();
         let flat = Vec3::new(me.vel.x, 0.0, me.vel.z).length();
+        let wet = if me.alive { peakrunner_core::water::immersion(world.map, &world.staged_water, me.pos).0 } else { 0.0 };
+        if me.alive && wet > 0.0 && self.wet <= 0.0 && speed > 2.0 {
+            let mut p = self.local(Cue::Splash);
+            p.gain = (0.35 + speed / 50.0).clamp(0.35, 1.0);
+            out.push(p);
+        }
+        self.wet = wet;
         if me.alive {
             if me.on_ground && !me.skiing && flat > 1.2 {
                 self.step += dt * flat / 2.2;
                 if self.step >= 1.0 {
                     self.step -= 1.0;
                     self.step_side = -self.step_side;
-                    let mut p = self.local(Cue::Footstep);
+                    let mut p = self.local(if wet > 0.12 { Cue::Wade } else { Cue::Footstep });
                     p.gain = 0.55 * (flat / 10.0).clamp(0.4, 1.0);
                     p.pan = 0.12 * self.step_side;
                     out.push(p);
@@ -1306,7 +1342,18 @@ impl Director {
         self.weapon = Some(me.weapon);
         self.alive = me.alive;
 
-        // Other bodies: footsteps for the three nearest walkers.
+        // Other bodies: a splash when anyone in earshot enters water.
+        for (i, p) in world.players.iter().enumerate() {
+            if i == world.player_id { continue; }
+            let slot = i % self.remote_wet.len();
+            let wet = if p.alive { peakrunner_core::water::immersion(world.map, &world.staged_water, p.pos).0 } else { 0.0 };
+            let was = std::mem::replace(&mut self.remote_wet[slot], wet);
+            if wet > 0.0 && was <= 0.0 && p.vel.length() > 2.0 {
+                let gain = (0.35 + p.vel.length() / 50.0).clamp(0.35, 1.0);
+                if let Some(play) = self.world(l, Cue::Splash, p.pos, gain) { out.push(play); }
+            }
+        }
+        // Footsteps for the three nearest walkers.
         let mut near = [(usize::MAX, f32::INFINITY); 3];
         for (i, p) in world.players.iter().enumerate() {
             if i == world.player_id || !p.alive || !p.on_ground || p.skiing { continue; }
@@ -1325,7 +1372,8 @@ impl Director {
             self.remote_steps[slot] += dt * flat / 2.2;
             if self.remote_steps[slot] >= 1.0 {
                 self.remote_steps[slot] -= 1.0;
-                if let Some(p) = self.world(l, Cue::Footstep, p.pos, 0.8) { out.push(p); }
+                let wading = self.remote_wet[i % self.remote_wet.len()] > 0.12;
+                if let Some(p) = self.world(l, if wading { Cue::Wade } else { Cue::Footstep }, p.pos, 0.8) { out.push(p); }
             }
         }
 

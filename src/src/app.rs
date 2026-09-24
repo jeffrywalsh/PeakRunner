@@ -511,6 +511,14 @@ impl eframe::App for PeakRunnerApp {
                 );
             }
         }
+        // Eye below a water surface: a murky tint over the view.
+        if self.mode == Mode::Play {
+            let eye = self.world.camera().0;
+            if let Some(c) = peakrunner_core::water::eye_under(self.world.map, &self.world.staged_water, eye) {
+                let [r, g, b] = c.map(|v| (v * 255.0) as u8);
+                ui.painter().rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(r, g, b, 120));
+            }
+        }
 
         match self.mode {
             Mode::Menu => self.menu_ui(ui),
@@ -748,8 +756,8 @@ impl PeakRunnerApp {
                 });
                 let about = match self.world.bot_difficulty {
                     peakrunner_core::bot_nav::Difficulty::Easy => "Mostly rookies: slow to react, wide of the mark.",
-                    peakrunner_core::bot_nav::Difficulty::Normal => "A spread of grunts, riders, skirmishers and anchors.",
-                    peakrunner_core::bot_nav::Difficulty::Hard => "Quick, accurate skiers and jetters, and aces.",
+                    peakrunner_core::bot_nav::Difficulty::Normal => "A spread of grunts, riders, skirmishers, anchors and hawks.",
+                    peakrunner_core::bot_nav::Difficulty::Hard => "Quick, accurate skiers, jetters, high-flying hawks and aces.",
                     peakrunner_core::bot_nav::Difficulty::Mixed => "Any personality, from rookie to ace.",
                 };
                 ui.label(RichText::new(about).color(MUTED).size(12.0));
@@ -1260,6 +1268,17 @@ impl PeakRunnerApp {
             scene::MSAA_WANTED.store(antialiasing,std::sync::atomic::Ordering::Relaxed);
             self.net.preferences.set_antialiasing(antialiasing);
         }
+        ui.horizontal(|ui| {
+            use crate::preferences::Bloom;
+            ui.label(RichText::new("Glow (bloom)").size(12.0).color(MUTED));
+            let current=self.net.preferences.saved.bloom;
+            for (value,label) in [(Bloom::Off,"Off"),(Bloom::Low,"Low"),(Bloom::High,"High")] {
+                if ui.selectable_label(current==value,label).clicked() && current!=value {
+                    scene::BLOOM_LEVEL.store(value.level(),std::sync::atomic::Ordering::Relaxed);
+                    self.net.preferences.set_bloom(value);
+                }
+            }
+        });
         if let Some(warning)=&self.net.preferences.warning {
             ui.label(RichText::new(warning).size(11.0).color(EMBER));
         } else if let Some(path)=&self.net.preferences.path {
@@ -1417,6 +1436,7 @@ impl NetUi {
         net.directory=net.preferences.saved.directory.clone();
         net.direct=net.preferences.saved.direct.clone();
         scene::MSAA_WANTED.store(net.preferences.saved.antialiasing,std::sync::atomic::Ordering::Relaxed);
+        scene::BLOOM_LEVEL.store(net.preferences.saved.bloom.level(),std::sync::atomic::Ordering::Relaxed);
         net
     }
 

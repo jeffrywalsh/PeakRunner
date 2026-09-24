@@ -54,6 +54,10 @@ pub struct Manifest {
     /// Optional Capture & Hold points; see `crate::control`.
     #[serde(default)]
     pub control_points: Vec<crate::control::Definition>,
+    /// Optional water bodies that slow movement; see `crate::water`. The
+    /// legacy `water` plane above stays render-only.
+    #[serde(default)]
+    pub water_volumes: Vec<crate::water::Volume>,
 }
 
 pub struct MapPack {
@@ -317,6 +321,7 @@ impl MapPack {
         }
         crate::equipment::validate(&manifest.entities)?;
         crate::control::validate(&manifest.control_points)?;
+        crate::water::validate(&manifest.water_volumes)?;
         Ok(Self {embedded:builtin_asset,manifest,root:root.into(),fingerprint:format!("{:x}",Sha256::digest(&json)),triangles,buckets,holes,heights})
     }
 

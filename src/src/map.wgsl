@@ -11,6 +11,7 @@ struct U {
     horizon: vec4<f32>,     // rgb, sun angular radius (radians)
     cloud: vec4<f32>,       // rgb, cloud scale
     hfog: vec4<f32>,        // density, base height, falloff, shade-map scale (1/tile metres)
+    glow: vec4<f32>,        // bloom: emissive texture layer (-1 none), strength, sun-disc glow
 }
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var images: texture_2d_array<f32>;
@@ -121,7 +122,14 @@ fn layer_mix(uv:vec2<f32>,w:vec4<f32>,l:vec4<i32>)->vec4<f32> {
         fog=max(fog,clamp(1.0-exp(-optical),0.0,1.0));
     }
     rgb=mix(rgb,u.fog.rgb,fog);
-    return vec4<f32>(rgb,select(1.0,0.6,v.layer.y == -3.0));
+    if (v.layer.y == -3.0) {return vec4<f32>(rgb,0.6);}
+    // Bloom mask (glow = 1 - alpha): only the emissive material layer glows,
+    // and only its bright texels, so lamp housings and white walls stay put.
+    var glow=0.0;
+    if (u.glow.x>=0.0 && abs(v.layer.x-u.glow.x)<0.5) {
+        glow=u.glow.y*smoothstep(0.45,0.9,dot(color.rgb,vec3<f32>(0.299,0.587,0.114)))*(1.0-fog);
+    }
+    return vec4<f32>(rgb,1.0-glow);
 }
 struct SkyOut { @builtin(position) pos:vec4<f32>, @location(0) ndc:vec2<f32> }
 @vertex fn vs_map_sky(@builtin(vertex_index) i:u32)->SkyOut {
@@ -175,5 +183,7 @@ fn cubemap_sky(d:vec3<f32>)->vec3<f32> {
     let warm=u.sun_color.rgb*vec3<f32>(1.0,0.9,0.72);
     let lit=mix(c,warm*1.05,disc*0.92)+warm*(corona+glow)*step(-0.02,d.y);
     c=mix(c,lit,u.amb_ground.w);
-    return vec4<f32>(mix(u.fog.rgb,tone(c),smoothstep(-0.02,0.12,d.y)),1);
+    let above=smoothstep(-0.02,0.12,d.y);
+    let sun_glow=clamp(disc*0.95+corona*1.5,0.0,1.0)*u.amb_ground.w*above*u.glow.z;
+    return vec4<f32>(mix(u.fog.rgb,tone(c),above),1.0-sun_glow);
 }

@@ -138,6 +138,11 @@ compatibility change, and no gameplay change.
   high to low: flag, capture and match cues; generator blast, hit marker, pain, kit,
   shield down; own weapons; explosions and plasma; bullets and impacts; footsteps and bounces.
   Playing a sound and rendering never allocate after startup.
+- **Water.** Entering a water volume at speed plays `Splash` (a deep, short plop
+  with spray and bubbles, under 0.5 s; louder with speed; positional for other
+  players within 60 m). Footsteps more than 12% submerged become `Wade` (a low
+  slosh, no clink). The eye under the surface tints the view with the volume's
+  colour. Replace them with `splash.wav` / `wade.wav` like any other cue.
 - **Spatial.** Smooth squared falloff to each cue's range (footsteps 38 m, shots
   140–150 m, near explosions 180 m, far explosions 520 m, generator blast 420 m).
   Equal-power stereo pan from the camera. A one-pole low-pass makes distant sounds

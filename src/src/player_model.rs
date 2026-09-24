@@ -35,6 +35,10 @@ pub struct PoseInput {
     pub seed: f32,
     /// Seconds since death, if dead.
     pub dead_for: Option<f32>,
+    /// Landing squash, 0 to 1 (see `Motion::squash`).
+    pub squash: f32,
+    /// Weapon lowered for a switch, 0 to 1 (see `Motion::lower`).
+    pub lower: f32,
 }
 
 impl PoseInput {
@@ -43,7 +47,102 @@ impl PoseInput {
         let dead_for = if p.alive { None } else { Some((RESPAWN_DELAY - p.respawn).max(0.0)) };
         PoseInput { vel: p.vel, yaw: p.yaw, pitch: p.pitch, on_ground: p.on_ground,
             skiing: p.skiing, jetting: p.jetting, weapon: p.weapon, shot_age, time,
-            seed: p.net_id as f32 * 0.7, dead_for }
+            seed: p.net_id as f32 * 0.7, dead_for, squash: 0.0, lower: 0.0 }
+    }
+}
+
+/// Short-lived animation cues derived from how a player's snapshot state
+/// changes frame to frame: a hard landing and a weapon switch. Nothing here
+/// is sent over the network; every client derives it the same way.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Motion {
+    /// Seconds since the last hard landing, and how hard it was (0 to 1).
+    pub land_age: f32,
+    pub land_strength: f32,
+    /// Seconds since the last weapon switch, and the weapon switched from.
+    pub switch_age: f32,
+    pub switch_from: u8,
+}
+
+impl Default for Motion {
+    fn default() -> Self { Motion { land_age: 9.0, land_strength: 0.0, switch_age: 9.0, switch_from: 0 } }
+}
+
+/// A landing's squash and recovery, and a weapon switch's lower and raise.
+const SQUASH_TIME: f32 = 0.38;
+const SWITCH_TIME: f32 = 0.32;
+/// Falls slower than this don't squash; airborne blips shorter than
+/// `MIN_AIR` (snapshot jitter over bumps) aren't landings.
+const SQUASH_FALL: f32 = 8.0;
+const MIN_AIR: f32 = 0.15;
+
+impl Motion {
+    /// Squash amount: a quick dip over the first 0.08 s, then a smooth recovery.
+    pub fn squash(&self) -> f32 {
+        let t = self.land_age;
+        if t >= SQUASH_TIME { return 0.0; }
+        let dip = (t / 0.08).min(1.0);
+        let rise = ((t - 0.08).max(0.0) / (SQUASH_TIME - 0.08)).min(1.0);
+        let ease = |k: f32| k * k * (3.0 - 2.0 * k);
+        self.land_strength * ease(dip) * (1.0 - ease(rise))
+    }
+    /// Weapon lowered: down and back up over `SWITCH_TIME`.
+    pub fn lower(&self) -> f32 {
+        if self.switch_age >= SWITCH_TIME { 0.0 } else { (self.switch_age / SWITCH_TIME * PI).sin() }
+    }
+    /// The weapon shown: the old one while lowering, the new one on the way up.
+    pub fn shown_weapon(&self, current: u8) -> u8 {
+        if self.switch_age < SWITCH_TIME * 0.5 { self.switch_from } else { current }
+    }
+}
+
+struct Track { id: u32, alive: bool, grounded: bool, air: f32, fall: f32, weapon: u8, motion: Motion }
+
+/// Per-player animation memory for the client, keyed by `net_id`.
+#[derive(Default)]
+pub struct AnimTracker { tracks: Vec<Track> }
+
+impl AnimTracker {
+    /// Observe this frame's players and age the cues by `dt`.
+    pub fn update(&mut self, players: &[Player], dt: f32) {
+        self.tracks.retain(|t| players.iter().any(|p| p.net_id == t.id));
+        for p in players {
+            let Some(t) = self.tracks.iter_mut().find(|t| t.id == p.net_id) else {
+                // First sight: nothing to animate yet.
+                self.tracks.push(Track { id: p.net_id, alive: p.alive, grounded: p.on_ground, air: 0.0,
+                    fall: 0.0, weapon: p.weapon, motion: Motion::default() });
+                continue;
+            };
+            t.motion.land_age += dt;
+            t.motion.switch_age += dt;
+            if p.alive != t.alive {
+                // Death or respawn: reset without a cue.
+                *t = Track { id: p.net_id, alive: p.alive, grounded: p.on_ground, air: 0.0, fall: 0.0,
+                    weapon: p.weapon, motion: Motion::default() };
+                continue;
+            }
+            if !p.on_ground {
+                t.air += dt;
+                t.fall = t.fall.max(-p.vel.y);
+            } else if !t.grounded {
+                if t.air >= MIN_AIR && t.fall > SQUASH_FALL {
+                    t.motion.land_age = 0.0;
+                    t.motion.land_strength = ((t.fall - SQUASH_FALL) / 22.0).clamp(0.25, 1.0);
+                }
+                t.air = 0.0;
+                t.fall = 0.0;
+            }
+            t.grounded = p.on_ground;
+            if p.alive && p.weapon != t.weapon {
+                t.motion.switch_from = t.weapon;
+                t.motion.switch_age = 0.0;
+                t.weapon = p.weapon;
+            }
+        }
+    }
+
+    pub fn motion(&self, id: u32) -> Motion {
+        self.tracks.iter().find(|t| t.id == id).map_or_else(Motion::default, |t| t.motion)
     }
 }
 
@@ -76,7 +175,8 @@ pub fn pose(i: &PoseInput) -> Pose {
     let phase = i.time * CADENCE + i.seed;
     let breathe = (i.time * 1.7 + i.seed).sin();
 
-    // Body posture per state.
+    // Body posture per state; a landing squash sinks the hips and bends forward.
+    let squash = if i.dead_for.is_some() { 0.0 } else { i.squash };
     let (crouch, lean, roll) = if i.skiing {
         // Deep ski tuck, leaning into the turn from sideways velocity.
         (0.24, 0.32, (-local_vel.x / 25.0).clamp(-1.0, 1.0) * 0.32)
@@ -99,6 +199,8 @@ pub fn pose(i: &PoseInput) -> Pose {
         None => Mat4::from_rotation_z(roll),
     };
 
+    let crouch = crouch + 0.2 * squash;
+    let lean = lean + 0.14 * squash;
     let pelvis = Vec3::new(0.0, 0.95 - crouch, 0.0);
     let chest = Mat4::from_translation(pelvis) * rot_x(-lean)
         * Mat4::from_scale(Vec3::new(1.0, 1.0 + 0.008 * breathe, 1.0));
@@ -128,6 +230,8 @@ pub fn pose(i: &PoseInput) -> Pose {
             let lift = (phase + if side < 0.0 { FRAC_PI_2 } else { -FRAC_PI_2 }).sin().max(0.0);
             (swing * 0.55 * amp, 0.12 + lift * 1.0 * amp, 0.03)
         };
+        // Squash: thighs forward, knees folded, so the feet stay under the hips.
+        let (hip_a, knee_a) = (hip_a + 0.42 * squash, knee_a + 0.84 * squash);
         let hip = pelvis + Vec3::new(side * 0.17, -0.05, 0.0);
         let thigh_dir = (rot_x(hip_a) * Mat4::from_rotation_z(side * splay)).transform_vector3(Vec3::NEG_Y);
         let knee = hip + thigh_dir * 0.44;
@@ -143,8 +247,10 @@ pub fn pose(i: &PoseInput) -> Pose {
     ];
     let (back, rise, _) = crate::drawlist::recoil(i.weapon, i.shot_age, i.time);
     let run_bob = amp * 0.03 * (phase * 2.0).sin();
-    let aim = Mat4::from_translation(chest.transform_point3(Vec3::new(0.14, 0.30 + run_bob, 0.0)))
-        * rot_x(look * 0.9 + rise * 2.0)
+    // A weapon switch dips the gun down and in, then brings the new one up.
+    let lower = if i.dead_for.is_some() { 0.0 } else { i.lower };
+    let aim = Mat4::from_translation(chest.transform_point3(Vec3::new(0.14, 0.30 + run_bob - 0.12 * lower, 0.08 * lower)))
+        * rot_x(look * 0.9 + rise * 2.0 - 1.0 * lower)
         * Mat4::from_translation(Vec3::new(0.0, 0.0, -0.36 + back * 2.5));
     // Hands: right on the grip, left on the fore-grip.
     let hands = [aim.transform_point3(Vec3::new(-0.06, -0.02, -0.34)),
@@ -172,8 +278,9 @@ fn flag_color(flag: Team) -> Vec3 {
 
 /// Parts for one player. `detailed` is the near LOD; far players keep the
 /// animated silhouette with fewer parts.
-pub fn push_player(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, p: &Player, time: f32, detailed: bool) {
-    let input = PoseInput::from_player(p, time);
+pub fn push_player(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, p: &Player, time: f32, detailed: bool, motion: Motion) {
+    let input = PoseInput { squash: motion.squash(), lower: motion.lower(), ..PoseInput::from_player(p, time) };
+    let shown = motion.shown_weapon(p.weapon);
     if matches!(input.dead_for, Some(t) if t > CORPSE_TIME) { return; }
     let pose = pose(&input);
     let root = Mat4::from_translation(p.pos) * Mat4::from_rotation_y(p.yaw) * pose.body;
@@ -243,7 +350,7 @@ pub fn push_player(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, p: &Player,
         }
     }
     if !detailed {
-        push_held_weapon(lit, root * pose.aim, p.weapon, team, &input, false);
+        push_held_weapon(lit, root * pose.aim, shown, team, &input, false);
         return;
     }
 
@@ -269,7 +376,7 @@ pub fn push_player(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, p: &Player,
     part(c * at(Vec3::new(0.0, 0.36, -0.19), Vec3::new(0.07, 0.10, 0.02)), MeshId::Cube, light, visor * 0.7);
     part(c * at(Vec3::new(0.0, 0.58, 0.0), Vec3::new(0.30, 0.08, 0.30)), MeshId::Bevel, trim, 0.0);
 
-    push_held_weapon(lit, root * pose.aim, p.weapon, team, &input, true);
+    push_held_weapon(lit, root * pose.aim, shown, team, &input, true);
 
     // Jet flame from both nozzles.
     if p.jetting && !dead {
@@ -372,7 +479,7 @@ fn push_held_weapon(lit: &mut Vec<LitDraw>, grip: Mat4, weapon: u8, team: Vec3, 
 #[cfg(test)]
 pub fn part_count(p: &Player, time: f32, detailed: bool) -> (usize, usize) {
     let (mut lit, mut emit) = (Vec::new(), Vec::new());
-    push_player(&mut lit, &mut emit, p, time, detailed);
+    push_player(&mut lit, &mut emit, p, time, detailed, Motion::default());
     (lit.len(), emit.len())
 }
 
@@ -392,7 +499,7 @@ mod tests {
 
     fn input(time: f32) -> PoseInput {
         PoseInput { vel: Vec3::new(0.0, 0.0, -8.0), yaw: 0.3, pitch: 0.1, on_ground: true, skiing: false,
-            jetting: false, weapon: 0, shot_age: 9.0, time, seed: 1.4, dead_for: None }
+            jetting: false, weapon: 0, shot_age: 9.0, time, seed: 1.4, dead_for: None, squash: 0.0, lower: 0.0 }
     }
 
     #[test]
@@ -484,6 +591,94 @@ mod tests {
         let lying = pose(&PoseInput { dead_for: Some(1.0), ..input(0.0) });
         let head_y = lying.body.transform_point3(lying.head.transform_point3(Vec3::ZERO)).y;
         assert!(head_y < 0.8, "a settled corpse lies down, head at {head_y}");
+    }
+
+    const DT: f32 = 1.0 / 60.0;
+
+    /// Feed the tracker `frames` of one player's state; count landing cues.
+    fn feed(t: &mut AnimTracker, p: &mut Player, frames: usize, on_ground: bool, vy: f32) -> usize {
+        let mut landings = 0;
+        for _ in 0..frames {
+            p.on_ground = on_ground;
+            p.vel.y = vy;
+            t.update(std::slice::from_ref(p), DT);
+            if t.motion(p.net_id).land_age == 0.0 { landings += 1; }
+        }
+        landings
+    }
+
+    #[test]
+    fn a_hard_landing_squashes_once_and_jitter_does_not() {
+        let mut t = AnimTracker::default();
+        let mut p = runner();
+        feed(&mut t, &mut p, 10, true, 0.0);
+        // A one-frame airborne blip over a bump (snapshot jitter): no squash.
+        assert_eq!(feed(&mut t, &mut p, 1, false, -2.0) + feed(&mut t, &mut p, 5, true, 0.0), 0);
+        // A slow step down: no squash either.
+        assert_eq!(feed(&mut t, &mut p, 30, false, -5.0) + feed(&mut t, &mut p, 5, true, 0.0), 0);
+        // A real fall: exactly one squash, scaled by impact speed.
+        assert_eq!(feed(&mut t, &mut p, 60, false, -24.0) + feed(&mut t, &mut p, 60, true, 0.0), 1);
+        let mut t2 = AnimTracker::default();
+        let mut q = runner();
+        feed(&mut t2, &mut q, 5, true, 0.0);
+        feed(&mut t2, &mut q, 60, false, -12.0);
+        feed(&mut t2, &mut q, 1, true, 0.0);
+        let soft = t2.motion(q.net_id).land_strength;
+        feed(&mut t, &mut p, 60, false, -30.0);
+        feed(&mut t, &mut p, 1, true, 0.0);
+        assert!(t.motion(p.net_id).land_strength > soft, "harder landings squash more");
+    }
+
+    #[test]
+    fn squash_and_switch_curves_are_continuous_and_settle() {
+        let m = |land_age: f32, switch_age: f32| Motion { land_age, land_strength: 1.0, switch_age, switch_from: 1 };
+        let mut prev = (m(0.0, 0.0).squash(), m(0.0, 0.0).lower());
+        let mut peak = 0.0f32;
+        // Sampled finely: no step between neighbouring instants (the dip is
+        // quick, 0.08 s, but smooth).
+        for k in 1..=480 {
+            let a = k as f32 / 480.0;
+            let now = (m(a, a).squash(), m(a, a).lower());
+            assert!((now.0 - prev.0).abs() < 0.05 && (now.1 - prev.1).abs() < 0.05, "jump at {a}: {prev:?} -> {now:?}");
+            peak = peak.max(now.0);
+            prev = now;
+        }
+        assert!(peak > 0.9, "a full-strength landing reaches a full squash");
+        assert_eq!(m(1.0, 1.0).squash(), 0.0);
+        assert_eq!(m(1.0, 1.0).lower(), 0.0);
+        // The posed hips sink during the squash.
+        let flat = pose(&input(0.0)).pelvis.y;
+        let sunk = pose(&PoseInput { squash: 1.0, ..input(0.0) }).pelvis.y;
+        assert!(sunk < flat - 0.15);
+    }
+
+    #[test]
+    fn a_weapon_switch_plays_once_and_swaps_the_model_midway() {
+        let mut t = AnimTracker::default();
+        let mut p = runner();
+        p.weapon = 0;
+        t.update(std::slice::from_ref(&p), DT);
+        // First sight never plays a switch.
+        assert!(t.motion(p.net_id).switch_age > SWITCH_TIME);
+        p.weapon = 1;
+        let mut starts = 0;
+        let mut shown = Vec::new();
+        for _ in 0..40 {
+            t.update(std::slice::from_ref(&p), DT);
+            let m = t.motion(p.net_id);
+            if m.switch_age == 0.0 { starts += 1; }
+            shown.push(m.shown_weapon(p.weapon));
+        }
+        assert_eq!(starts, 1, "one switch, one animation");
+        assert_eq!(shown.first(), Some(&0), "the old weapon goes down first");
+        assert_eq!(shown.last(), Some(&1), "the new weapon comes up");
+        // Respawning with a different weapon is a reset, not a switch.
+        p.alive = false;
+        t.update(std::slice::from_ref(&p), DT);
+        p.alive = true;
+        p.weapon = 2;
+        t.update(std::slice::from_ref(&p), DT);
+        assert!(t.motion(p.net_id).switch_age > SWITCH_TIME);
     }
 }
 

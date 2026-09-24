@@ -61,6 +61,28 @@ front and drawn after the lit pass and before the additive pass, so flames
 glow through smoke. The map shader math is unchanged. It works on WASM:
 WebGL2 supports the blend state.
 
+## Bloom (`src/bloom.wgsl`, `Bloom` in `src/scene.rs`)
+
+Glow is marked, not guessed from brightness: the resolved scene colour's alpha
+channel carries a glow mask (glow = 1 − alpha; everything else writes 1).
+
+- Lit draws glow in proportion to their `emit` above 0.2 (visors, thruster and
+  emitter housings); faint emit such as snow motes does not.
+- Additive effects (flames, flashes, plasma, sparks, fireballs) add their
+  strength to the mask through a reverse-subtract alpha blend.
+- Smoke's normal alpha blend dims the glow behind it.
+- Map geometry glows only on the kit's `light` material (texture layer 10 in
+  every pack: light strips, lamps, capture-tower and beacon glow), and only on
+  its bright texels, so white walls and snow never bloom.
+- Both skies mark the sun disc and corona.
+
+After the scene resolves (so 4× MSAA works unchanged), a prefilter keeps the
+masked light at half size, a dual-Kawase chain blurs it down to 1/16 (Low) or
+1/32 (High) and back up additively, and the blit screen-blends it over the
+scene. egui draws the HUD after the blit, so the HUD never glows. Low uses
+intensity 0.7 and four levels; High 1.1 and five. Everything is Rgba8Unorm, so
+WebGL2 supports it. The capture-point ring is an egui overlay and stays crisp.
+
 ## Caps
 
 | Budget | Limit |
@@ -97,5 +119,14 @@ WebGL2 supports the blend state.
 
 ## Not in this slice
 
-- Bloom, instanced particles and textured decals.
+- Instanced particles and textured decals (bloom has since been added; see above).
 - The fired grenade chamber is the only chamber visible from the default view.
+
+## Third-person landing and weapon-switch cues
+
+`src/src/player_model.rs` derives two short cues per player from how its snapshot state changes frame to frame. Nothing new is sent over the network, and every client derives them the same way.
+
+- **Landing squash.** A player lands after at least 0.15 s airborne, falling faster than 8 m/s: the hips sink and the knees fold for 0.38 s, scaled by impact speed. Shorter airborne blips, such as snapshot jitter over bumps, don't count.
+- **Weapon switch.** When a player's weapon changes, the held gun dips down and in over 0.32 s. The old model shows on the way down and the new one on the way up. Respawning never counts as a switch.
+
+For captures, `QA_PLAYERS` takes a fourth field, one of `dive`, `land@T` or `switch@T` (see `src/src/qa_overrides.rs`).

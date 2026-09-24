@@ -82,6 +82,18 @@ impl MapGpu {
             let vertex=[p[0]+1024.0+x*s[0],p[2],p[1]+1024.0+z*s[1],0.,1.,0.,x*s[0]/32.0,z*s[1]/32.0,0.,0.,pack.manifest.water_layer as f32,-3.];
             bytes.extend_from_slice(bytemuck::cast_slice(&vertex));
         }
+        // Declared water volumes (and QA-staged ones): a flat surface fanned
+        // from the first outline point, with the same translucent water pass.
+        let staged=peakrunner_core::water::qa_staged();
+        for volume in pack.manifest.water_volumes.iter().chain(&staged) {
+            let outline=volume.outline();
+            for k in 1..outline.len().saturating_sub(1) {
+                for q in [outline[0],outline[k],outline[k+1]] {
+                    let vertex=[q[0],volume.surface,q[1],0.,1.,0.,q[0]/32.0,q[1]/32.0,0.,0.,pack.manifest.water_layer as f32,-3.];
+                    bytes.extend_from_slice(bytemuck::cast_slice(&vertex));
+                }
+            }
+        }
         let count=(bytes.len()/48) as u32;
         let vertices=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("source map triangles"),contents:&bytes,usage:wgpu::BufferUsages::VERTEX});
         Some(Self {map,pipeline,sky,water,group,uniform,vertices,count,water_start,images,weights,shade,shade_size,uploaded:false})
@@ -145,8 +157,12 @@ fn qa_look()->Option<&'static peakrunner_core::look::Look> {
     }).as_ref()
 }
 
-/// `map.wgsl`'s `U`: the original 224 bytes plus seven look vectors.
-const UNIFORM_FLOATS:usize=84;
+/// `map.wgsl`'s `U`: the original 224 bytes, seven look vectors and `glow`.
+const UNIFORM_FLOATS:usize=88;
+/// Texture layer of the kit's `light` material (index 10 of `MATERIALS` in
+/// `scripts/build-original-map.py`). Every shipped pack is built through that
+/// kit, so light strips, lamps, beacon and capture-tower glow share it.
+const KIT_LIGHT_LAYER:f32=10.0;
 const UNIFORM_BYTES:u64=(UNIFORM_FLOATS*4) as u64;
 
 fn uniform_data(pack:&map_pack::MapPack,frame:&DrawFrame)->Vec<f32> {
@@ -172,6 +188,9 @@ fn uniform_data(pack:&map_pack::MapPack,frame:&DrawFrame)->Vec<f32> {
     let [r,g,b]=p.cloud_color;data.extend([r,g,b,p.cloud_scale]);
     // hfog.w: world metres to shade-map texture coordinates over the tile.
     let [d,base,fall]=look.height_fog;data.extend([d,base,fall,1.0/(256.0*pack.manifest.terrain_step)]);
+    // Bloom mask inputs: emissive layer, its strength, and sun-disc glow.
+    let light=if pack.manifest.texture_count as f32>KIT_LIGHT_LAYER {KIT_LIGHT_LAYER} else {-1.0};
+    data.extend([light,1.0,1.0,0.0]);
     debug_assert_eq!(data.len(),UNIFORM_FLOATS);
     data
 }
@@ -204,6 +223,24 @@ mod tests {
         assert_eq!(empty.sun_direction,peakrunner_core::look::DEFAULT_SUN);
         assert_eq!(empty.exposure,1.0);assert!(empty.sky.is_none());
         let wgsl=include_str!("map.wgsl");
-        assert!(wgsl.contains("hfog: vec4<f32>,"),"map.wgsl uniform must end with the look block");
+        assert!(wgsl.contains("hfog: vec4<f32>,"),"map.wgsl uniform must keep the look block");
+        assert!(wgsl.contains("glow: vec4<f32>,"),"map.wgsl uniform must end with the glow block");
+    }
+
+    #[test]
+    fn every_pack_marks_the_kit_light_layer_as_emissive() {
+        use peakrunner_core::terrain::MapId;
+        let frame=crate::drawlist::build_frame(&crate::sim::World::new(),1.6,0.016);
+        for id in [MapId::Raindance,MapId::BroadsideClone,MapId::StonehengeClone,MapId::SnowblindClone,MapId::DesertOfDeathClone] {
+            let pack=super::map_pack::on(id).unwrap();
+            let data=super::uniform_data(pack,&frame);
+            assert_eq!(&data[84..87],&[super::KIT_LIGHT_LAYER,1.0,1.0],"{id:?}");
+            // Layer 10 must be a material, not a sky face or lightmap page.
+            assert!(!pack.manifest.sky_layers.contains(&10),"{id:?}");
+            assert!(!pack.manifest.terrain_layers.contains(&10),"{id:?}");
+        }
+        // The one pack that records its material names confirms the index.
+        let raw:serde_json::Value=serde_json::from_str(include_str!("../assets/maps/raindance/map.json")).unwrap();
+        assert_eq!(raw["materials"][super::KIT_LIGHT_LAYER as usize],"light");
     }
 }

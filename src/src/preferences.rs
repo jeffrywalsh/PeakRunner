@@ -21,9 +21,37 @@ pub(crate) struct Preferences {
     /// Offline bot difficulty. An unknown value reads as the default.
     #[serde(deserialize_with = "lenient_difficulty")]
     pub bot_difficulty: Difficulty,
+    /// Glow around lights, flames and the sun. An unknown value reads as the default.
+    #[serde(deserialize_with = "lenient_bloom")]
+    pub bloom: Bloom,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Bloom {
+    Off,
+    #[default]
+    Low,
+    High,
+}
+
+impl Bloom {
+    /// `scene::BLOOM_LEVEL` value.
+    pub fn level(self) -> u8 {
+        match self {
+            Bloom::Off => 0,
+            Bloom::Low => 1,
+            Bloom::High => 2,
+        }
+    }
 }
 
 fn lenient_difficulty<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Difficulty, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
+fn lenient_bloom<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Bloom, D::Error> {
     let value = serde_json::Value::deserialize(d)?;
     Ok(serde_json::from_value(value).unwrap_or_default())
 }
@@ -37,6 +65,7 @@ impl Default for Preferences {
             direct: "quic://play.peakrunner.net:7777".into(),
             antialiasing: true,
             bot_difficulty: Difficulty::default(),
+            bloom: Bloom::default(),
         }
     }
 }
@@ -63,6 +92,7 @@ impl Preferences {
             direct: address(direct).unwrap_or_else(|| self.direct.clone()),
             antialiasing: self.antialiasing,
             bot_difficulty: self.bot_difficulty,
+            bloom: self.bloom,
         }
     }
 }
@@ -158,6 +188,11 @@ impl Store {
         self.commit(next);
     }
 
+    pub fn set_bloom(&mut self, bloom: Bloom) {
+        let next = Preferences { bloom, ..self.saved.clone() };
+        self.commit(next);
+    }
+
     fn commit(&mut self, next: Preferences) {
         if next == self.saved {
             return;
@@ -193,6 +228,7 @@ fn read(path: &Path) -> io::Result<Preferences> {
     let mut prefs = Preferences::default().edited(&raw.name, &raw.directory, &raw.direct);
     prefs.antialiasing = raw.antialiasing;
     prefs.bot_difficulty = raw.bot_difficulty;
+    prefs.bloom = raw.bloom;
     Ok(prefs)
 }
 
@@ -285,8 +321,8 @@ mod tests {
         );
         assert_eq!(Store::load(path.clone()).saved.name, "Pilot 3");
         let value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        // schema, name, directory, direct, antialiasing, bot_difficulty: nothing else.
-        assert_eq!(value.as_object().unwrap().len(), 6);
+        // schema, name, directory, direct, antialiasing, bot_difficulty, bloom: nothing else.
+        assert_eq!(value.as_object().unwrap().len(), 7);
         assert!(value.get("password").is_none());
         #[cfg(unix)]
         {
@@ -313,6 +349,26 @@ mod tests {
         let loaded = Store::load(path.clone()).saved;
         assert_eq!(loaded.name, "Pilot 9");
         assert!(!loaded.antialiasing, "editing the name must not reset anti-aliasing");
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn bloom_defaults_low_persists_and_tolerates_unknown_values() {
+        let dir = temp();
+        let path = dir.join("client.json");
+        fs::create_dir_all(&dir).unwrap();
+        // A file written before the setting existed gets the default.
+        fs::write(&path, br#"{"schema":1,"name":"Pilot","directory":"https://example.net/s","direct":"quic://example.net:7777"}"#).unwrap();
+        let mut s = Store::load(path.clone());
+        assert_eq!(s.saved.bloom, Bloom::Low);
+        s.set_bloom(Bloom::High);
+        assert_eq!(Store::load(path.clone()).saved.bloom, Bloom::High);
+        s.save("Pilot 5", &s.saved.directory.clone(), &s.saved.direct.clone());
+        assert_eq!(Store::load(path.clone()).saved.bloom, Bloom::High, "a name edit keeps bloom");
+        let raw = fs::read_to_string(&path).unwrap();
+        assert!(raw.contains(r#""bloom": "high""#) || raw.contains(r#""bloom":"high""#));
+        fs::write(&path, raw.replace("high", "blinding")).unwrap();
+        assert_eq!(Store::load(path.clone()).saved.bloom, Bloom::Low);
+        assert_eq!([Bloom::Off.level(), Bloom::Low.level(), Bloom::High.level()], [0, 1, 2]);
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

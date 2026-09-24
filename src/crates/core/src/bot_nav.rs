@@ -637,9 +637,9 @@ pub struct BotProfile {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MoveStyle { Ground, Skier, Jetter }
+pub enum MoveStyle { Ground, Skier, Jetter, Flyer }
 
-pub const ARCHETYPES: [BotProfile; 6] = [
+pub const ARCHETYPES: [BotProfile; 7] = [
     BotProfile { name: "Rookie", aim_error: 0.11, reaction: 0.75, lead: 0.3, aggression: 0.3,
         retreat_health: 0.0, uses_kit: false, route: [1.0, 1.2, 2.5, 1.5], style: MoveStyle::Ground },
     BotProfile { name: "Grunt", aim_error: 0.07, reaction: 0.5, lead: 0.6, aggression: 0.5,
@@ -652,6 +652,9 @@ pub const ARCHETYPES: [BotProfile; 6] = [
         retreat_health: 40.0, uses_kit: true, route: [1.0, 1.0, 1.2, 1.0], style: MoveStyle::Ground },
     BotProfile { name: "Ace", aim_error: 0.025, reaction: 0.2, lead: 0.95, aggression: 0.7,
         retreat_health: 35.0, uses_kit: true, route: [1.0, 0.7, 0.9, 0.9], style: MoveStyle::Jetter },
+    // Crosses the map high on managed jet arcs and dives on targets below.
+    BotProfile { name: "Hawk", aim_error: 0.045, reaction: 0.3, lead: 0.85, aggression: 0.7,
+        retreat_health: 25.0, uses_kit: true, route: [1.0, 0.8, 0.9, 0.9], style: MoveStyle::Flyer },
 ];
 
 /// Offline difficulty: which archetypes fill the bot slots.
@@ -664,12 +667,12 @@ impl Difficulty {
         match self { Difficulty::Easy => "Easy", Difficulty::Normal => "Normal", Difficulty::Hard => "Hard", Difficulty::Mixed => "Mixed" }
     }
     /// Archetype weights, indexing `ARCHETYPES`.
-    fn weights(self) -> [f32; 6] {
+    fn weights(self) -> [f32; 7] {
         match self {
-            Difficulty::Easy => [0.55, 0.35, 0.1, 0.0, 0.0, 0.0],
-            Difficulty::Normal => [0.1, 0.35, 0.2, 0.15, 0.2, 0.0],
-            Difficulty::Hard => [0.0, 0.1, 0.2, 0.25, 0.2, 0.25],
-            Difficulty::Mixed => [1.0 / 6.0; 6],
+            Difficulty::Easy => [0.55, 0.35, 0.1, 0.0, 0.0, 0.0, 0.0],
+            Difficulty::Normal => [0.1, 0.3, 0.2, 0.15, 0.15, 0.0, 0.1],
+            Difficulty::Hard => [0.0, 0.1, 0.15, 0.2, 0.15, 0.25, 0.15],
+            Difficulty::Mixed => [1.0 / 7.0; 7],
         }
     }
     /// Deterministic pick from a uniform `roll` in [0, 1).

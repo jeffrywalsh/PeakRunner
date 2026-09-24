@@ -155,6 +155,24 @@ Design checklist (each item has bitten us once):
   `ctf_active` and `drain`). Give every map at least 2 (centre plus one per side,
   mirrored), keep each ring on open, walkable ground with more than one approach,
   and keep spawns outside rings. See `docs/capture-and-hold.md`.
+- **Water:** the legacy `water` plane is render-only. Water that slows players
+  goes in the manifest's `water_volumes` (up to 32): each has `surface` (world
+  y), exactly one footprint (`rect` `[x0, z0, x1, z1]` or `polygon`
+  `[[x, z], ...]`, 3–64 points, convex for correct surface rendering), optional
+  `depth` (volume ends that far below the surface), `flow` `[x, z]` m/s (a
+  current, at most 30), and `color` (linear RGB 0–1, used for the underwater
+  tint). See `crates/core/src/water.rs`. In the shared sim, horizontal drag
+  scales with immersion^1.5 (3/s fully submerged), skiing in water adds up to
+  1.5/s, walking top speed drops by 60% x immersion, buoyancy floats a swimmer
+  with the eye near the surface, and jetting while waist-deep costs 1.5x energy.
+  Chaingun rounds and turret plasma fizzle underwater; discs and grenades are
+  dragged hard (5/s). Measured on a flat patch, a skier entering at 30 m/s keeps
+  29.7 m/s after 1 s dry, 20.8 ankle-deep, 2.7 waist-deep and 1.7 swimming; walking
+  top speed is 11.2 dry and 7.0 waist-deep; jetting out of deep water takes 0.43 s.
+  Keep water off spawns and capture rings, keep ski lanes dry unless the
+  slowdown is the point, and make sure every basin has a shore a wader can walk
+  out of. `QA_WATER=surface,x0,z0,x1,z1[,flow_x,flow_z];...` stages volumes in
+  a local match for previews.
 - **Pads:** optional `landing_pad` with named `deploy_slots` anchors for future
   player-placed turrets and vehicles.
 - **Props and terrain shade:** after the lightmap bake, call
@@ -166,9 +184,28 @@ Design checklist (each item has bitten us once):
     render-only. Big props (boulders, outcrops, standing stones, logs, large
     ice shards) are solid and sunk into the ground. They come in mirrored
     pairs through the flag midpoint, stay at least 28 m off the ski lanes
-    (flag to flag, flag to each control point), and add at most
-    `props.PROP_COLLISION_TRIS` (2500) solid triangles per map, outside the
-    per-base budget.
+    (flag to flag, flag to each control point), and take at most
+    `props.SCENERY_COLLISION_TRIS` (2500) solid triangles. Scenery and cover
+    together stay under `props.PROP_COLLISION_TRIS` (4000) per map, outside
+    the per-base budget.
+  - **Cover** (`place_cover`, the theme's `cover` list): deliberate solid
+    pieces that block movement and shots, such as dry-stone walls, log piles,
+    rock clusters, sandstone ruins, crates, ice ridges and plating debris.
+    They stand 36–62 m to either side of each ski lane and in a ring
+    34–46 m around each control point, mirrored through the flag midpoint.
+    Heights are crouch cover (1.25–1.5 m) or full cover (2.6–3.6 m). Walls
+    are built in 2.5 m segments that follow the ground and reach 0.5 m below
+    it, so nothing hovers or leaves a gap underneath. Rock clusters overlap
+    their rocks, so no wedge can trap a player. Cover keeps
+    `BASE_CLEAR` off each flag (flag routes are unchanged), off lanes, rings,
+    spawns and holes, 30 m apart and 4 m from any other solid prop. Each map
+    gets 16–22 pieces.
+  - **Ground layer** (`ground_layer`): up to `props.GROUND_TRIS` (80,000)
+    render-only triangles of grass clumps (8–12 blades each). Two thirds go
+    into dense meadow patches 4–9 m across, weighted towards ski lanes, flags
+    and control points; the rest is scattered, thinner away from them. Baked
+    grass cannot cover the whole 4 km² densely; that would need GPU-instanced
+    grass.
   - Nothing is placed near existing collision geometry, terrain holes and
     their neighbour cells, flags, spawns, capture rings, water, or the map
     edge. Density thins away from the flags and points.
@@ -183,7 +220,11 @@ Design checklist (each item has bitten us once):
     ambient by G. Bake it with the map's own sun, the same as the lightmaps.
     The payload is optional: packs without it render unshaded. It is compressed
     by `crates/core/build.rs` and copied by the bundle scripts.
-  - Each map suite runs `assets/prop_checks.py` on its committed pack.
+  - Each map suite runs `assets/prop_checks.py` on its committed pack. It
+    checks at least 12 mirrored cover pieces clear of lanes, flags, spawns,
+    rings and holes, that each piece stops a shot at crouch height, that
+    a player standing a metre out from any face can walk three metres away,
+    and that the ground layer spends its triangle budget.
 
 ## 4. Look at it before wiring
 
