@@ -10,12 +10,14 @@ struct U {
     zenith: vec4<f32>,      // rgb, cloud cover
     horizon: vec4<f32>,     // rgb, sun angular radius (radians)
     cloud: vec4<f32>,       // rgb, cloud scale
-    hfog: vec4<f32>,        // density, base height, falloff, unused
+    hfog: vec4<f32>,        // density, base height, falloff, shade-map scale (1/tile metres)
 }
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var images: texture_2d_array<f32>;
 @group(0) @binding(2) var samp: sampler;
 @group(0) @binding(3) var weights: texture_2d<f32>;
+// Baked terrain shade: r = sun visibility, g = ambient occlusion (terrain_shade.py).
+@group(0) @binding(4) var shade: texture_2d<f32>;
 struct In {
     @location(0) pos: vec3<f32>, @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>, @location(3) lmuv: vec2<f32>,
@@ -90,7 +92,15 @@ fn layer_mix(uv:vec2<f32>,w:vec4<f32>,l:vec4<i32>)->vec4<f32> {
     let ndl=max(dot(n,u.sun.xyz),0.0);
     // Hemisphere ambient: the defaults average the old flat 0.55 term.
     let hemi=mix(u.amb_ground.rgb,u.amb_sky.rgb,clamp(n.y*0.5+0.5,0.0,1.0));
-    var light=hemi+u.sun_color.rgb*(0.45*ndl);
+    // Terrain (-2) and props (-1) take the baked terrain shade where they
+    // stand; structures keep their own lightmaps below.
+    var sh=vec2<f32>(1.0);
+    if (v.layer.y>-2.5 && v.layer.y<-0.5) {
+        sh=textureSampleLevel(shade,samp,clamp(v.world.xz*u.hfog.w,vec2<f32>(0.0005),vec2<f32>(0.9995)),0.0).rg;
+    }
+    // A caster also hides part of the sky, so shadowed ground loses up to a
+    // fifth of its ambient as well as the direct sun.
+    var light=hemi*sh.y*mix(0.8,1.0,sh.x)+u.sun_color.rgb*(0.45*ndl*sh.x);
     if (v.layer.y>=0.0) {
         light=max(vec3<f32>(0.22),textureSampleLevel(images,samp,clamp(v.lmuv,vec2<f32>(0.002),vec2<f32>(0.998)),i32(v.layer.y),0.0).rgb);
     }

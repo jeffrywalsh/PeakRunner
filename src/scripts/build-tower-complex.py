@@ -102,6 +102,7 @@ def build(output, bake=True):
         material_source_sha256=pack_writer.source_hash(tower_complex_materials.__file__),
         provenance='PeakRunner original tower-complex geometry, original procedural terrain and original material kit; no extracted assets or external height data',
         definition_sha256=pack_writer.source_hash(ROOT/'maps/tower-complex.json'))
+    pack_writer.add_props_and_shade(kit, files, manifest, 'tower-complex', spec['seed'], [], flags, spawn_points, control_points)
     pack_writer.write_pack(output, files, manifest)
     print(f'Built {spec["name"]}: {len(mesh.collision)//9} solid triangles'
           + (f', {lightmap["pages"]} lightmap pages in {bake_seconds} s' if lightmap else ', unbaked'))

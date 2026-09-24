@@ -92,6 +92,7 @@ macro_rules! embedded_map {
                 "weights.rgba" => packed!("weights.rgba"),
                 "textures.rgba" => packed!("textures.rgba"),
                 "ambient.f32" => packed!("ambient.f32"),
+                "shade.rg" => packed!("shade.rg"),
                 _ => Err(concat!("Unknown ", $label, " asset").into()),
             }
         }
@@ -168,6 +169,10 @@ pub fn on(map: crate::terrain::MapId) -> Option<&'static MapPack> {
         }
     }
 }
+
+/// Side of the optional `shade.rg` terrain shade map, in texels (2 bytes each).
+pub const SHADE_SIZE: u32 = 1024;
+const SHADE_BYTES: usize = (SHADE_SIZE * SHADE_SIZE * 2) as usize;
 
 /// Distance-fog colour used by every map before per-map colours existed.
 pub const DEFAULT_FOG: [f32; 3] = [0.62, 0.62, 0.62];
@@ -280,6 +285,15 @@ impl MapPack {
                     || bytes.chunks_exact(4).any(|b| {let v=f32::from_le_bytes(b.try_into().unwrap());!v.is_finite() || v.abs()>1.0}) => return Err("Invalid ambience".into()),
                 _ => (),
             }
+        }
+        // Optional baked terrain shade (scripts/assets/terrain_shade.py): sun
+        // visibility and ambient occlusion over the tile, two bytes per texel.
+        if manifest.files.contains_key("shade.rg") {
+            let bytes = read("shade.rg", SHADE_BYTES as u64)?;
+            if manifest.files.get("shade.rg") != Some(&format!("{:x}", Sha256::digest(&bytes))) {
+                return Err("Checksum mismatch: shade.rg".into());
+            }
+            if bytes.len() != SHADE_BYTES { return Err("Invalid terrain shade".into()); }
         }
         if collision.len()%36 != 0 || collision.len()>36*500_000 {return Err("Invalid collision data".into());}
         let mut triangles=Vec::new();
@@ -498,7 +512,7 @@ mod tests {
         let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
         let root = std::env::temp_dir().join(format!("peakrunner-empty-audio-{}-{nonce}",std::process::id()));
         std::fs::create_dir(&root).unwrap();
-        for name in ["map.json","vertices.bin","collision.bin","height.bin","weights.rgba","textures.rgba"] {
+        for name in ["map.json","vertices.bin","collision.bin","height.bin","weights.rgba","textures.rgba","shade.rg"] {
             std::fs::write(root.join(name), builtin_asset(name).unwrap()).unwrap();
         }
         assert!(MapPack::load(&root).is_err(), "missing nonempty audio must fail");

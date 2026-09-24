@@ -292,3 +292,7 @@ tower, 432 for both Col towers, 560 cavern; 8,072 total, 23,354 render,
 16 lightmap pages. Screenshots: `research/screenshots/frostline-pass-*.png`.
 Not playtested: the drain radius and the void's effect on flag defence need a
 human match; bots don't use the void or the points' drain tactics.
+
+## Props and terrain shade
+
+Frostline scatters original props from `scripts/assets/props.py` (theme `frostline`): snow-capped rocks and large ice shards (solid), pine saplings, small ice shards and frost tufts (render-only). The committed pack has 44 snow rock, 284 ice shard, 200 sapling, 1800 tuft. That adds 21,089 render triangles and 1,680 solid ones (prop budget 2,500). Big props come in mirrored pairs, stay at least 80 m from each flag and 28 m off the ski lanes, and sink into the ground. The baked terrain shade map `shade.rg` (`scripts/assets/terrain_shade.py`) shadows the ground under structures, hulls and big props for the map's sun, plus terrain self-shadow and occlusion. About 24.7% of the tile is in shadow. See `docs/map-pipeline.md`.

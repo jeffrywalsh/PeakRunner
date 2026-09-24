@@ -36,7 +36,11 @@ class OriginalMapTests(unittest.TestCase):
         self.assertIn('no extracted assets',self.pack['provenance'])
         self.assertNotIn('sources',self.pack)
         used={o['asset'] for o in self.pack['instances']}|{o['kind'] for o in self.pack['entities']}
-        self.assertEqual(used,set(kit.ASSETS))
+        # Shared original assets live in their own modules, not the kit catalogue.
+        shared={'cnh_tower'}
+        for name in shared&used:
+            self.assertTrue((ROOT/f'scripts/assets/{name}.py').is_file(),name)
+        self.assertEqual(used-shared,set(kit.ASSETS))
         self.assertEqual(len(self.pack['entities']),18)
 
     def test_heightfield_is_generated_not_imported(self):

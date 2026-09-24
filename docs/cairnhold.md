@@ -223,3 +223,7 @@ From `research/playability-survey/proposal.md` and the visual audit
 - **Still open:** the gallery has no ramp from the hall floor (it is reached
   by jetting or from outside); nobody has walked or skied it; bots do not use
   the gallery, skylights or tunnel.
+
+## Props and terrain shade
+
+Cairnhold scatters original props from `scripts/assets/props.py` (theme `cairnhold`): leaning standing stones and boulder scree (solid), heather mounds and grass tufts (render-only). The committed pack has 24 standing stone, 40 boulder, 1300 heather, 2400 tuft. That adds 42,636 render triangles and 1,800 solid ones (prop budget 2,500). Big props come in mirrored pairs, stay at least 80 m from each flag and 28 m off the ski lanes, and sink into the ground. The baked terrain shade map `shade.rg` (`scripts/assets/terrain_shade.py`) shadows the ground under structures, hulls and big props for the map's sun, plus terrain self-shadow and occlusion. About 5.7% of the tile is in shadow. See `docs/map-pipeline.md`.

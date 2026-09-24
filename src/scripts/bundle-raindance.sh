@@ -18,7 +18,7 @@ cp assets/Info.plist "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleName PeakRunner Original' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName PeakRunner Original' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier dev.peakrunner.original-playtest' "$app/Contents/Info.plist"
-for file in map.json vertices.bin collision.bin height.bin weights.rgba textures.rgba ambient.f32; do
+for file in map.json vertices.bin collision.bin height.bin weights.rgba textures.rgba ambient.f32 shade.rg; do
     cp "$pack/$file" "$app/Contents/Resources/map/$file"
 done
 codesign --force --sign - --timestamp=none "$app/Contents/MacOS/peakrunner-bin"

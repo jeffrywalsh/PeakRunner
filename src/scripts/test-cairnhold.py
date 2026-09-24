@@ -659,7 +659,7 @@ class CairnholdTests(unittest.TestCase):
                 build.build(out, bake=False)
                 digests.append({f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in out.iterdir()})
             self.assertEqual(digests[0], digests[1])
-            self.assertEqual(len(digests[0]), 7)
+            self.assertEqual(len(digests[0]), 8)   # map.json, six payloads, shade.rg
 
 class PlayabilityV4(unittest.TestCase):
     """The playability-survey fixes (research/playability-survey): a
@@ -894,6 +894,13 @@ class SpawnForwardClearance(unittest.TestCase):
         from assets import spawn_checks
         pack = Path(__file__).resolve().parent.parent/'assets/maps/cairnhold'
         self.assertEqual(spawn_checks.exposed(pack), [])
+
+
+class PropsAndShade(unittest.TestCase):
+    """Props and the terrain shade map on the committed pack (assets/prop_checks.py)."""
+    def test_props_and_terrain_shade(self):
+        from assets import prop_checks
+        prop_checks.check_pack(self, Path(__file__).resolve().parent.parent/'assets/maps/cairnhold')
 
 
 if __name__ == '__main__':

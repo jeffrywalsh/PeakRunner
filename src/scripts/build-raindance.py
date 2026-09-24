@@ -191,6 +191,8 @@ def build(output, bake=True):
         structures_asset_sha256=pack_writer.source_hash(raindance_structures.__file__),
         material_source_sha256=pack_writer.source_hash(raindance_materials.__file__),
         definition_sha256=pack_writer.source_hash(ROOT/'maps/raindance.json'))
+    pack_writer.add_props_and_shade(kit, files, manifest, 'old-holler', d['seed'], holes, flags, spawn_points, points,
+                                    water=d['environment']['water_height'])
     pack_writer.write_pack(output, files, manifest)
     print(f'Built {d["name"]}: {len(mesh.collision)//9} solid triangles ({base_triangles//2} per base), '
           f'{len(files["vertices.bin"])//144} render triangles, {len(mesh.entities)} equipment objects'

@@ -673,4 +673,11 @@ class SpawnForwardClearance(unittest.TestCase):
         self.assertEqual(spawn_checks.exposed(pack), [])
 
 
+class PropsAndShade(unittest.TestCase):
+    """Props and the terrain shade map on the committed pack (assets/prop_checks.py)."""
+    def test_props_and_terrain_shade(self):
+        from assets import prop_checks
+        prop_checks.check_pack(self, Path(__file__).resolve().parent.parent/'assets/maps/tower-complex')
+
+
 if __name__=='__main__':unittest.main()

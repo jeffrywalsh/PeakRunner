@@ -274,6 +274,8 @@ def build(output, bake=True):
                    'original material kit, sky and synthesized wind; no extracted assets, '
                    'no external height data, no recordings',
         definition_sha256=pack_writer.source_hash(ROOT/'maps/dustreach.json'))
+    pack_writer.add_props_and_shade(kit, files, manifest, 'dustreach', definition['seed'], manifest['holes'], flags, spawn_points,
+                                    control_points)
     pack_writer.write_pack(output, files, manifest)
     print(f'Built {definition["name"]}: {len(mesh.collision)//9} solid triangles '
           f'({base_triangles//2} per citadel, '

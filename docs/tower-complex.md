@@ -329,3 +329,7 @@ hovering edges).
 Collision: 2,442 triangles per base (budget 4,500), 216 per C&H tower, 5,972
 for the whole map. 13 lightmap pages. Captures:
 `research/screenshots/tc-rework-*.png`.
+
+## Props and terrain shade
+
+Tower Complex scatters original props from `scripts/assets/props.py` (theme `tower-complex`): rock outcrops of two or three boulders on the hills (solid), scrub and grass tufts (render-only). The committed pack has 26 outcrop, 700 scrub, 3200 tuft. That adds 33,963 render triangles and 2,304 solid ones (prop budget 2,500). Big props come in mirrored pairs, stay at least 80 m from each flag and 28 m off the ski lanes, and sink into the ground. The baked terrain shade map `shade.rg` (`scripts/assets/terrain_shade.py`) shadows the ground under structures, hulls and big props for the map's sun, plus terrain self-shadow and occlusion. About 1.9% of the tile is in shadow. See `docs/map-pipeline.md`.

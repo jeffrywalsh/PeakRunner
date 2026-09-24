@@ -9,6 +9,7 @@ pub struct MapGpu {
     pipeline:wgpu::RenderPipeline, sky:wgpu::RenderPipeline, water:wgpu::RenderPipeline,
     group:wgpu::BindGroup, uniform:wgpu::Buffer, vertices:wgpu::Buffer,
     count:u32, water_start:u32, images:wgpu::Texture, weights:wgpu::Texture,
+    shade:wgpu::Texture, shade_size:u32,
     uploaded:bool,
 }
 
@@ -23,6 +24,7 @@ impl MapGpu {
                 wgpu::BindGroupLayoutEntry {binding:2,visibility:wgpu::ShaderStages::FRAGMENT,
                     ty:wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),count:None},
                 texture_entry(3,wgpu::TextureViewDimension::D2),
+                texture_entry(4,wgpu::TextureViewDimension::D2),
             ],
         });
         let shader=device.create_shader_module(wgpu::ShaderModuleDescriptor {label:Some("source map"),source:wgpu::ShaderSource::Wgsl(include_str!("map.wgsl").into())});
@@ -45,6 +47,13 @@ impl MapGpu {
         let pipeline=make(false,false);let sky=make(true,false);let water=make(false,true);
         let images=texture(device,pack.manifest.texture_count,9);
         let weights=texture(device,1,1);
+        // Baked terrain shade (sun visibility, ambient occlusion); packs without
+        // one get a 1x1 white texture, which leaves lighting unchanged.
+        let shade_size=if pack.manifest.files.contains_key("shade.rg") {map_pack::SHADE_SIZE} else {1};
+        let shade=device.create_texture(&wgpu::TextureDescriptor {label:Some("terrain shade"),
+            size:wgpu::Extent3d {width:shade_size,height:shade_size,depth_or_array_layers:1},mip_level_count:1,sample_count:1,
+            dimension:wgpu::TextureDimension::D2,format:wgpu::TextureFormat::Rg8Unorm,
+            usage:wgpu::TextureUsages::TEXTURE_BINDING|wgpu::TextureUsages::COPY_DST,view_formats:&[]});
         let sampler=device.create_sampler(&wgpu::SamplerDescriptor {label:Some("map repeat"),
             address_mode_u:wgpu::AddressMode::Repeat,address_mode_v:wgpu::AddressMode::Repeat,
             mag_filter:wgpu::FilterMode::Linear,min_filter:wgpu::FilterMode::Linear,mipmap_filter:wgpu::MipmapFilterMode::Linear,
@@ -55,6 +64,7 @@ impl MapGpu {
             wgpu::BindGroupEntry {binding:1,resource:wgpu::BindingResource::TextureView(&images.create_view(&wgpu::TextureViewDescriptor {dimension:Some(wgpu::TextureViewDimension::D2Array),..Default::default()}))},
             wgpu::BindGroupEntry {binding:2,resource:wgpu::BindingResource::Sampler(&sampler)},
             wgpu::BindGroupEntry {binding:3,resource:wgpu::BindingResource::TextureView(&weights.create_view(&Default::default()))},
+            wgpu::BindGroupEntry {binding:4,resource:wgpu::BindingResource::TextureView(&shade.create_view(&Default::default()))},
         ]});
         let mut bytes=pack.asset("vertices.bin").expect("validated map vertices");
         let (terrain,indices)=terrain::sample_mesh_of(map);
@@ -74,7 +84,7 @@ impl MapGpu {
         }
         let count=(bytes.len()/48) as u32;
         let vertices=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("source map triangles"),contents:&bytes,usage:wgpu::BufferUsages::VERTEX});
-        Some(Self {map,pipeline,sky,water,group,uniform,vertices,count,water_start,images,weights,uploaded:false})
+        Some(Self {map,pipeline,sky,water,group,uniform,vertices,count,water_start,images,weights,shade,shade_size,uploaded:false})
     }
 
     pub fn update(&mut self,queue:&wgpu::Queue,frame:&DrawFrame) {
@@ -92,6 +102,10 @@ impl MapGpu {
                     offset+=length;
                 }
             }
+            let shade=if self.shade_size==1 {vec![255,255]} else {pack.asset("shade.rg").expect("validated shade")};
+            queue.write_texture(self.shade.as_image_copy(),&shade,
+                wgpu::TexelCopyBufferLayout {offset:0,bytes_per_row:Some(self.shade_size*2),rows_per_image:Some(self.shade_size)},
+                wgpu::Extent3d {width:self.shade_size,height:self.shade_size,depth_or_array_layers:1});
             self.uploaded=true;
         }
         let data=uniform_data(pack,frame);
@@ -156,7 +170,8 @@ fn uniform_data(pack:&map_pack::MapPack,frame:&DrawFrame)->Vec<f32> {
     let [r,g,b]=p.zenith;data.extend([r,g,b,p.cloud_cover]);
     let [r,g,b]=p.horizon;data.extend([r,g,b,p.sun_size]);
     let [r,g,b]=p.cloud_color;data.extend([r,g,b,p.cloud_scale]);
-    let [d,base,fall]=look.height_fog;data.extend([d,base,fall,0.0]);
+    // hfog.w: world metres to shade-map texture coordinates over the tile.
+    let [d,base,fall]=look.height_fog;data.extend([d,base,fall,1.0/(256.0*pack.manifest.terrain_step)]);
     debug_assert_eq!(data.len(),UNIFORM_FLOATS);
     data
 }

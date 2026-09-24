@@ -1896,7 +1896,8 @@ mod shader_check {
         use super::*;
         use crate::sim::{Disc, MatchState, Team, World};
         let mut w = World::new();
-        w.set_map(MapId::Raindance);
+        // PROBE_MAP=<map key> times another map; Old Holler by default.
+        w.set_map(std::env::var("PROBE_MAP").ok().and_then(|k| MapId::parse(&k)).unwrap_or(MapId::Raindance));
         w.start_match(true);
         w.state = MatchState::Playing;
         let me = w.player_id;

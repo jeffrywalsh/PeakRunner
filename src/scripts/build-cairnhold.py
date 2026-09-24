@@ -209,6 +209,7 @@ def build(output, bake=True):
         provenance='PeakRunner original Cairnhold geometry, original procedural terrain and original material kit; '
                    'no extracted assets or external height data',
         definition_sha256=pack_writer.source_hash(ROOT/'maps/cairnhold.json'))
+    pack_writer.add_props_and_shade(kit, files, manifest, 'cairnhold', definition['seed'], holes, flags, spawn_points, control_points)
     pack_writer.write_pack(output, files, manifest)
     print(f'Built {definition["name"]}: {len(mesh.collision)//9} solid triangles '
           f'({base_triangles//2} per base, {ring_triangles} Ring, {len(mesh.collision)//9-base_triangles-ring_triangles} '

@@ -4,7 +4,7 @@
 use std::path::Path;
 
 const MAPS: [&str; 5] = ["raindance", "tower-complex", "cairnhold", "frostline", "dustreach"];
-const PAYLOADS: [&str; 6] = ["vertices.bin", "collision.bin", "height.bin", "weights.rgba", "textures.rgba", "ambient.f32"];
+const PAYLOADS: [&str; 7] = ["vertices.bin", "collision.bin", "height.bin", "weights.rgba", "textures.rgba", "ambient.f32", "shade.rg"];
 
 fn main() {
     let out = std::env::var("OUT_DIR").unwrap();

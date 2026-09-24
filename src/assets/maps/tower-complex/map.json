@@ -946,12 +946,220 @@
   "material_source_sha256": "d86aa4cb8e7facef1838d50786a3ae0486303984f7428e3381169d18ee6d4293",
   "provenance": "PeakRunner original tower-complex geometry, original procedural terrain and original material kit; no extracted assets or external height data",
   "definition_sha256": "9831a9ce6caeadeaa210a18e77cfa7c53a74b40a57a11c54a971aa05a207ddaf",
+  "props": {
+    "theme": "tower-complex",
+    "version": 4,
+    "counts": {
+      "outcrop": 26,
+      "scrub": 700,
+      "tuft": 3200
+    },
+    "render_triangles": 33963,
+    "solid_triangles": 2304,
+    "big": [
+      [
+        1291.14,
+        191.13,
+        1530.99,
+        "outcrop",
+        2.51
+      ],
+      [
+        756.86,
+        191.15,
+        517.01,
+        "outcrop",
+        2.51
+      ],
+      [
+        1519.7,
+        190.24,
+        1450.7,
+        "outcrop",
+        2.68
+      ],
+      [
+        528.3,
+        194.5,
+        597.3,
+        "outcrop",
+        2.68
+      ],
+      [
+        175.71,
+        162.61,
+        1482.56,
+        "outcrop",
+        2.7
+      ],
+      [
+        1872.29,
+        188.67,
+        565.44,
+        "outcrop",
+        2.7
+      ],
+      [
+        1676.88,
+        213.37,
+        1036.96,
+        "outcrop",
+        2.8
+      ],
+      [
+        371.12,
+        196.19,
+        1011.04,
+        "outcrop",
+        2.8
+      ],
+      [
+        995.37,
+        202.22,
+        663.51,
+        "outcrop",
+        3.76
+      ],
+      [
+        1052.63,
+        183.28,
+        1384.49,
+        "outcrop",
+        3.76
+      ],
+      [
+        805.25,
+        100.35,
+        1123.72,
+        "outcrop",
+        3.72
+      ],
+      [
+        1242.75,
+        146.08,
+        924.28,
+        "outcrop",
+        3.72
+      ],
+      [
+        496.04,
+        191.4,
+        954.42,
+        "outcrop",
+        4.07
+      ],
+      [
+        1551.96,
+        228.89,
+        1093.58,
+        "outcrop",
+        4.07
+      ],
+      [
+        898.53,
+        153.58,
+        1321.67,
+        "outcrop",
+        4.07
+      ],
+      [
+        1149.47,
+        206.43,
+        726.33,
+        "outcrop",
+        4.07
+      ],
+      [
+        420.55,
+        160.85,
+        247.28,
+        "outcrop",
+        3.96
+      ],
+      [
+        1627.45,
+        198.84,
+        1800.72,
+        "outcrop",
+        3.96
+      ],
+      [
+        147.2,
+        125.65,
+        538.93,
+        "outcrop",
+        2.47
+      ],
+      [
+        1900.8,
+        258.12,
+        1509.07,
+        "outcrop",
+        2.47
+      ],
+      [
+        1666.37,
+        206.81,
+        1886.42,
+        "outcrop",
+        2.87
+      ],
+      [
+        381.63,
+        224.18,
+        161.58,
+        "outcrop",
+        2.87
+      ],
+      [
+        1219.95,
+        136.58,
+        1034.86,
+        "outcrop",
+        3.1
+      ],
+      [
+        828.05,
+        141.32,
+        1013.14,
+        "outcrop",
+        3.1
+      ],
+      [
+        1932.41,
+        282.94,
+        129.82,
+        "outcrop",
+        4.29
+      ],
+      [
+        115.59,
+        249.14,
+        1918.18,
+        "outcrop",
+        4.29
+      ]
+    ],
+    "source_sha256": "eb61e71a42776bab5f8331b47cc5c898cb43461fa63f8fc831157f20d23599b1"
+  },
+  "terrain_shade": {
+    "size": 1024,
+    "texel_m": 2.0,
+    "sun": [
+      -0.57735,
+      0.57735,
+      -0.57735
+    ],
+    "shaded_fraction": 0.0195,
+    "baker_sha256": "648b7389e15de81bcf2fd010617202e83b15002faec60138b858d466a637bc6b"
+  },
   "files": {
     "height.bin": "dffe8552470895571cc27963c64f10867a22ff73b82e5d857e1ad65cb364490a",
-    "vertices.bin": "5248483363946949bb01415ce1d78117da182f56e39ccbc384e83f59c7bfcb2f",
-    "collision.bin": "7ae27de2f783195c511b33124a394fb1bfb9b7fac98155971d0287c7e3f0a839",
+    "vertices.bin": "1fae5c821bf9c9920b5796bca258b16a4988488bc4fcb4629e3de70673210b1e",
+    "collision.bin": "2f0523953cf66b1803b511ead3306bd38d8f7ef28cef2783ed6cc2ef02848625",
     "weights.rgba": "d15cfda626a394adf0b7781e6c9840dd0ecde36b184017c57ba177640af28fd7",
     "textures.rgba": "88ae9701722e898a945ae315ddeaea40d1819e723f2d5a48c109261de6086e5a",
-    "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e"
+    "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e",
+    "shade.rg": "9dd1d916373e1a9a8de4d553623e6771573682a99a47216dc7ad8767353cdbb0"
   }
 }

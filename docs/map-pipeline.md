@@ -157,6 +157,33 @@ Design checklist (each item has bitten us once):
   and keep spawns outside rings. See `docs/capture-and-hold.md`.
 - **Pads:** optional `landing_pad` with named `deploy_slots` anchors for future
   player-placed turrets and vehicles.
+- **Props and terrain shade:** after the lightmap bake, call
+  `pack_writer.add_props_and_shade(kit, files, manifest, theme, seed, holes,
+  flags, spawn_points, control_points)`. It scatters the map's prop theme
+  (`scripts/assets/props.py`) and bakes `shade.rg` (`terrain_shade.py`).
+  - Props are original low-poly shapes built from the map's own materials.
+    Small props (tufts, ferns, heather, scrub, saplings, bones) are
+    render-only. Big props (boulders, outcrops, standing stones, logs, large
+    ice shards) are solid and sunk into the ground. They come in mirrored
+    pairs through the flag midpoint, stay at least 28 m off the ski lanes
+    (flag to flag, flag to each control point), and add at most
+    `props.PROP_COLLISION_TRIS` (2500) solid triangles per map, outside the
+    per-base budget.
+  - Nothing is placed near existing collision geometry, terrain holes and
+    their neighbour cells, flags, spawns, capture rings, water, or the map
+    edge. Density thins away from the flags and points.
+  - Props keep the live-lighting path (light layer -1), so they add no
+    lightmap pages. Each pack's `props` block in `map.json` records the
+    counts and every big prop.
+  - `shade.rg` is a 1024x1024 map (2 m texels), two bytes per texel: sun
+    visibility and ambient occlusion. It comes from a soft heightfield
+    ray-march, an orthographic sun depth map of every opaque structure and big
+    prop (so floating hulls shadow the ground below), and overhead and concavity
+    occlusion. The terrain shader and props multiply sun light by R and
+    ambient by G. Bake it with the map's own sun, the same as the lightmaps.
+    The payload is optional: packs without it render unshaded. It is compressed
+    by `crates/core/build.rs` and copied by the bundle scripts.
+  - Each map suite runs `assets/prop_checks.py` on its committed pack.
 
 ## 4. Look at it before wiring
 

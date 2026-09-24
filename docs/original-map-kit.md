@@ -367,3 +367,7 @@ the slit), all jet-only.
 
 Collision: 3,384 triangles per base (budget 4,500). Not playtested: whether a
 walking route makes the flag too easy to reach.
+
+## Props and terrain shade
+
+Old Holler scatters original props from `scripts/assets/props.py` (theme `old-holler`): meadow boulders and fallen logs (solid), moss tufts and ferns (render-only). The committed pack has 48 boulder, 16 log, 4200 tuft, 900 fern. That adds 29,560 render triangles and 1,920 solid ones (prop budget 2,500). Big props come in mirrored pairs, stay at least 80 m from each flag and 28 m off the ski lanes, and sink into the ground. The baked terrain shade map `shade.rg` (`scripts/assets/terrain_shade.py`) shadows the ground under structures, hulls and big props for the map's sun, plus terrain self-shadow and occlusion. About 0.9% of the tile is in shadow. See `docs/map-pipeline.md`.

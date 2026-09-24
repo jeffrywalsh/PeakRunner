@@ -285,6 +285,8 @@ def build(output, bake=True):
         provenance='PeakRunner original Frostline geometry, original procedural terrain, flora, material kit and synthesized wind; '
                    'no extracted assets or external height data',
         definition_sha256=pack_writer.source_hash(ROOT/'maps/frostline.json'))
+    pack_writer.add_props_and_shade(kit, files, manifest, 'frostline', definition['seed'], manifest['holes'], flags, spawn_points,
+                                    control_points)
     pack_writer.write_pack(output, files, manifest)
     print(f'Built {definition["name"]}: {len(mesh.collision)//9} solid triangles '
           f'({base_triangles//2} per base, {beacon_triangles} beacon and centre tower, {point_triangles} flank towers, '

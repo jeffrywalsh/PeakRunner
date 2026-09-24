@@ -263,3 +263,7 @@ Supersedes the cistern, storehouse and spawn dimensions above (asset
   9,988 total; 26,056 render triangles; 20 lightmap pages.
 - **Still untested by people:** the taller rooms, the mezzanine, the new ring,
   and whether 18 routes make the flag too easy to take.
+
+## Props and terrain shade
+
+Dustreach scatters original props from `scripts/assets/props.py` (theme `dustreach`): sandstone boulders (solid), dry scrub, dune grass and bleached bones (render-only). The committed pack has 48 boulder, 700 scrub, 3200 tuft, 40 bones. That adds 35,103 render triangles and 1,728 solid ones (prop budget 2,500). Big props come in mirrored pairs, stay at least 80 m from each flag and 28 m off the ski lanes, and sink into the ground. The baked terrain shade map `shade.rg` (`scripts/assets/terrain_shade.py`) shadows the ground under structures, hulls and big props for the map's sun, plus terrain self-shadow and occlusion. About 1.7% of the tile is in shadow. See `docs/map-pipeline.md`.

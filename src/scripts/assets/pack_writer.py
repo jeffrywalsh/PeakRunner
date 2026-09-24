@@ -67,6 +67,28 @@ def bake_lightmaps(vertices, textures, count, lamps, kit):
     return baked.astype('<f4').tobytes(), merged, count+len(pages), meta
 
 
+def add_props_and_shade(kit, files, manifest, theme, seed, holes, flags, spawn_points, control_points,
+                        extra_clear=(), water=None, sun=None):
+    """Scatter the theme's props (assets/props.py) over the terrain, append
+    them to vertices.bin and collision.bin, then bake the terrain shade map
+    (assets/terrain_shade.py) with structures and big props as casters.
+    Call after the structure lightmap bake, with files['collision.bin']
+    holding only the structures."""
+    from assets import props, terrain_shade
+    terrain = props.Terrain(files['height.bin'], files['weights.rgba'], holes, water=water)
+    protect = props.Protection(files['collision.bin'], flags, spawn_points, control_points, extra_clear)
+    verts, solid, casters, summary = props.scatter(kit, theme, seed, terrain, protect)
+    structures = files['vertices.bin']
+    files['vertices.bin'] = structures+verts
+    files['collision.bin'] = files['collision.bin']+solid
+    sun = sun or (manifest.get('look') or {}).get('sun_direction') or MAP_SUN
+    files['shade.rg'], shade = terrain_shade.bake(files['height.bin'], structures+casters, sun,
+                                                  kit.MATERIALS.index('light'))
+    summary['source_sha256'] = source_hash(props.__file__)
+    manifest['props'] = summary; manifest['terrain_shade'] = shade
+    return summary
+
+
 def source_hash(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
