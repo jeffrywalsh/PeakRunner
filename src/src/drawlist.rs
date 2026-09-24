@@ -401,13 +401,15 @@ fn shock_ring(emit: &mut Vec<EmitDraw>, center: Vec3, radius: f32, thickness: f3
     }
 }
 
-/// Disc in flight: a bright rim and a dark hub so the spin reads, two rim
-/// studs that sweep round, and a longer ribbon wake.
+/// Disc in flight: a bright rim around a paler glowing hub, two rim studs that
+/// sweep round so the spin reads, and a longer ribbon wake. The hub stays
+/// thinner than the rim and self-lit: a dark, thicker hub read as a black
+/// bar whenever a disc flew at the player edge-on.
 fn push_disc_round(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, d: &crate::sim::Disc) {
     let model = spinning_disc(d.pos, d.vel, d.spin, 0.42, 0.06);
     lit.push(LitDraw { mesh: MeshId::Disc, model, color: Vec3::new(0.10, 0.74, 1.0), emit: 1.1, mode: 0.0 });
-    lit.push(LitDraw { mesh: MeshId::Disc, model: model * Mat4::from_scale(Vec3::new(0.6, 1.5, 0.6)),
-        color: Vec3::new(0.03, 0.06, 0.09), emit: 0.0, mode: 0.0 });
+    lit.push(LitDraw { mesh: MeshId::Disc, model: model * Mat4::from_scale(Vec3::new(0.6, 1.05, 0.6)),
+        color: Vec3::new(0.40, 0.78, 1.0), emit: 0.6, mode: 0.0 });
     for k in [0.0, std::f32::consts::PI] {
         lit.push(LitDraw { mesh: MeshId::Cube,
             model: model * Mat4::from_rotation_y(k) * Mat4::from_translation(Vec3::new(0.84, 0.0, 0.0))
@@ -473,7 +475,9 @@ fn push_plasma(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, d: &crate::sim:
 /// Chaingun round. Every third round of a burst is a long bright tracer with
 /// a soft glow; the rest are faint streaks, which gives the stream a rhythm.
 fn push_tracer(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, d: &crate::sim::Disc, time: f32) {
-    let f = d.vel.normalize_or_zero();
+    // A round at rest still needs a full basis; a zero axis gives the lit
+    // body a singular normal matrix, which shades as NaN (black).
+    let f = d.vel.normalize_or(Vec3::NEG_Z);
     let mut r = f.cross(Vec3::Y).normalize_or_zero();
     if r.length_squared() < 0.01 { r = Vec3::X; }
     let u = r.cross(f).normalize_or_zero();
@@ -988,6 +992,79 @@ fn push_turret_head(lit:&mut Vec<LitDraw>,emit:&mut Vec<EmitDraw>,d:&peakrunner_
         for x in [-0.42,0.42] {
             part(lit,full,MeshId::Cube,Vec3::new(x,0.25,-2.0),Vec3::new(0.26,0.26,2.8),dark,0.);
             part(lit,full,MeshId::Cube,Vec3::new(x,0.25,-3.35),Vec3::new(0.4,0.4,0.36),steel,0.);
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod projectile_visibility {
+    use super::*;
+
+    /// Brightness a lit draw keeps even facing away from the sun: its
+    /// self-lit term, which the shader adds unfogged by lighting.
+    fn self_lit_luma(d: &LitDraw) -> f32 {
+        (0.3 * d.color.x + 0.59 * d.color.y + 0.11 * d.color.z) * d.emit
+    }
+
+    /// Every round in flight must read as a bright streak from any side:
+    /// no near-black part, no degenerate transform, and additive glow only.
+    /// A dark hub on the disc once showed incoming fire as black lines.
+    #[test]
+    fn projectile_draws_never_render_dark() {
+        let dirs: Vec<Vec3> = (0..400).map(|i| {
+            let a = i as f32 * 2.399963;
+            let y = 1.0 - 2.0 * (i as f32 + 0.5) / 400.0;
+            let r = (1.0 - y * y).sqrt();
+            Vec3::new(r * a.cos(), y, r * a.sin())
+        }).chain([Vec3::Y, -Vec3::Y, Vec3::X]).collect();
+        for kind in [0u8, 1, 3] {
+            for (i, dir) in dirs.iter().enumerate() {
+                for life in [0.05, 0.9, 1.19, 1.5, 4.9] {
+                    let speed = match kind { 1 => 420.0, 0 => 60.0, _ => 80.0 };
+                    let d = crate::sim::Disc { pos: Vec3::new(100.0, 50.0, 100.0), vel: *dir * speed,
+                        team: crate::sim::Team::Glacier, owner: 0, life, kind, spin: i as f32 * 0.7 };
+                    let (mut lit, mut emit) = (Vec::new(), Vec::new());
+                    match kind {
+                        0 => push_disc_round(&mut lit, &mut emit, &d),
+                        3 => push_plasma(&mut lit, &mut emit, &d, i as f32 * 0.01),
+                        _ => push_tracer(&mut lit, &mut emit, &d, i as f32 * 0.013),
+                    }
+                    assert!(!lit.is_empty(), "kind {kind} draws a body");
+                    for l in &lit {
+                        assert!(l.model.is_finite() && normal_columns(l.model).iter().flatten().all(|v| v.is_finite()),
+                            "kind {kind}: degenerate transform renders black");
+                        assert!(self_lit_luma(l) >= 0.3,
+                            "kind {kind}: a part with color {:?} emit {} reads dark", l.color, l.emit);
+                    }
+                    for e in &emit {
+                        // Both signs go through the additive emit pass (negative
+                        // alpha only softens the edge), so glow can never darken.
+                        assert!(e.color[3] != 0.0 && e.color.iter().all(|c| c.is_finite()),
+                            "kind {kind}: projectile glow must be finite");
+                        assert!(e.color[0].max(e.color[1]).max(e.color[2]) >= 0.4, "kind {kind}: glow too dark");
+                    }
+                }
+            }
+        }
+    }
+
+    /// A round nearly at rest (a fizzle, or a spawn frame) still builds a
+    /// finite streak instead of a zero-axis matrix.
+    #[test]
+    fn a_resting_round_keeps_a_finite_transform() {
+        for kind in [0u8, 1, 3] {
+            let d = crate::sim::Disc { pos: Vec3::new(10.0, 5.0, 10.0), vel: Vec3::ZERO,
+                team: crate::sim::Team::Ember, owner: 0, life: 0.5, kind, spin: 0.0 };
+            let (mut lit, mut emit) = (Vec::new(), Vec::new());
+            match kind {
+                0 => push_disc_round(&mut lit, &mut emit, &d),
+                3 => push_plasma(&mut lit, &mut emit, &d, 0.0),
+                _ => push_tracer(&mut lit, &mut emit, &d, 0.0),
+            }
+            for l in &lit {
+                assert!(normal_columns(l.model).iter().flatten().all(|v| v.is_finite()), "kind {kind}");
+            }
         }
     }
 }

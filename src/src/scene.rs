@@ -1589,6 +1589,107 @@ mod shader_check {
             assert_eq!(super::precipitation_count(super::MapId::Valley, count), count);
         }
     }
+    /// Incoming fire in real bot fights, seen from the target: rendering the
+    /// same frame with and without the rounds must never turn pixels dark.
+    #[test]
+    #[ignore = "requires a GPU adapter"]
+    fn incoming_rounds_never_darken_the_view() {
+        use super::*;
+        use crate::drawlist::build_frame_with;
+        use crate::effects::Effects;
+        pollster::block_on(async {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+            let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await.expect("GPU adapter");
+            let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.expect("GPU device");
+            let mut scene = SceneGpu::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+            let (width, height) = (640u32, 400u32);
+            let read = |scene: &mut SceneGpu, frame: &crate::drawlist::DrawFrame| -> Vec<u8> {
+                let mut encoder = device.create_command_encoder(&Default::default());
+                scene.render(&device, &queue, &mut encoder, width, height, frame);
+                let stride = (width * 4).div_ceil(256) * 256;
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some("probe"), size: (stride * height) as u64,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+                encoder.copy_texture_to_buffer(scene.color.as_image_copy(),
+                    wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0, bytes_per_row: Some(stride), rows_per_image: Some(height) } },
+                    wgpu::Extent3d { width, height, depth_or_array_layers: 1 });
+                queue.submit([encoder.finish()]);
+                let (tx, rx) = std::sync::mpsc::channel();
+                buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| { tx.send(r).unwrap(); });
+                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                rx.recv().unwrap().unwrap();
+                let mapped = buffer.slice(..).get_mapped_range().unwrap();
+                mapped.chunks(stride as usize).flat_map(|row| row[..width as usize * 4].iter().copied()).collect()
+            };
+            let luma = |p: &[u8]| 0.3 * p[0] as f32 + 0.59 * p[1] as f32 + 0.11 * p[2] as f32;
+            let label = std::env::var("PEAKRUNNER_CAPTURE_LABEL").unwrap_or_else(|_| "probe".into());
+            std::fs::create_dir_all("screenshots").unwrap();
+            let mut worst_total = 0usize;
+            for map in [MapId::Raindance, MapId::BroadsideClone, MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone] {
+                let mut w = crate::sim::World::new();
+                w.set_map(map);
+                w.start_match(true);
+                w.players[0].is_bot = true;
+                let (mut shots, mut dark_frames, mut worst) = (0, 0, 0usize);
+                for step in 0..(200.0 / 0.05) as u32 {
+                    w.tick(0.05);
+                    if step % 3 != 0 || shots >= 40 { continue; }
+                    let mut chosen = None;
+                    'find: for (pid, p) in w.players.iter().enumerate() {
+                        if !p.alive { continue; }
+                        let eye = p.pos + Vec3::Y * 1.6;
+                        let look = Vec3::new(-p.yaw.sin() * p.pitch.cos(), p.pitch.sin(), -p.yaw.cos() * p.pitch.cos());
+                        for d in &w.discs {
+                            if d.team == p.team || d.kind == 2 { continue; }
+                            let to = d.pos - eye;
+                            let dist = to.length();
+                            if dist < 2.0 || dist > 45.0 { continue; }
+                            if d.vel.dot(-to) <= 0.0 || look.dot(to / dist) < 0.55 { continue; }
+                            chosen = Some(pid); break 'find;
+                        }
+                    }
+                    let Some(pid) = chosen else { continue; };
+                    let keep = w.player_id;
+                    w.player_id = pid;
+                    let a = build_frame_with(&w, width as f32 / height as f32, 1.0 / 60.0, &mut Effects::new());
+                    let discs = std::mem::take(&mut w.discs);
+                    let b = build_frame_with(&w, width as f32 / height as f32, 1.0 / 60.0, &mut Effects::new());
+                    w.discs = discs;
+                    w.player_id = keep;
+                    let (pa, pb) = (read(&mut scene, &a), read(&mut scene, &b));
+                    let dark = pa.chunks_exact(4).zip(pb.chunks_exact(4)).filter(|(x, y)| luma(x) < 45.0 && luma(y) > 90.0).count();
+                    shots += 1;
+                    if shots == 1 || (map == MapId::BroadsideClone && shots == 30) {
+                        let path = format!("screenshots/{label}-{map:?}-sample{shots}.png");
+                        let opaque: Vec<u8> = pa.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
+                        let mut enc = png::Encoder::new(std::fs::File::create(&path).unwrap(), width, height);
+                        enc.set_color(png::ColorType::Rgba);
+                        enc.set_depth(png::BitDepth::Eight);
+                        enc.write_header().unwrap().write_image_data(&opaque).unwrap();
+                    }
+                    if dark > 0 {
+                        dark_frames += 1;
+                        if dark > worst {
+                            worst = dark;
+                            for (tag, px) in [("with", &pa), ("without", &pb)] {
+                                let path = format!("screenshots/{label}-{map:?}-{tag}.png");
+                                let opaque: Vec<u8> = px.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
+                                let mut enc = png::Encoder::new(std::fs::File::create(&path).unwrap(), width, height);
+                                enc.set_color(png::ColorType::Rgba);
+                                enc.set_depth(png::BitDepth::Eight);
+                                enc.write_header().unwrap().write_image_data(&opaque).unwrap();
+                            }
+                        }
+                    }
+                }
+                println!("{map:?}: incoming-fire frames {shots}, frames with darkened pixels {dark_frames}, worst {worst} px");
+                worst_total = worst_total.max(worst);
+            }
+            println!("worst darkened pixels in any frame: {worst_total}");
+            assert_eq!(worst_total, 0, "incoming rounds darkened the view; see screenshots/{label}-*");
+        });
+    }
+
     /// Real GPU render of the production scene, without opening a game window.
     /// Run with --ignored --nocapture; captures are for visual review, not golden tests.
     #[test]

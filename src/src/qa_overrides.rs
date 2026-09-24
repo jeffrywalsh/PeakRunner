@@ -24,6 +24,11 @@
 //! control points (`name:x,y,z[:drain][:rRADIUS]`) on any map, `QA_POINT_STATE="0=1/0.4/0/c"`
 //! forces point `index=owner/progress/capturing[/c for contested]` (`-` = none),
 //! and `QA_MODE=cnh` with `QA_SCORE=120,45` shows Capture & Hold on the client.
+//! `QA_ROUNDS="1:1010,246,870:0,0,-300;0:..."` stages projectiles in flight
+//! (`kind:x,y,z:vx,vy,vz`, kind 0 disc, 1 bullet, 2 grenade, 3 plasma). Each
+//! loops along its velocity over 0.25 s so incoming fire can be captured.
+//! `QA_BLASTS="0:1010,244,860@3;2:1016,244,866@3.2"` stages one explosion each
+//! (`kind:x,y,z@seconds`) through the normal effects path, scorch included.
 use glam::Vec3;
 use peakrunner_core::sim::{Team, World};
 use std::sync::OnceLock;
@@ -31,7 +36,10 @@ use std::sync::OnceLock;
 #[derive(Clone, Copy)]
 enum StagedPose { Stand, Dive, Land(f32), Switch(f32), Splash(f32) }
 
-struct Overrides { equipment: Vec<(usize, f32, f32)>, down: Vec<u8>, boom: Vec<u8>, boom_at: f32, kit_heal: bool, players: Vec<(String, Team, Vec3, bool, StagedPose)>, started: std::time::Instant, carry_at: f32 }
+struct Overrides { equipment: Vec<(usize, f32, f32)>, down: Vec<u8>, boom: Vec<u8>, boom_at: f32, kit_heal: bool, players: Vec<(String, Team, Vec3, bool, StagedPose)>, started: std::time::Instant, carry_at: f32, rounds: Vec<(u8, Vec3, Vec3)>, blasts: Vec<(u8, Vec3, f32)> }
+
+/// Marks QA-staged rounds so each frame replaces them rather than piling up.
+const STAGED_ROUND_SPIN: f32 = -4242.0;
 
 fn parse() -> Option<&'static Overrides> {
     static CELL: OnceLock<Option<Overrides>> = OnceLock::new();
@@ -39,10 +47,30 @@ fn parse() -> Option<&'static Overrides> {
         let eq = std::env::var("QA_EQUIPMENT").ok();
         let pl = std::env::var("QA_PLAYERS").ok();
         let kit_heal = std::env::var("QA_KIT").is_ok_and(|v| v == "heal");
-        if eq.is_none() && pl.is_none() && !kit_heal { return None; }
+        let rd = std::env::var("QA_ROUNDS").ok();
+        let bl = std::env::var("QA_BLASTS").ok();
+        if eq.is_none() && pl.is_none() && !kit_heal && rd.is_none() && bl.is_none() { return None; }
         let boom_at = std::env::var("QA_BOOM_AT").ok().and_then(|v| v.parse().ok()).unwrap_or(5.0);
         let carry_at = std::env::var("QA_CARRY_AT").ok().and_then(|v| v.parse().ok()).unwrap_or(6.0);
-        let mut o = Overrides { equipment: Vec::new(), down: Vec::new(), boom: Vec::new(), boom_at, kit_heal, players: Vec::new(), started: std::time::Instant::now(), carry_at };
+        let mut o = Overrides { equipment: Vec::new(), down: Vec::new(), boom: Vec::new(), boom_at, kit_heal, players: Vec::new(), started: std::time::Instant::now(), carry_at, rounds: Vec::new(), blasts: Vec::new() };
+        let vec3 = |s: &str| -> Option<Vec3> {
+            let v: Vec<f32> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            (v.len() == 3).then(|| Vec3::new(v[0], v[1], v[2]))
+        };
+        for item in rd.iter().flat_map(|s| s.split(';')) {
+            let parts: Vec<_> = item.split(':').collect();
+            if parts.len() != 3 { continue; }
+            if let (Ok(kind), Some(pos), Some(vel)) = (parts[0].trim().parse(), vec3(parts[1]), vec3(parts[2])) {
+                o.rounds.push((kind, pos, vel));
+            }
+        }
+        for item in bl.iter().flat_map(|s| s.split(';')) {
+            let Some((head, at)) = item.split_once('@') else { continue; };
+            let Some((kind, xyz)) = head.split_once(':') else { continue; };
+            if let (Ok(kind), Some(pos), Ok(at)) = (kind.trim().parse(), vec3(xyz), at.trim().parse()) {
+                o.blasts.push((kind, pos, at));
+            }
+        }
         for item in eq.iter().flat_map(|s| s.split(',')) {
             let Some((key, value)) = item.split_once('=') else { continue; };
             if let Some(team) = key.strip_prefix("gen") {
@@ -101,6 +129,21 @@ pub fn apply(world: &mut World) {
     }
     for &(i, h, s) in &o.equipment {
         if let Some(state) = world.equipment.get_mut(i) { state.health = h; if state.powered { state.shield = s; } }
+    }
+    for &(kind, pos, at) in &o.blasts {
+        let age = o.started.elapsed().as_secs_f32() - at;
+        if (0.0..0.55).contains(&age) && !world.explosions.iter().any(|e| e.kind == kind && e.pos.distance(pos) < 0.1) {
+            world.explosions.push(peakrunner_core::sim::Explosion { pos, age, max_r: 9.0, kind });
+        }
+    }
+    if !o.rounds.is_empty() {
+        world.discs.retain(|d| d.spin != STAGED_ROUND_SPIN);
+        let phase = (o.started.elapsed().as_secs_f32() % 0.25) - 0.125;
+        for &(kind, pos, vel) in &o.rounds {
+            let life = match kind { 0 => 4.0, 1 => 0.9, 2 => 1.5, _ => 2.0 };
+            world.discs.push(peakrunner_core::sim::Disc { pos: pos + vel * phase, vel, team: Team::Glacier,
+                owner: 0, life, kind, spin: STAGED_ROUND_SPIN });
+        }
     }
     let Some(template) = world.players.get(world.player_id).cloned() else { return; };
     let carry_now = o.started.elapsed().as_secs_f32() >= o.carry_at;
