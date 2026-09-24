@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test the cleaned Raindance build without reading source-game assets.
+"""Test the Old Holler build (map key `raindance`) without reading source-game assets.
 Run from src/ with the numpy venv: scripts/test-raindance.py"""
 import hashlib
 import importlib.util
@@ -122,7 +122,9 @@ class RaindanceTests(unittest.TestCase):
         for x in np.arange(-28, 28.1, 2):
             for z in np.arange(-24, 24.1, 2):
                 if abs(abs(x)-20) < 5.5 and -19.5 < z < base.HOLE_Z[1]+.5: continue   # hall ramps
-                if any(math.hypot(x-e['position'][0], z-e['position'][2]) < 4 for e in EQUIPMENT if e['position'][1] < 0):
+                if abs(x) < base.STAIR_W/2+.3 and base.B_Z0-.3 < z < base.OPEN_Z1+.3: continue   # atrium stair
+                if any(math.hypot(x-e['position'][0], z-e['position'][2]) < 4 for e in EQUIPMENT
+                       if abs(e['position'][1]-base.FLOOR) < .01):
                     continue
                 t, ny = self.soup.hits((x, base.FLOOR+3, z), (0, -1, 0))
                 self.assertAlmostEqual(3-t[0], 0, places=3, msg=(x, z)); self.assertGreater(ny[0], .999)
@@ -152,6 +154,7 @@ class RaindanceTests(unittest.TestCase):
         below it, that pocket is sealed on every side."""
         ramps = [(x, 9, -19, base.HOLE_Z[1], base.FLOOR, base.ROOF_TOP, base.FLOOR) for x in (-20, 20)]
         ramps += [(x, 18, -52, -28, base.APRON_TOP, base.ROOF_TOP, base.APRON_TOP) for x in (-22, 22)]
+        ramps += [(0, base.STAIR_W, base.B_Z0, base.STAIR_Z1, base.FLOOR, base.B_FLOOR, base.B_FLOOR)]
         sealed = 0
         for x, w, z0, z1, y0, y1, floor in ramps:
             for zz in np.arange(z0+.3, z1, .4):
@@ -169,7 +172,9 @@ class RaindanceTests(unittest.TestCase):
         """The support ray starts 0.15 m above the feet; its first hit must be
         the up-facing floor top wherever a player can stand."""
         regions = [(-29, 29, -25, 25, base.FLOOR), (12.2, 32.3, -27.8, 28.3, base.ROOF_TOP),
-                   (-32.3, -12.2, -27.8, 28.3, base.ROOF_TOP), (-11.8, 11.8, 4.2, 19.8, base.ROOF_TOP)]
+                   (-32.3, -12.2, -27.8, 28.3, base.ROOF_TOP), (-11.8, 11.8, 4.2, 19.8, base.ROOF_TOP),
+                   (-10.8, 10.8, base.B_Z0+.2, base.B_Z1-.2, base.B_FLOOR),
+                   (base.DOOR_X[0]+.2, base.DOOR_X[1]-.2, base.B_Z1+1.2, base.STRIP_Z[1]-.2, base.B_FLOOR)]
         checked = 0
         for x0, x1, z0, z1, level in regions:
             for x in np.arange(x0, x1+.01, .8):
@@ -185,6 +190,65 @@ class RaindanceTests(unittest.TestCase):
         for dx, dz in [(0, 0), (3, 1), (-2, -1), (4, 2)]:     # all beyond the flag-deck roof (z > 20)
             t = self.soup.first((dx, 0, 22+dz), (0, 1, 0))
             self.assertAlmostEqual(t, base.ROOF_TOP, places=3, msg=(dx, dz))
+
+    # --- Generator basement ---------------------------------------------------
+    def test_basement_floor_has_headroom_over_the_generator(self):
+        gx, _, gz = next(e['position'] for e in EQUIPMENT if e['kind'] == 'generator')
+        checked = 0
+        for x in np.arange(-10, 10.1, 1.5):
+            for z in np.arange(base.B_Z0+1, base.B_Z1-.9, 1.5):
+                if abs(x) < base.STAIR_W/2+.3 and z < base.STAIR_Z1+.3: continue   # stair wedge
+                if abs(x-gx) < 3 and abs(z-gz) < 2.5: continue                        # generator plinth
+                t, ny = self.soup.hits((x, base.B_FLOOR+3, z), (0, -1, 0))
+                self.assertAlmostEqual(3-t[0], 0, places=3, msg=(x, z)); self.assertGreater(ny[0], .999)
+                self.assertGreater(self.soup.first((x, base.B_FLOOR+.1, z), (0, 1, 0)), 6.5, (x, z))
+                checked += 1
+        self.assertGreater(checked, 150)
+        # The generator (5.8 m) clears the ceiling.
+        self.assertGreater(base.B_CEIL-base.B_FLOOR, 6.0)
+
+    def test_both_stairs_are_walkable_with_headroom(self):
+        for z in np.arange(base.B_Z0+.3, base.STAIR_Z1-.2, .5):         # atrium stair
+            y = base.FLOOR+(base.B_FLOOR-base.FLOOR)*(z-base.B_Z0)/(base.STAIR_Z1-base.B_Z0)
+            for x in (-1.3, 0, 1.3):
+                t, ny = self.soup.hits((x, y+2, z), (0, -1, 0))
+                self.assertAlmostEqual(y+2-t[0], y, places=2, msg=(x, z)); self.assertGreater(ny[0], .8)
+                self.assertGreater(self.soup.first((x, y+.1, z), (0, 1, 0)), 2.6, (x, z, 'headroom'))
+        zc = sum(base.STRIP_Z)/2
+        for x in np.arange(base.SERVICE_X[0]+.2, base.SERVICE_X[1]-.1, .5):   # service stair
+            y = base.service_y(x)
+            for z in (zc-1.2, zc, zc+1.2):
+                t, ny = self.soup.hits((x, y+2, z), (0, -1, 0))
+                self.assertAlmostEqual(y+2-t[0], y, places=2, msg=(x, z)); self.assertGreater(ny[0], .8)
+                self.assertGreater(self.soup.first((x, y+.1, z), (0, 1, 0)), 2.6, (x, z, 'headroom'))
+        # Its top lands on the shed floor at ground level, and the door is open.
+        t, _ = self.soup.hits((31, 1, zc), (0, -1, 0)); self.assertAlmostEqual(1-t[0], 0, places=3)
+        self.assertEqual(self.soup.first((31, 1.2, zc), (1, 0, 0)), np.inf)
+        self.assertGreater(self.soup.first((31, .1, zc), (0, 1, 0)), 2.8)
+
+    def test_underground_spaces_do_not_leak_into_the_void(self):
+        """Below ground, every sideways or downward ray from the basement,
+        passage and service stair meets geometry: nothing opens onto the
+        empty cut beneath the hall (terrain is absent in cut cells)."""
+        dirs = [(math.cos(a)*c, -s, math.sin(a)*c) for s, c in ((0, 1), (.5, .866), (1, 0))
+                for a in np.linspace(0, math.tau, 12, endpoint=False)]
+        zc = sum(base.STRIP_Z)/2
+        points = [(x, base.B_FLOOR+h, z) for x in (-9, -4, 4, 9) for z in (-4, 12, 22) for h in (1, 4)]
+        points += [(-3, base.B_FLOOR+1, z) for z in (26, 30)]
+        points += [(x, base.service_y(x)+1.5, zc) for x in (2, 8, 14, 19)]
+        for p in points:
+            for d in dirs:
+                self.assertLess(self.soup.first(p, d), 80, (p, d))
+
+    def test_generators_sit_in_cut_cells_on_the_basement_floor(self):
+        holes = set(self.man['holes'])
+        gens = [e for e in self.man['entities'] if e['kind'] == 'generator']
+        self.assertEqual(len(gens), 2)
+        for e, b in zip(gens, sorted(build.spec()['bases'], key=lambda b: b['team'])):
+            x, y, z = e['position']
+            self.assertIn(int(z//8)*256+int(x//8), holes, e['id'])
+            t, _ = self.world.hits((x, y-1, z), (0, -1, 0))
+            self.assertAlmostEqual(y-1-t[0], b['position'][1]+base.B_FLOOR+1, places=2, msg=e['id'])
 
     # --- Z-fighting ----------------------------------------------------------
     def test_no_two_boxes_share_a_visible_face(self):
@@ -268,6 +332,14 @@ class RaindanceTests(unittest.TestCase):
             for x in np.arange(-29, 29.1, 1.5):
                 for z in np.arange(-25, 25.1, 1.5):
                     targets.append(m.point((x, base.FLOOR+base.LIFT+.8, z)))
+            # Basement, passage and the service stair below the shed.
+            for x in np.arange(-10, 10.1, 1.5):
+                for z in np.arange(base.B_Z0+.5, base.B_Z1, 1.5):
+                    targets.append(m.point((x, base.B_FLOOR+base.LIFT+.8, z)))
+            for z in np.arange(base.B_Z1+1.5, base.STRIP_Z[1], 1.5):
+                targets.append(m.point((-3, base.B_FLOOR+base.LIFT+.8, z)))
+            for x in np.arange(base.SERVICE_X[0]+.5, base.CEIL_END, 1.5):
+                targets.append(m.point((x, base.service_y(x)+base.LIFT+.8, sum(base.STRIP_Z)/2)))
         targets = np.array(targets)
         turrets = [e for e in self.man['entities'] if e['kind'] == 'turret']
         self.assertEqual(len(turrets), 6)
@@ -349,6 +421,27 @@ class RaindanceTests(unittest.TestCase):
             build.build(out, bake=False)
             for f in self.pack.iterdir():
                 self.assertEqual(f.read_bytes(), (out/f.name).read_bytes(), f.name)
+
+class RouteCounts(unittest.TestCase):
+    """Walking routes on the committed pack (assets/route_checks.py): more
+    than one way into each hall and onto each flag roof, and exactly two
+    into the generator basement (the atrium stair and the service stair)."""
+    def test_base_routes(self):
+        from assets import route_checks
+        pack = route_checks.Pack(PACK)
+        for b in build.spec()['bases']:
+            ox, oy, oz = b['position']; a = math.radians(b['yaw']); c, s = math.cos(a), math.sin(a)
+            def box(lx0, lx1, ly0, ly1, lz0, lz1):
+                (ax, az), (bx, bz) = [(ox+lx*c+lz*s, oz-lx*s+lz*c) for lx, lz in ((lx0, lz0), (lx1, lz1))]
+                return (min(ax, bx), max(ax, bx), oy+ly0, oy+ly1, min(az, bz), max(az, bz))
+            found = route_checks.base_entries(pack, (ox, oz), {
+                'hall': box(-29.5, 29.5, base.FLOOR-1, base.FLOOR+1.5, -25.5, 25.5),
+                'flag': box(-12, 12, base.ROOF_TOP-1, base.ROOF_TOP+1.5, 4, 20),
+                'generator': box(-base.B_X, base.B_X, base.B_FLOOR-.5, base.B_FLOOR+1.5, base.B_Z0, base.B_Z1)})
+            self.assertGreaterEqual(len(found['hall']), 2, (b['id'], found['hall']))
+            self.assertGreaterEqual(len(found['flag']), 2, (b['id'], found['flag']))
+            self.assertEqual(len(found['generator']), 2, (b['id'], found['generator']))
+
 
 class SpawnForwardClearance(unittest.TestCase):
     """Every committed spawn faces open floor: a clear body-width view for

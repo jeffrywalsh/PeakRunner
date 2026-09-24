@@ -116,7 +116,9 @@ def build(output, bake=True):
     for b in d['bases']:
         mesh.origin = tuple(b['position']); mesh.yaw = math.radians(b.get('yaw', 0))
         for x in [-34, 34]: mesh.box((x, -.27, -12), (4, .6, 88), 'concrete')
-        mesh.box((0, -.27, 30), (64, .6, 4), 'concrete')
+        # The rear strip's east end is the service shed (raindance_base).
+        rear_end = raindance_base.CEIL_END
+        mesh.box(((rear_end-32)/2, -.27, 30), (rear_end+32, .6, 4), 'concrete')
         for x in [-21, 21]: mesh.box((x, -.27, -40), (22, .6, 24), 'concrete')
         mesh.box((0, -.27, -54), (64, .6, 4), 'grate')
     if sys.byteorder != 'little': mesh.vertices.byteswap(); mesh.collision.byteswap()

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "name": "Raindance — PeakRunner original",
+  "name": "Old Holler — PeakRunner original",
   "seed": 84271,
   "terrain": {"base_height": 102, "ravine_depth": 65, "ravine_width": 105, "ridge_height": 34},
   "bases": [
@@ -17,7 +17,7 @@
     {"id": "east-bunker", "asset": "bunker", "position": [1390, 0, 750], "grounded": true, "yaw": -145}
   ],
   "base_equipment": [
-    {"kind": "generator", "position": [0, -10, 20]},
+    {"kind": "generator", "position": [6, -18, 16]},
     {"kind": "inventory", "position": [-8, -10, 4]},
     {"kind": "inventory", "position": [8, -10, 4]},
     {"kind": "repair", "position": [0, -10, -12]},

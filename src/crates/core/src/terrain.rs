@@ -128,8 +128,9 @@ pub fn pillars() -> Vec<Pillar> {
     out
 }
 
-/// Which ground the match is on. Valley is the small rift. Raindance is the
-/// Original highland terrain: 256 samples, 8 m apart, heights as raw/32.
+/// Which ground the match is on. Valley is the small rift. `Raindance` is the
+/// key for Old Holler, the original highland terrain: 256 samples, 8 m apart,
+/// heights as raw/32.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum MapId {
     Valley,
@@ -193,10 +194,11 @@ fn all_maps() -> [MapInfo; 6] {
             glacier: GLACIER_HOME,
             res: RES,
         },
+        // Formerly shown as Raindance; the `raindance` key stays for rotations.
         MapInfo {
             id: MapId::Raindance,
-            name: "Raindance",
-            note: "2 km. Original rainy highlands, ravine crossing and powered bases.",
+            name: "Old Holler",
+            note: "2 km. Rainy highland hollows, a ravine crossing and sunken bases over generator basements.",
             size: RAIN_SIZE,
             // Original base centers; map packs supply exact flag deck positions.
             ember: Vec3::new(1160.0, 0.0, 480.0),
@@ -581,6 +583,24 @@ mod map_tests {
             // The entity point is 2.5 m up the model; probe just above the floor.
             let floor = pack.floor(p - Vec3::Y * 2.4).expect("generator floor").0;
             assert!((floor - (home.y - 2.0)).abs() < 0.01, "generator {} floor {floor}, base {home:?}", d.id);
+        }
+    }
+
+    /// Old Holler's (key `raindance`) generators sit in the basement under
+    /// each sunken hall, 8 m below the hall floor, inside the hall's cut.
+    #[test]
+    fn raindance_generators_are_in_basements_in_cut_cells() {
+        let id = MapId::Raindance;
+        let pack = crate::map_pack::on(id).unwrap();
+        let gens: Vec<_> = crate::equipment::definitions(id).iter()
+            .filter(|d| d.kind == crate::equipment::Kind::Generator).collect();
+        assert_eq!(gens.len(), 2);
+        for d in gens {
+            let p = d.pos();
+            assert!(pack.hole(p.x, p.z), "generator {} is not over a cut cell", d.id);
+            let floor = pack.floor(p - Vec3::Y * 2.4).expect("generator floor").0;
+            // Base decks sit at 112; the hall floor is 10 m down, the basement 18.
+            assert!((floor - (112.0 - 18.0)).abs() < 0.01, "generator {} floor {floor}", d.id);
         }
     }
 

@@ -1,4 +1,4 @@
-"""Raindance base, cleaned (asset raindance-base-v2).
+"""Old Holler base (asset raindance-base-v3; the map key stays `raindance`).
 
 Same layout as the original kit base (basement hall, atrium, wide ski ramps,
 exposed flag deck, service spire) with the pipeline checklist applied:
@@ -13,6 +13,11 @@ exposed flag deck, service spire) with the pipeline checklist applied:
 - Hall walls get liners, baseboards, cornices, pilasters and a team stripe;
   lit strips under the roof replace the old floating wall lights.
 - Eight spawn points per team, 1.2 m above solid floor, facing open space.
+- The generator sits in a basement under the hall with exactly two ways in:
+  a stair down from the atrium floor, and a service stair that climbs from
+  a passage behind the basement to a shed against the hall's back wall.
+  Everything underground stays inside the hall's existing terrain cut
+  (local |x| < 32, -56 < z < 32; the 8 m cells align with the base origin).
 
 Local coordinates: Y up, the entrance faces local -Z. Hall floor at -10,
 roof top at 8.6, ground level at 0.
@@ -21,12 +26,26 @@ import math
 
 from assets.structure_kit import Builder
 
-ASSET_ID = 'raindance-base-v2'
+ASSET_ID = 'raindance-base-v3'
 FLOOR, WALL_TOP, ROOF_TOP, APRON_TOP = -10.0, 7.4, 8.6, .03
 LIFT = 1.2
 UNDER, HEADROOM = .6, 2.4
 # Openings in each roof half above the upper end of its hall ramp.
 HOLE_X, HOLE_Z = (15.5, 24.5), (10.0, 19.0)
+# Basement: floor top, ceiling (the hall slab's underside) and interior box.
+B_FLOOR, B_CEIL = -18.0, FLOOR-1.2
+B_X, B_Z0, B_Z1 = 11.0, -6.0, 24.0
+# Atrium stair: 4 m wide at x = 0, down from the hall floor to the basement.
+STAIR_W, STAIR_Z1 = 4.0, 8.4
+OPEN_Z1 = 1.5            # hall-floor opening ends where stair headroom passes 2.6 m
+# Service route: door in the basement's back wall, passage and landing,
+# then a stair along +x in the rear strip up to a shed at ground level.
+DOOR_X, DOOR_TOP = (-5.0, -1.0), -13.5
+STRIP_Z = (28.0, 31.6)
+SERVICE_X = (-1.0, 30.2)
+TUNNEL_CLEAR = 4.5
+CEIL_END = 19.6          # where the rear apron ends and the shed begins
+SHED_X1, SHED_ROOF, DOOR_LINTEL = 32.0, 3.4, 3.0
 
 
 def close_under(mesh, x, width, z0, z1, y0, y1, floor, mat):
@@ -64,11 +83,89 @@ def cap(mesh, p, r, sides, mat):
         mesh.triangle([(x, y, z), (x+r*math.cos(b), y, z+r*math.sin(b)), (x+r*math.cos(a), y, z+r*math.sin(a))], mat)
 
 
+def ramp_x(mesh, z0, z1, x0, x1, y0, y1, mat, solid=True):
+    """A ramp climbing along +x (the kit's ramp runs along z): walking
+    surface, a 0.6 m slab beneath it and closed long sides."""
+    a, b, c, d = (x0, y0, z0), (x0, y0, z1), (x1, y1, z1), (x1, y1, z0)
+    aa, bb, cc, dd = [(p[0], p[1]-UNDER, p[2]) for p in (a, b, c, d)]
+    mesh.quad(a, b, c, d, mat, solid)
+    mesh.quad(aa, dd, cc, bb, 'trim', solid)
+    mesh.quad(a, d, dd, aa, 'trim', solid); mesh.quad(b, bb, cc, c, 'trim', solid)
+
+
+def service_y(x):
+    """Walking surface of the service stair, from B_FLOOR up to ground."""
+    return B_FLOOR+(0-B_FLOOR)*(x-SERVICE_X[0])/(SERVICE_X[1]-SERVICE_X[0])
+
+
+def basement(mesh, b, lit):
+    """Generator basement under the hall and its two routes (see module doc)."""
+    wall = lambda x0, x1, z0, z1, y0, y1, m='concrete': b.wall(x0, x1, z0, z1, y0, y1, m)
+    # Room: floor slab, side walls on the slab, north and back walls between.
+    wall(-B_X-1, B_X+1, B_Z0-1, B_Z1+1, B_FLOOR-1, B_FLOOR, 'grate')
+    for s in (-1, 1): wall(s*B_X, s*(B_X+1), B_Z0-1, B_Z1+1, B_FLOOR, B_CEIL)
+    wall(-B_X, B_X, B_Z0-1, B_Z0, B_FLOOR, B_CEIL)
+    wall(-B_X, DOOR_X[0], B_Z1, B_Z1+1, B_FLOOR, B_CEIL)
+    wall(DOOR_X[1], B_X, B_Z1, B_Z1+1, B_FLOOR, B_CEIL)
+    wall(*DOOR_X, B_Z1, B_Z1+1, DOOR_TOP, B_CEIL, 'trim')
+    # Atrium stair, sealed underneath (the wedge meets the north wall).
+    h = STAIR_W/2
+    mesh.ramp(0, STAIR_W, B_Z0, STAIR_Z1, FLOOR, B_FLOOR)
+    toe = B_Z0+(STAIR_Z1-B_Z0)*(FLOOR-UNDER-B_FLOOR)/(FLOOR-B_FLOOR)
+    mesh.triangle([(-h, B_FLOOR, B_Z0), (-h, B_FLOOR, toe), (-h, FLOOR-UNDER, B_Z0)], 'trim')
+    mesh.triangle([(h, B_FLOOR, B_Z0), (h, FLOOR-UNDER, B_Z0), (h, B_FLOOR, toe)], 'trim')
+    # Rails round the atrium opening (the stair side is open).
+    for s in (-1, 1): wall(s*h, s*(h+.2), B_Z0, OPEN_Z1, FLOOR, FLOOR+1, 'trim')
+    wall(-h-.2, h+.2, OPEN_Z1, OPEN_Z1+.2, FLOOR, FLOOR+1, 'trim')
+    # Passage out of the back door, then a landing at the service stair's foot.
+    px0, px1 = DOOR_X[0]-.4, SERVICE_X[0]
+    wall(px0, px1, B_Z1+1, STRIP_Z[1], B_FLOOR-1, B_FLOOR, 'grate')
+    wall(px0, DOOR_X[0], B_Z1+1, STRIP_Z[1], B_FLOOR, B_CEIL)
+    wall(px1, px1+.4, B_Z1+1, STRIP_Z[0]-.4, B_FLOOR, B_CEIL)
+    wall(*DOOR_X, STRIP_Z[0]-.4, STRIP_Z[0], DOOR_TOP, B_CEIL, 'trim')
+    wall(*DOOR_X, *STRIP_Z, DOOR_TOP, DOOR_TOP+.6, 'trim')
+    # Service stair under a sloped ceiling, walled on both long sides.
+    x0, x1 = SERVICE_X
+    ramp_x(mesh, *STRIP_Z, x0, x1, B_FLOOR, 0, 'grate')
+    ramp_x(mesh, *STRIP_Z, x0, CEIL_END, B_FLOOR+TUNNEL_CLEAR+UNDER, service_y(CEIL_END)+TUNNEL_CLEAR+UNDER, 'panel')
+    wall(x0, CEIL_END, STRIP_Z[0]-.4, STRIP_Z[0], B_FLOOR-1, B_CEIL)
+    wall(px0, CEIL_END, STRIP_Z[1], 32, B_FLOOR-1, APRON_TOP-.6)
+    # Shed over the stair's top end, its door facing away from the hall.
+    wall(CEIL_END, CEIL_END+.4, *STRIP_Z, service_y(CEIL_END)+TUNNEL_CLEAR, SHED_ROOF)
+    wall(CEIL_END, SHED_X1, STRIP_Z[1], 32, B_FLOOR-1, SHED_ROOF)
+    wall(CEIL_END, SHED_X1+.3, STRIP_Z[0], 32.3, SHED_ROOF, SHED_ROOF+.5, 'panel')
+    wall(SHED_X1-.4, SHED_X1, *STRIP_Z, DOOR_LINTEL, SHED_ROOF, 'trim')
+    wall(x1, SHED_X1, *STRIP_Z, -UNDER, 0, 'grate')
+    mesh.box(((CEIL_END+SHED_X1)/2, SHED_ROOF-.6, 32.05), (SHED_X1-CEIL_END, .5, .1), lit.accent, False)
+    # Dressing and light: liners on the basement walls, strips under the
+    # ceilings, and a lit strip down the stair's sloped ceiling.
+    lit.dress('x', -B_X, 1, [(B_Z0+.2, B_Z1-.2)], B_FLOOR, B_CEIL)
+    lit.dress('x', B_X, -1, [(B_Z0+.2, B_Z1-.2)], B_FLOOR, B_CEIL)
+    lit.dress('z', B_Z0, 1, [(-B_X, -h), (h, B_X)], B_FLOOR, B_CEIL)
+    lit.dress('z', B_Z1, -1, [(-B_X, DOOR_X[0]), (DOOR_X[1], B_X)], B_FLOOR, B_CEIL)
+    for x in (-7, 7): lit.ceiling_strip('z', x, B_Z0+2, B_Z1-2, B_CEIL, 1.1)
+    lit.ceiling_strip('z', sum(DOOR_X)/2, B_Z1+1.3, STRIP_Z[0]-.8, B_CEIL, .7, spacing=2)
+    lit.ceiling_strip('x', sum(STRIP_Z)/2, DOOR_X[0]+.4, DOOR_X[1]-.4, DOOR_TOP, .7, spacing=2)
+    zc, w = sum(STRIP_Z)/2, .45
+    y = lambda x: service_y(x)+TUNNEL_CLEAR-.07
+    xs = (x0+.4, CEIL_END-.4)
+    mesh.quad((xs[0], y(xs[0]), zc-w/2), (xs[1], y(xs[1]), zc-w/2), (xs[1], y(xs[1]), zc+w/2),
+              (xs[0], y(xs[0]), zc+w/2), 'light', False)
+    for x in range(1, int(CEIL_END), 4): lit.lamp((x+.5, y(x+.5)-.3, zc), .8)
+    lit.ceiling_strip('x', zc, CEIL_END+1, SHED_X1-1, SHED_ROOF, .8)
+
+
 def build(mesh, team, circuit, equipment):
     accent = 'ember' if team == 0 else 'glacier'
     b = Builder(mesh, accent, interior='panel', metal='trim', glow='light')
+    under = Builder(mesh, accent, interior='concrete', metal='trim', glow='light')
     # Hall floor and walls; side walls fit between the front and back walls.
-    mesh.box((0, FLOOR-.6, 0), (64, 1.2, 56), 'grate')
+    # The floor leaves the atrium stair's opening.
+    h = STAIR_W/2
+    b.slab(-32, 32, -28, B_Z0, FLOOR, 'grate', 1.2)
+    b.slab(-32, 32, OPEN_Z1, 28, FLOOR, 'grate', 1.2)
+    for s in (-1, 1): b.slab(s*h, s*32, B_Z0, OPEN_Z1, FLOOR, 'grate', 1.2)
+    basement(mesh, b, under)
     wy, wh = (FLOOR+WALL_TOP)/2, WALL_TOP-FLOOR
     for x in (-31, 31): mesh.box((x, wy, 0), (2, wh, 52), 'concrete')
     mesh.box((0, wy, 27), (64, wh, 2), 'concrete')
@@ -128,4 +225,7 @@ def build(mesh, team, circuit, equipment):
         'entrances': [(0, 0, -52), (-22, APRON_TOP, -52), (22, APRON_TOP, -52)],
         'hall': (0, hall, 0),
         'roof_openings': [(-20, ROOF_TOP, sum(HOLE_Z)/2), (20, ROOF_TOP, sum(HOLE_Z)/2)],
+        'generator_room': (0, B_FLOOR+LIFT, 16),
+        'stair_head': (0, FLOOR, B_Z0),
+        'service_door': (SHED_X1, 0, sum(STRIP_Z)/2),
     }

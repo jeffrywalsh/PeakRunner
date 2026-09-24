@@ -76,7 +76,7 @@ mod tests {
         assert_eq!(late.lobby().snapshot.unwrap().map, MapId::Raindance);
         a.leave(); b.leave(); late.leave();
         wait(|| handle.players.load(std::sync::atomic::Ordering::Relaxed) == 0);
-        wait(|| handle.status.lock().unwrap().map == "Raindance");
+        wait(|| handle.status.lock().unwrap().map == "Old Holler");
     }
 
     #[test]

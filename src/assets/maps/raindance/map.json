@@ -1,5 +1,5 @@
 {
-  "texture_count": 42,
+  "texture_count": 44,
   "terrain_layers": [
     0,
     1,
@@ -20,7 +20,7 @@
     "scale": "720 150 1"
   },
   "lightmap": {
-    "pages": 22,
+    "pages": 24,
     "first_layer": 20,
     "texel_m": 0.5,
     "sun": [
@@ -28,11 +28,11 @@
       0.57735,
       -0.57735
     ],
-    "lamps": 142,
+    "lamps": 200,
     "baker_sha256": "66d1c04a0581f283b62d4a01a9229abd22fbd18a738474c8c5c148db84800fed"
   },
   "version": 1,
-  "name": "Raindance \u2014 PeakRunner original",
+  "name": "Old Holler \u2014 PeakRunner original",
   "flags": [
     [
       1160.0,
@@ -356,9 +356,9 @@
       "id": "generator-0",
       "kind": "generator",
       "position": [
-        1160.0,
-        104.5,
-        460.0
+        1154.0,
+        96.5,
+        464.0
       ],
       "team": 0,
       "circuit": "ember",
@@ -447,9 +447,9 @@
       "id": "generator-7",
       "kind": "generator",
       "position": [
-        800.0,
-        104.5,
-        1420.0
+        806.0,
+        96.5,
+        1416.0
       ],
       "team": 1,
       "circuit": "glacier",
@@ -642,6 +642,21 @@
             120.6,
             465.5
           ]
+        ],
+        "generator_room": [
+          1160.0,
+          95.2,
+          464.0
+        ],
+        "stair_head": [
+          1160.0,
+          102.0,
+          486.0
+        ],
+        "service_door": [
+          1128.0,
+          112,
+          450.2
         ]
       }
     },
@@ -699,6 +714,21 @@
             120.6,
             1414.5
           ]
+        ],
+        "generator_room": [
+          800.0,
+          95.2,
+          1416.0
+        ],
+        "stair_head": [
+          800.0,
+          102.0,
+          1394.0
+        ],
+        "service_door": [
+          832.0,
+          112,
+          1429.8
         ]
       }
     },
@@ -2621,18 +2651,18 @@
     "rock"
   ],
   "provenance": "PeakRunner original procedural kit v2 (cleaned Raindance); no extracted assets",
-  "base_asset": "raindance-base-v2",
+  "base_asset": "raindance-base-v3",
   "structures_asset": "raindance-structures-v2",
-  "base_asset_sha256": "45283b5a30c445025c939a89c9bb0515bfec0ae418864c0566fb4831872b3f20",
+  "base_asset_sha256": "b34cf8f9947872d25763b81ca034ed706e7affbf61cae06e8fdce8974ad2e2ba",
   "structures_asset_sha256": "2168bd8af5ee259d70362d060f006095d3065f853be12cf5d512ade9a638067b",
   "material_source_sha256": "fe226cf2d1f451356c001f0da50bebb734c1f8cc260864d3ba6b6f94a07ae8ad",
-  "definition_sha256": "34865844790943ae49e8545824f69b008a07f9ef0d969214be5b7a51e6da9f67",
+  "definition_sha256": "38bbd0cbb27eceb37ec0916ec5426daed5c33bd31314b6aa85e78db28582e494",
   "files": {
     "height.bin": "7305d9f6ff06e086d7a831130da4116c42522d3e7606f28ebdf5d682bbf16eeb",
     "weights.rgba": "f8e2504e4779325a8afe4f46e269c02dbee2eaf61bbb06bbfbeb3d3eab8da19d",
-    "vertices.bin": "ac9952f694862c72d0389f00b15a499bdd2f05f5128c9ef2050cd8d3961949ec",
-    "collision.bin": "f4d3a4afd7cf8fffbb548f26cab84f41665a01d55e2e351fd8073fa9022339a3",
-    "textures.rgba": "f47faf7f5aa36099db2296de2cc25ea30206e93db38e2f71049342d89de004d2",
+    "vertices.bin": "075f72ee93009ca27710600f8ffdd6c0db3a8f5db3cb82a70f54b179a159c3bb",
+    "collision.bin": "744af5edbc3c60ec13039e7e128ea028b17fd8afe3cdb6958dc3c704ff2d0664",
+    "textures.rgba": "dcd37317d862f6a4c9264aa250f7cd68e7c6693b2bacff72c554ad64ad74cfdd",
     "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e"
   }
 }

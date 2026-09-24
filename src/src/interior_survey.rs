@@ -45,7 +45,7 @@ pub fn run(path: &Path, which: &str) -> Result<(), String> {
     };
     let pack = peakrunner_core::map_pack::on(map).ok_or("that map has no collision pack")?;
     if map == MapId::Raindance && !pack.manifest.private_reference {
-        return Err("Reference survey needs PEAKRUNNER_MAP_PACK set to PeakRunner-Broadside-Reference.app/Contents/Resources/map. Refusing to survey Raindance.".into());
+        return Err("Reference survey needs PEAKRUNNER_MAP_PACK set to PeakRunner-Broadside-Reference.app/Contents/Resources/map. Refusing to survey the built-in Old Holler map.".into());
     }
     let frames = interior_survey::frames_for(pack, map)?;
     let names: Vec<String> = if pack.manifest.reference_bases.is_empty() {
