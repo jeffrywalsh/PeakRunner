@@ -35,6 +35,11 @@ The old checkout and legacy browser prototype remain at
 
 ## Map rotation (five original maps in source)
 
+**Resuming work:** read `docs/session-handoff.md` first. It records the current
+branch and commit state, every system added after the September release, the
+full verification checklist, visual-QA hooks, the agent workflow, user design
+preferences, and the backlog.
+
 **Making or replacing a map:** follow `docs/map-pipeline.md` (study, concept,
 build, visual QA, tests, embed, commit). It lists the checks every map must pass.
 
