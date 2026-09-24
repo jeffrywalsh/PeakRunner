@@ -332,3 +332,38 @@ Asset `raindance-base-v5`, `raindance-structures-v3`.
 Collision: 3,316 triangles per base (budget 4,500); 12,983 for the map.
 Not playtested: whether four doors make the flag too easy to take, and the
 Crossing's reach from the bridge (players hop the 1 m bridge rail).
+
+## Old Holler flag routes (2026-09-24)
+
+Asset `raindance-base-v6`. The pipeline asks for "two main entrances but ~10
+ways of getting to the flag"; the bishop chamber alone had 5 (four doors and
+the slit), all jet-only.
+
+- **Walkable tower ramps.** Each roof half gets a 3.6 m ramp that climbs 9 m
+  over 16 m (29 degrees, inside the 35 degree walk limit and the bots' 0.62
+  rise-per-metre link limit) from behind its stairwell opening to a landing
+  beside the east or west door. The landing's inner edge follows the ledge's
+  24-sided rim vertex for vertex, so the two meet with no gap and no overlap.
+  Where a ramp's underside is lower than 2.4 m over the roof, a solid closure
+  stops players walking under it.
+- **Wider ledge.** The ledge round the collar is now a 2.4 m walkway (rim
+  radius 8.2 m, was 7.4). The 1.6 m ring could not be walked round: its
+  straight 3 m nav segments cut outside the edge and bots fell off. A 3.0 m
+  ledge overhung the deck so far that the jet hops up onto its front failed;
+  2.4 m keeps both. From either landing a player reaches all four doors on foot.
+- **Routes** (`route_checks.flag_routes`, airborne, over the chamber, ledge
+  and landings from chamber-floor height up): 11 (ember) and 12 (glacier)
+  per flag, was 7 in the same volume; the chamber on its own still has its 5 entries. `test-raindance.py`
+  requires 10.
+- **Tests.** `test_tower_ramps_walk_up_to_the_ledge` (slope, headroom, landing
+  floor to the door, sealed underside). In sim.rs the east door route now walks
+  up the ramp and in; the west and back routes climb outside the ledge rim
+  first. The fly-through grab at 20, 30 and 40 m/s is unchanged and passes.
+- **Bots.** A lone bot reaches the enemy flag in 80 s (ember) and 91 s
+  (glacier), was 90 s and 165 s. The new ramps made the east roof a cheaper
+  route, which exposed bots pinning themselves under the hall's 0.6 m eave on
+  jet links; bots now back away from a wall when the climb straight up is
+  blocked (sim.rs, jet steering).
+
+Collision: 3,384 triangles per base (budget 4,500). Not playtested: whether a
+walking route makes the flag too easy to reach.

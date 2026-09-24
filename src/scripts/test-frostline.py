@@ -642,17 +642,32 @@ class ControlPoints(unittest.TestCase):
 
 
 class Surfaces(unittest.TestCase):
-    """No visible coplanar faces of different materials (they flicker). The
-    only pairs left belong to the shared kit turret mount (its team band sits
-    flush on its collar), which build-original-map.py owns."""
-    def test_no_z_fighting_outside_the_kit_turret_mounts(self):
+    """No visible coplanar faces of different materials (they flicker),
+    anywhere on the map, the kit turret mounts included. (The mounts' earlier
+    "pairs" were the team band and collar, 7 cm apart, that the checker's
+    plane buckets merged at float32 world coordinates; it now confirms true
+    coplanarity.)"""
+    def test_no_z_fighting_anywhere(self):
         from assets import surface_checks
         root = Path(__file__).resolve().parent.parent/'assets/maps/frostline'
         v = np.fromfile(root/'vertices.bin', '<f4'); c = np.fromfile(root/'collision.bin', '<f4')
-        turrets = [e['position'] for e in json.loads((root/'map.json').read_text())['entities'] if e['kind'] == 'turret']
-        left = [e for e in surface_checks.z_fighting(v, c)
-                if not any(math.dist(e[1], t) < 3.0 for t in turrets)]
-        self.assertEqual(left, [])
+        self.assertEqual(surface_checks.z_fighting(v, c), [])
+
+    def test_checker_needs_true_coplanarity(self):
+        """Two parallel faces a few centimetres apart, far from the origin in
+        float32, are not flagged; the same faces sharing a plane are."""
+        from assets import surface_checks
+        def tri(p, mat):
+            return [c for q in p for c in (*q, 0, 0, 1, 0, 0, 0, 0, mat, -1)]
+        n = np.array([-.9659258, 0, -.2588190]); t = np.array([.2588190, 0, -.9659258])
+        centre = np.array([775.77, 123., 1380.55])
+        def face(off, mat):
+            o = centre+n*off
+            return tri([o-t*.3, o+t*.3, o+np.array([0, .3, 0])], mat)
+        apart = np.array(face(0, 7)+face(.07, 9), np.float32)
+        self.assertEqual(surface_checks.z_fighting(apart), [])
+        flush = np.array(face(0, 7)+face(0, 9), np.float32)
+        self.assertEqual(len(surface_checks.z_fighting(flush)), 1)
 
 
 class SpawnForwardClearance(unittest.TestCase):

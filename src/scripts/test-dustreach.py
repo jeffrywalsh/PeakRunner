@@ -797,12 +797,8 @@ class DustreachPassTests(unittest.TestCase):
 
     def test_no_z_fighting_anywhere(self):
         from assets import surface_checks
+        # Covers everything, the kit turret mounts included.
         found = surface_checks.z_fighting(self.mesh.vertices, self.mesh.collision)
-        # The shared kit turret mount (build-original-map.py) has a near-coplanar
-        # band that the checker flags at some positions on its own; it is not
-        # this map's geometry, so pairs on a mount are left to the kit.
-        mounts = [e['position'] for e in self.mesh.entities if e['kind'] == 'turret']
-        found = [f for f in found if min(math.hypot(f[1][0]-m[0], f[1][2]-m[2]) for m in mounts) > 2.5]
         self.assertEqual(found, [], sorted(found, key=lambda f: -f[0])[:5])
 
     def test_no_visible_hovering_edges(self):

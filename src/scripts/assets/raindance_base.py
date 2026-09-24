@@ -1,4 +1,4 @@
-"""Old Holler base (asset raindance-base-v5; the map key stays `raindance`).
+"""Old Holler base (asset raindance-base-v6; the map key stays `raindance`).
 
 Same layout as the original kit base (basement hall, atrium, wide ski ramps,
 front roof deck) with the pipeline checklist applied, and the flag in a
@@ -14,8 +14,9 @@ and the exposed roof flag stand):
   behind them: attackers can shoot and fly straight in. Turrets face the
   enemy flag with a limited field of fire (`turret_arcs.py`), so none of
   them fires back into the chamber.
-- The chamber is reached by jetting: from the front deck up to the ledge
-  round the collar, or over the mitre and in through the slit.
+- The chamber is reached on foot up either tower ramp (v6) to a landing and
+  round the 2.4 m ledge to any door, or by jetting: from the deck up to the
+  ledge, or over the mitre and in through the slit.
 
 The earlier cleanup items still hold:
 
@@ -43,7 +44,7 @@ import math
 
 from assets.structure_kit import Builder
 
-ASSET_ID = 'raindance-base-v5'
+ASSET_ID = 'raindance-base-v6'
 FLOOR, WALL_TOP, ROOF_TOP, APRON_TOP = -10.0, 7.4, 8.6, .03
 LIFT = 1.2
 UNDER, HEADROOM = .6, 2.4
@@ -67,7 +68,7 @@ SHED_X1, SHED_ROOF, DOOR_LINTEL = 32.0, 3.4, 3.0
 # are above ROOF_TOP; the lower half is solid and the chamber above it is hollow.
 TZ, SIDES, PHASE = 20.0, 24, 0.0            # panel i spans i*15..(i+1)*15 degrees from +X
 CH_FLOOR = ROOF_TOP+9.0                      # chamber floor and outer ledge top
-R_OUT, R_IN, R_LEDGE = 5.8, 5.2, 7.4         # stem outer / inner radius at the floor, ledge rim
+R_OUT, R_IN, R_LEDGE = 5.8, 5.2, 8.2         # stem outer / inner radius at the floor, ledge rim (a 2.4 m walkway, v6)
 # Four doors, one per side, two panels (3.0 m at the outer face) each and
 # 4.5 m tall, centred on -Z (front), +X, +Z and -X. Opposite doors line up
 # through the flag on the axis, so a jetting player flies straight through.
@@ -79,6 +80,12 @@ R_OUT_L, R_IN_L = 5.645, 5.045               # shell radii at the lintel
 R_BULB = 6.5                                 # widest part of the mitre
 SLIT_DIR = (-math.sqrt(.5), math.sqrt(.5))   # the mitre slit faces back-left (-X, +Z)
 SLIT_Y, SLIT_W, SLIT_TILT = ROOF_TOP+18.2, 3.6, math.radians(40)
+# Walkable approaches to the chamber ledge (v6): one ramp per side climbs from
+# the roof half behind its stairwell opening up to a landing beside the east
+# or west door. 9 m over 16 m is 29 degrees, under the 35 degree walk limit.
+TOWER_RAMP_Z = (20.4, 24.0)
+TOWER_RAMP_HIGH, TOWER_RAMP_LOW = 11.0, 27.0
+LANDING_X, LANDING_Z = (7.45, 11.0), (17.0, 24.0)
 
 
 def close_under(mesh, x, width, z0, z1, y0, y1, floor, mat):
@@ -124,6 +131,55 @@ def ramp_x(mesh, z0, z1, x0, x1, y0, y1, mat, solid=True):
     mesh.quad(a, b, c, d, mat, solid)
     mesh.quad(aa, dd, cc, bb, 'trim', solid)
     mesh.quad(a, d, dd, aa, 'trim', solid); mesh.quad(b, bb, cc, c, 'trim', solid)
+
+
+def close_under_x(mesh, z0, z1, x_high, x_low, y_high, y_low, floor, mat):
+    """Solid closure under a ramp that descends from x_high to x_low (either
+    direction along x) wherever its underside is lower than HEADROOM above
+    `floor`: two side panels and an end wall across the ramp."""
+    run = x_low-x_high
+    under = lambda x: y_high+(y_low-y_high)*(x-x_high)/run-UNDER
+    xa = x_high+run*(floor+HEADROOM-(y_high-UNDER))/(y_low-y_high)   # clearance reaches HEADROOM
+    xb = x_high+run*(floor-(y_high-UNDER))/(y_low-y_high)             # underside meets the floor
+    if abs(xb-x_high) < abs(xa-x_high): return
+    for z in (z0, z1):
+        flip = (z == z0) == (run > 0)                                   # side panels face outward
+        tri = [(xa, floor, z), (xb, floor, z), (xa, under(xa), z)]
+        mesh.triangle(tri[::-1] if flip else tri, mat)
+    quad = [(xa, floor, z0), (xa, floor, z1), (xa, under(xa), z1), (xa, under(xa), z0)]
+    mesh.quad(*(quad if run > 0 else quad[::-1]), mat)
+
+
+def _quad_facing(mesh, a, b, c, d, mat, want):
+    """Quad a-b-c-d, wound so its normal points along `want` (a vector)."""
+    u = [b[i]-a[i] for i in range(3)]; v = [d[i]-a[i] for i in range(3)]
+    n = (u[1]*v[2]-u[2]*v[1], u[2]*v[0]-u[0]*v[2], u[0]*v[1]-u[1]*v[0])
+    if sum(n[i]*want[i] for i in range(3)) < 0: a, b, c, d = a, d, c, b
+    mesh.quad(a, b, c, d, mat)
+
+
+def tower_landing(mesh, side, mat):
+    """A 0.8 m slab at chamber-floor height from the ledge's 24-sided rim out
+    to the ramp's high end. Its inner edge follows the rim's own vertices, so
+    the landing meets the ledge edge to edge with no gap and no overlap."""
+    za, zb = LANDING_Z; xo = side*LANDING_X[1]
+    rim = [_pt(R_LEDGE, CH_FLOOR, i) for i in range(SIDES)]
+    inner = []
+    for i in range(SIDES):
+        p, q = rim[i], rim[(i+1) % SIDES]
+        if side*p[0] > 0 and za < p[2] < zb: inner.append((p[0], p[2]))
+        for zc in (za, zb):                                  # rim edge crossing a landing end
+            if (p[2]-zc)*(q[2]-zc) < 0:
+                t = (zc-p[2])/(q[2]-p[2]); x = p[0]+t*(q[0]-p[0])
+                if side*x > 0: inner.append((x, zc))
+    inner.sort(key=lambda p: p[1])
+    top, bot = CH_FLOOR, CH_FLOOR-.8
+    for (x0, z0), (x1, z1) in zip(inner, inner[1:]):
+        _quad_facing(mesh, (x0, top, z0), (x1, top, z1), (xo, top, z1), (xo, top, z0), mat, (0, 1, 0))
+        _quad_facing(mesh, (x0, bot, z0), (x1, bot, z1), (xo, bot, z1), (xo, bot, z0), 'trim', (0, -1, 0))
+    _quad_facing(mesh, (xo, bot, za), (xo, bot, zb), (xo, top, zb), (xo, top, za), 'trim', (side, 0, 0))
+    for (x, z), sz in ((inner[0], -1), (inner[-1], 1)):
+        _quad_facing(mesh, (x, bot, z), (xo, bot, z), (xo, top, z), (x, top, z), 'trim', (0, 0, sz))
 
 
 def service_y(x):
@@ -339,6 +395,15 @@ def build(mesh, team, circuit, equipment):
         close_under(mesh, x, 18, -52, -28, APRON_TOP, ROOF_TOP, APRON_TOP, 'concrete')
     # The bishop flag tower behind the front roof deck (see bishop_tower).
     bishop_tower(mesh, b, accent)
+    # Tower ramps: walk up from each roof half to a landing at the east or
+    # west door, then round the ledge to any of the four doors.
+    z0, z1 = TOWER_RAMP_Z
+    for side in (-1, 1):
+        hi, lo = side*TOWER_RAMP_HIGH, side*TOWER_RAMP_LOW
+        if side > 0: ramp_x(mesh, z0, z1, hi, lo, CH_FLOOR, ROOF_TOP, 'grate')
+        else: ramp_x(mesh, z0, z1, lo, hi, ROOF_TOP, CH_FLOOR, 'grate')
+        close_under_x(mesh, z0, z1, hi, lo, CH_FLOOR, ROOF_TOP, ROOF_TOP, 'trim')
+        tower_landing(mesh, side, 'grate')
     # Exterior ribbed cladding and team band above ground on the side walls.
     for x in (-32.05, 32.05):
         for z in range(-24, 26, 8): mesh.box((x, WALL_TOP/2, z), (.15, WALL_TOP-.2, .7), 'trim', False)

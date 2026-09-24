@@ -213,6 +213,40 @@ class RaindanceTests(unittest.TestCase):
                 checked += 1
         self.assertGreater(checked, 500)
 
+    def test_tower_ramps_walk_up_to_the_ledge(self):
+        """Each side's ramp is walkable (under 35 degrees) with headroom from
+        the roof up to its landing, the landing is floor top level with the
+        ledge, and the landing meets the ledge in front of the east or west
+        door; under the low end of the ramp nobody can walk in."""
+        z0, z1 = base.TOWER_RAMP_Z
+        hi, lo = base.TOWER_RAMP_HIGH, base.TOWER_RAMP_LOW
+        slope = math.degrees(math.atan2(base.CH_FLOOR-base.ROOF_TOP, lo-hi))
+        self.assertLess(slope, 35.0)
+        for side in (-1, 1):
+            for x in np.arange(hi+.2, lo-.1, .5):
+                y = base.CH_FLOOR+(base.ROOF_TOP-base.CH_FLOOR)*(x-hi)/(lo-hi)
+                for z in (z0+.5, (z0+z1)/2, z1-.5):
+                    t, ny = self.soup.hits((side*x, y+2, z), (0, -1, 0))
+                    self.assertAlmostEqual(y+2-t[0], y, places=2, msg=(side, x, z))
+                    self.assertGreater(ny[0], math.cos(math.radians(35)))
+                    self.assertGreater(self.soup.first((side*x, y+.1, z), (0, 1, 0)), 2.6, (side, x, z, 'headroom'))
+            # Landing and ledge: floor top all the way from the ramp to the door.
+            for x in np.arange(base.R_OUT+.3, base.LANDING_X[1]-.1, .3):
+                for z in (base.TZ-1, base.TZ, base.TZ+1):
+                    t, ny = self.soup.hits((side*x, base.CH_FLOOR+2, z), (0, -1, 0))
+                    self.assertAlmostEqual(2-t[0], 0, places=3, msg=(side, x, z)); self.assertGreater(ny[0], .99)
+            # Sealed under the ramp wherever it is lower than headroom.
+            sealed = 0
+            for x in np.arange(hi, lo, .4):
+                under = base.CH_FLOOR+(base.ROOF_TOP-base.CH_FLOOR)*(x-hi)/(lo-hi)-base.UNDER
+                gap = under-base.ROOF_TOP
+                if not .6 < gap < base.HEADROOM-.05: continue
+                p = (side*x, base.ROOF_TOP+min(.5, gap/2), (z0+z1)/2)
+                for a in np.linspace(0, math.tau, 8, endpoint=False):
+                    self.assertLess(self.soup.first(p, (math.cos(a+.1), 0, math.sin(a+.1))), 10, (p, a))
+                sealed += 1
+            self.assertGreater(sealed, 2)
+
     def test_opposite_doors_line_up_straight_through(self):
         """Four doors (front -Z, east +X, back +Z, west -X), 3 m wide and 4.5 m
         tall: a body band enters one door, crosses the chamber floor over the
@@ -669,19 +703,22 @@ class RouteCounts(unittest.TestCase):
             for e in mitre: self.assertGreater((e[0]-cx)*sx+(e[2]-cz)*sz, 0, (b['id'], 'mitre entry not at the slit', e))
 
     def test_distinct_flag_routes(self):
-        """route_checks.flag_routes on the bishop chamber (airborne): each of
-        the four doors and the mitre slit lands straight in the flag's zone,
-        so each is one route. Five per flag today, a regression floor; the
-        pipeline's target is about ten (docs/map-pipeline.md)."""
+        """route_checks.flag_routes (airborne) on the flag tower's upper
+        volume: the chamber, the ledge round it and both ramp landings, from
+        chamber-floor height up. Ways in include both walking ramps, jet hops
+        onto the ledge from every side, the four doors and the mitre slit.
+        The pipeline's target is about ten ways to the flag
+        (docs/map-pipeline.md); the chamber alone still has its five entries
+        (test_base_routes)."""
         from assets import route_checks as rc
         pack = rc.Pack(PACK)
         for b in build.spec()['bases']:
             ox, oy, oz = b['position']
             m = kit.Mesh(); m.origin = tuple(b['position']); m.yaw = math.radians(b['yaw'])
-            cx, _, cz = m.point((0, 0, base.TZ)); floor = oy+base.CH_FLOOR; r = base.R_IN
+            cx, _, cz = m.point((0, 0, base.TZ)); floor = oy+base.CH_FLOOR; r = base.LANDING_X[1]+.5
             found = rc.flag_routes(pack, (cx, cz), (cx-r, cx+r, floor-.5, floor+14, cz-r, cz+r),
                                    (cx-2.5, cx+2.5, floor-.5, floor+.8, cz-2.5, cz+2.5), airborne=True)
-            self.assertGreaterEqual(found['routes'], 5, (b['id'], [len(a) for a in found['approaches']]))
+            self.assertGreaterEqual(found['routes'], 10, (b['id'], [len(a) for a in found['approaches']]))
 
     @staticmethod
     def door_points():

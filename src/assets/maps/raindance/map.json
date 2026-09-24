@@ -2853,18 +2853,18 @@
     "rock"
   ],
   "provenance": "PeakRunner original procedural kit v2 (cleaned Raindance); no extracted assets",
-  "base_asset": "raindance-base-v5",
+  "base_asset": "raindance-base-v6",
   "structures_asset": "raindance-structures-v3",
-  "base_asset_sha256": "af1ae38216a5f60cde1c0d151a578eceb1869154e488455e1c6e058d8a44e2c1",
+  "base_asset_sha256": "14c8ed314aac4683fdc59a46eb5b4c53c754c35018912b7ae5c90c40b244e2e8",
   "structures_asset_sha256": "bbd5f4a11418fff0358ddb915e3964922ba114da6762e4e9143e97b36db34a8f",
   "material_source_sha256": "dd83ab464ed17fb65a14768b5acefe8c872514396bf8d356dd4126310120182b",
   "definition_sha256": "deb9f5050b74cb797e0acf005c7bc74e788f91a1675b89126c084c2022943968",
   "files": {
     "height.bin": "7305d9f6ff06e086d7a831130da4116c42522d3e7606f28ebdf5d682bbf16eeb",
     "weights.rgba": "f8e2504e4779325a8afe4f46e269c02dbee2eaf61bbb06bbfbeb3d3eab8da19d",
-    "vertices.bin": "e3d15f07d580ac7f6ecd62d4d455f304d1622815048cc1710791594ee349c79e",
-    "collision.bin": "9295a0c2ee48b945c59481f18486b41025e65a51a1abcc9225fa9583ed9acfda",
-    "textures.rgba": "c097ebea6a9f8ac14b8f735771915801a7185474ed52c4b162801b6cde50deca",
+    "vertices.bin": "f9963efed77937f7490dbe131af2bd9dbd5abc9cafa88905aae969f1af8c8d1e",
+    "collision.bin": "470d7c23ee2aaebac6631993a1ba92dbae56bbe73565e18f874fa23316f7daee",
+    "textures.rgba": "e92a51e957856b7722245d75a4b5546ff3e7d3ac5e44532fbb3106910f6f57ea",
     "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e"
   }
 }

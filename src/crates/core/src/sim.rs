@@ -1370,6 +1370,16 @@ impl World {
                     let back = -Vec3::new(vel.x, 0.0, vel.z).normalize_or_zero();
                     wish = back;
                 }
+                // Under an overhang (a roof's eave over its wall): the climb
+                // straight up is blocked, so back away from the wall until it
+                // clears, then rise and cross, instead of pinning under it.
+                if pos.y < goal.y + 0.5 && hlen < 4.0 && hlen > 0.05 {
+                    let blocked = crate::map_pack::on(self.map).is_some_and(|pack| {
+                        let top = goal.y + 1.5;
+                        top > pos.y + 0.5 && pack.sweep(pos + Vec3::Y * 0.5, Vec3::new(pos.x, top, pos.z), PLAYER_RADIUS).is_some()
+                    });
+                    if blocked { wish = -horiz / hlen; }
+                }
                 let tank = energy >= ENERGY_MAX * crate::bot_nav::JET_PLAN_ENERGY - 4.0;
                 if on_ground && !tank && (hlen < 12.0 || horiz_speed < 10.0) {
                     // Recharge in place before committing to the climb.
@@ -3836,25 +3846,32 @@ mod spawn_point_tests {
         let slit_in = (sx * 1.5 + lx, 25.1, TZ + sz * 1.5 + lz);
         // (name, start on the roof, waypoints in, waypoints out); each waypoint
         // is (local x, y above the base origin, local z, jet). Each door is
-        // entered from a hover over the ledge round the collar (r 5.8..7.4),
+        // entered from a hover over the ledge round the collar (r 5.8..8.2),
         // straight in: nothing stands behind the doors.
         type Route = (&'static str, (f32, f32, f32), Vec<(f32, f32, f32, bool)>, Vec<(f32, f32, f32, bool)>);
         let routes: [Route; 5] = [
             ("front", (0., 8.6, 8.),
                 vec![(0., FLOOR + 1., 13.3, true), (0., FLOOR, 16.2, false), (0., FLOOR, 20., false)],
                 vec![(0., FLOOR, 16.2, false), (0., FLOOR, 13.4, false), (0., 8.6, 9.5, false)]),
-            ("east", (14., 8.6, 20.),
-                vec![(6.7, FLOOR + 1., 20., true), (3.8, FLOOR, 20., false), (0., FLOOR, 20., false)],
-                vec![(3.8, FLOOR, 20., false), (6.6, FLOOR, 20., false), (10.5, FLOOR + 1., 20., true),
-                     (14., 8.6, 20., false)]),
+            // East: walk up the tower ramp from the roof half to its landing
+            // and in the east door; out the same way, down to the roof.
+            ("east", (29.0, 8.6, 22.2),
+                vec![(11.5, FLOOR, 22.2, false), (8.5, FLOOR, 20., false), (3.8, FLOOR, 20., false),
+                     (0., FLOOR, 20., false)],
+                vec![(3.8, FLOOR, 20., false), (8.5, FLOOR, 20., false), (11.5, FLOOR, 22.2, false),
+                     (29.0, 8.6, 22.2, false)]),
             ("back", (8., 8.6, 26.),
-                vec![(0., FLOOR + 1., 26.6, true), (0., FLOOR, 23.8, false), (0., FLOOR, 20., false)],
+                vec![(0., FLOOR + 2.5, 30., true), (0., FLOOR + 1., 26.6, true), (0., FLOOR, 23.8, false),
+                     (0., FLOOR, 20., false)],
                 vec![(0., FLOOR, 23.8, false), (0., FLOOR, 26.6, false), (7.5, FLOOR + 1., 27.5, true),
                      (8., 8.6, 26., false)]),
-            ("west", (-14., 8.6, 14.),
-                vec![(-6.7, FLOOR + 1., 20., true), (-3.8, FLOOR, 20., false), (0., FLOOR, 20., false)],
-                vec![(-3.8, FLOOR, 20., false), (-6.6, FLOOR, 20., false), (-10.5, FLOOR + 1., 20., true),
-                     (-14., 8.6, 14., false)]),
+            // West: jet from the deck up past the landing's front edge onto
+            // the ledge and in the west door; out over the landing and down.
+            ("west", (-14., 8.6, 10.),
+                vec![(-9.5, FLOOR + 2.5, 14.5, true), (-7.5, FLOOR + 1., 20., true), (-3.8, FLOOR, 20., false),
+                     (0., FLOOR, 20., false)],
+                vec![(-3.8, FLOOR, 20., false), (-7.5, FLOOR, 20., false), (-10.5, FLOOR + 1., 20., true),
+                     (-16., 8.6, 12., false)]),
             ("slit", (-13., 8.6, 26.),
                 vec![(slit_out.0, slit_out.1, slit_out.2, true), (slit_in.0, slit_in.1, slit_in.2, true),
                      (slit_in.0, FLOOR, slit_in.2, false)],

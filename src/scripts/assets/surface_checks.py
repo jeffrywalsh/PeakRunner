@@ -67,6 +67,11 @@ def z_fighting(vertices, collision=None):
             axis = int(np.abs(canon[ki]).argmax()); keep = [c for c in range(3) if c != axis]
             for j, kj in g[a+1:]:
                 if mat[i] == mat[j] or unit[ki] @ unit[kj] < 0: continue
+                # Buckets key on the absolute plane distance, so two parallel
+                # faces centimetres apart can share one when float32 world
+                # coordinates tilt their normals slightly (a kit turret's band
+                # 7 cm off its collar did). Confirm true coplanarity.
+                if abs(unit[ki] @ (p[j].mean(0)-p[i][0])) > PLANE_EPS: continue
                 pi, pj = p[i][:, keep], p[j][:, keep]
                 if _inside(pj.mean(0), pi) or _inside(pi.mean(0), pj):
                     small = pj if ln[j] < ln[i] else pi
