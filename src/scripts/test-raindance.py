@@ -83,8 +83,10 @@ class Recording(kit.Mesh):
         try: return super().equipment(*a, **k)
         finally: self.depth -= 1
 
+    group = 'base'
+
     def box(self, p, size, mat='concrete', solid=True):
-        if not self.depth: self.boxes.append((tuple(p), tuple(size), mat, solid))
+        if not self.depth: self.boxes.append((tuple(p), tuple(size), mat, solid, self.group))
         super().box(p, size, mat, solid)
 
 
@@ -180,6 +182,7 @@ class RaindanceTests(unittest.TestCase):
         for x0, x1, z0, z1, level in regions:
             for x in np.arange(x0, x1+.01, .8):
                 for z in np.arange(z0, z1+.01, .8):
+                    if level == base.ROOF_TOP and math.hypot(x, z-base.TZ) < 7.7: continue   # inside the tower
                     t, ny = self.soup.hits((x, level+2.6, z), (0, -1, 0))
                     if not len(t) or abs(2.6-t[0]) > .02: continue
                     first, fy = self.soup.hits((x, level+.15, z), (0, -1, 0))
@@ -210,20 +213,19 @@ class RaindanceTests(unittest.TestCase):
                 checked += 1
         self.assertGreater(checked, 500)
 
-    def test_doors_are_open_straight_through_to_the_chamber(self):
-        """Front (-Z) and side (+X) doors: a body band passes the wall (1.6 m
-        wide, 3.4 m tall) with nothing behind it, crossing the chamber floor
-        to the far inner wall. The two doors are 90 degrees apart, so neither
-        looks out through the other."""
-        for (x, z), (dx, dz) in (((0, -9), (0, 1)), ((9, 0), (-1, 0))):
-            for h in (.3, 1., 1.8, 2.5, 3.2):
-                for off in (-.5, 0, .5):
+    def test_opposite_doors_line_up_straight_through(self):
+        """Four doors (front -Z, east +X, back +Z, west -X), 3 m wide and 4.5 m
+        tall: a body band enters one door, crosses the chamber floor over the
+        flag and leaves through the opposite door with nothing in the way,
+        so a jetting player can fly straight through and grab the flag."""
+        for (x, z), (dx, dz) in (((0, -12), (0, 1)), ((12, 0), (-1, 0)), ((0, 12), (0, -1)), ((-12, 0), (1, 0))):
+            for h in (.3, 1., 1.8, 2.5, 3.2, 4.1):
+                for off in (-.8, 0, .8):
                     o = (x+off*abs(dz), base.CH_FLOOR+h, base.TZ+z+off*abs(dx))
-                    t = self.soup.first(o, (dx, 0, dz), 20)
-                    self.assertGreater(t, 9+base.R_IN-.8, msg=(x, z, h, off))
-                    self.assertLess(t, 9+base.R_OUT+.1, msg=(x, z, h, off))
-            o = (x, base.CH_FLOOR+3.55, base.TZ+z)                       # lintel
-            self.assertLess(self.soup.first(o, (dx, 0, dz), 12), 9-base.R_IN+.01)
+                    self.assertGreater(self.soup.first(o, (dx, 0, dz), 24), 24-1e-3, msg=(x, z, h, off))
+            o = (x, base.CH_LINTEL+.15, base.TZ+z)                       # lintel
+            self.assertLess(self.soup.first(o, (dx, 0, dz), 12), 12-base.R_OUT_L+.02)
+        self.assertEqual(len(base.DOORS), 4)
 
     def test_slit_has_a_lane_for_a_standing_body(self):
         """A 1.04 m wide, 2.56 m tall body box flies straight in through the
@@ -262,11 +264,11 @@ class RaindanceTests(unittest.TestCase):
                 if abs(x-gx) < 3 and abs(z-gz) < 2.5: continue                        # generator plinth
                 t, ny = self.soup.hits((x, base.B_FLOOR+3, z), (0, -1, 0))
                 self.assertAlmostEqual(3-t[0], 0, places=3, msg=(x, z)); self.assertGreater(ny[0], .999)
-                self.assertGreater(self.soup.first((x, base.B_FLOOR+.1, z), (0, 1, 0)), 6.5, (x, z))
+                self.assertGreater(self.soup.first((x, base.B_FLOOR+.1, z), (0, 1, 0)), 7.9, (x, z))
                 checked += 1
         self.assertGreater(checked, 150)
-        # The generator (5.8 m) clears the ceiling.
-        self.assertGreater(base.B_CEIL-base.B_FLOOR, 6.0)
+        # 8 m clear: flyable, and the generator (5.8 m) clears the ceiling.
+        self.assertAlmostEqual(base.B_CEIL-base.B_FLOOR, 8.0, places=4)
 
     def test_both_stairs_are_walkable_with_headroom(self):
         for z in np.arange(base.B_Z0+.3, base.STAIR_Z1-.2, .5):         # atrium stair
@@ -317,10 +319,12 @@ class RaindanceTests(unittest.TestCase):
         faces in one plane over a shared area: that is what z-fights."""
         mesh = Recording(); mesh.lamps = []
         base.build(mesh, 0, 'one', EQUIPMENT)
-        raindance_structures.bunker(mesh); raindance_structures.landing_pad(mesh, 0)
-        faces = [f+(i,) for i, (p, s, _, _) in enumerate(mesh.boxes) for f in box_faces(p, s)]
+        mesh.group = 'bunker'; raindance_structures.bunker(mesh)
+        mesh.group = 'pad'; raindance_structures.landing_pad(mesh, 0)
+        faces = [f+(i,) for i, (p, s, _, _, _) in enumerate(mesh.boxes) for f in box_faces(p, s)]
         by_plane = {}
-        for k, plane, d, rect, i in faces: by_plane.setdefault((k, round(plane, 4), d), []).append((rect, i))
+        for k, plane, d, rect, i in faces:     # structures stand apart; compare within each
+            by_plane.setdefault((mesh.boxes[i][4], k, round(plane, 4), d), []).append((rect, i))
         for key, items in by_plane.items():
             for a in range(len(items)):
                 for b in range(a+1, len(items)):
@@ -412,14 +416,17 @@ class RaindanceTests(unittest.TestCase):
                 targets.append(m.point((-3, base.B_FLOOR+base.LIFT+.8, z)))
             for x in np.arange(base.SERVICE_X[0]+.5, base.CEIL_END, 1.5):
                 targets.append(m.point((x, base.service_y(x)+base.LIFT+.8, sum(base.STRIP_Z)/2)))
-            # The whole flag chamber floor; its two doors are open.
+            # The whole flag chamber floor; its four doors are open.
             for x in np.arange(-4.6, 4.61, .5):
                 for z in np.arange(-4.6, 4.61, .5):
                     if math.hypot(x, z) < base.R_IN-.55:
                         targets.append(m.point((x, base.CH_FLOOR+base.LIFT+.8, base.TZ+z)))
             pt = lambda x, z: tuple(m.point((x, 0, z))[i] for i in (0, 2))
-            openings += [(pt(-.8, base.TZ-base.R_IN), pt(.8, base.TZ-base.R_IN)),
-                         (pt(base.R_IN, base.TZ-.8), pt(base.R_IN, base.TZ+.8))]
+            w = 1.35                                                    # half a door at the inner face
+            openings += [(pt(-w, base.TZ-base.R_IN), pt(w, base.TZ-base.R_IN)),
+                         (pt(base.R_IN, base.TZ-w), pt(base.R_IN, base.TZ+w)),
+                         (pt(-w, base.TZ+base.R_IN), pt(w, base.TZ+base.R_IN)),
+                         (pt(-base.R_IN, base.TZ-w), pt(-base.R_IN, base.TZ+w))]
         targets = np.array(targets)
         allowed = sightline_checks.near_openings(targets, openings)
         turrets = [e for e in self.man['entities'] if e['kind'] == 'turret']
@@ -500,11 +507,129 @@ class RaindanceTests(unittest.TestCase):
             for f in self.pack.iterdir():
                 self.assertEqual(f.read_bytes(), (out/f.name).read_bytes(), f.name)
 
+    # --- Field structures, render z-fighting, look (v5) -----------------------
+    def test_bunker_is_tall_with_two_openings(self):
+        """Ceiling 7 m over the floor, open at the front ramp and through the
+        6 m back opening, with a ramp down to the ground on each side."""
+        m = kit.Mesh(); raindance_structures.bunker(m); soup = Soup(m.collision)
+        top = raindance_structures.B_FLOOR_TOP
+        for x in (-6, 0, 6):
+            for z in (-6, 0, 5):
+                t, ny = soup.hits((x, top+2, z), (0, -1, 0))
+                self.assertAlmostEqual(2-t[0], 0, places=3); self.assertGreater(ny[0], .999)
+                self.assertAlmostEqual(soup.first((x, top+.1, z), (0, 1, 0)), 6.9, places=3)
+        for h in (.5, 2, 4, 5.2):
+            for x in (-2.4, 0, 2.4):
+                self.assertEqual(soup.first((x, top+h, 0), (0, 0, 1), 30), np.inf, ('back', x, h))
+                self.assertEqual(soup.first((x, top+h, 0), (0, 0, -1), 30), np.inf, ('front', x, h))
+
+    def test_pads_and_bunkers_reach_below_the_ground(self):
+        """No field structure edge hovers over the terrain: each landing pad's
+        foundation and each bunker's slab reach below the ground at their rims."""
+        d = build.spec()
+        for o in d['objects']:
+            if o['asset'] not in ('landing_pad', 'bunker'): continue
+            x, y, z = o['position']
+            if o.get('grounded'): y = kit.height(x, z, d)
+            bottom = y-4 if o['asset'] == 'landing_pad' else y-2.8
+            r = 10.6 if o['asset'] == 'landing_pad' else 14.9
+            for a in np.linspace(0, math.tau, 24, endpoint=False):
+                ground = kit.height(x+r*math.cos(a), z+r*math.sin(a), d)
+                self.assertLess(bottom, ground-.5, (o['id'], a, ground))
+
+    def test_render_mesh_has_no_same_facing_overlaps(self):
+        """No two visible structure triangles of different materials lie in
+        one plane, facing the same way, over each other (they would z-fight).
+        Equipment models are the kit's and are left out."""
+        class Tracked(kit.Mesh):
+            def __init__(self): super().__init__(); self.skip = []; self.depth = 0
+            def equipment(self, *a, **k):
+                start = len(self.vertices); self.depth += 1
+                try: return super().equipment(*a, **k)
+                finally:
+                    self.depth -= 1
+                    if not self.depth: self.skip.append((start, len(self.vertices)))
+        m = Tracked(); m.lamps = []
+        base.build(m, 0, 'one', EQUIPMENT)
+        m.origin = (200, 0, 0); raindance_structures.bunker(m)
+        m.origin = (-200, 0, 0); raindance_structures.landing_pad(m, 0)
+        v = np.array(m.vertices, np.float64).reshape(-1, 3, 12)
+        keep = np.ones(len(v), bool)
+        for a, b in m.skip: keep[a//36:b//36] = False
+        v = v[keep]
+        p = v[:, :, :3]; mat = v[:, 0, 10]
+        n = np.cross(p[:, 1]-p[:, 0], p[:, 2]-p[:, 0]); ln = np.linalg.norm(n, axis=1)
+        ok = np.nonzero(ln > 1e-6)[0]; n = n[ok]/ln[ok, None]
+        d = np.einsum('ij,ij->i', n, p[ok, 0])
+        groups = {}
+        for k, i in enumerate(ok):
+            groups.setdefault((tuple(np.round(n[k], 3)), round(float(d[k])/.004)), []).append(i)
+        def inside(pt, tri, keep):
+            a, b, c = tri[:, keep]; v0, v1, v2 = c-a, b-a, pt-a
+            d00, d01, d11, d20, d21 = v0@v0, v0@v1, v1@v1, v2@v0, v2@v1
+            den = d00*d11-d01*d01
+            if abs(den) < 1e-12: return False
+            u = (d11*d20-d01*d21)/den; w = (d00*d21-d01*d20)/den
+            return u > .02 and w > .02 and u+w < .98
+        bad = []
+        for (normal, _), items in groups.items():
+            if len(items) < 2: continue
+            keep_axes = [c for c in range(3) if c != int(np.abs(normal).argmax())]
+            for a in range(len(items)):
+                for b in range(a+1, len(items)):
+                    i, j = items[a], items[b]
+                    if mat[i] == mat[j]: continue
+                    if inside(p[j].mean(0)[keep_axes], p[i], keep_axes) or inside(p[i].mean(0)[keep_axes], p[j], keep_axes):
+                        bad.append((p[i].mean(0).round(2).tolist(), int(mat[i]), int(mat[j])))
+        self.assertEqual(bad, [])
+
+    def test_capture_and_hold_points(self):
+        """Three towers (docs/capture-and-hold.md): the knolls mirror each
+        other through the map centre on flat, tree-free ground; the Crossing
+        stands on a platform level with the bridge deck, touching its west
+        side at mid-span. None runs in CTF."""
+        from assets import cnh_tower
+        d = build.spec(); pts = self.man['control_points']
+        self.assertEqual([p['id'] for p in pts], ['crossing', 'west-knoll', 'east-knoll'])
+        self.assertTrue(all(p['radius'] == cnh_tower.RING and not p['ctf_active'] for p in pts))
+        (wx, wy, wz), (ex, ey, ez) = pts[1]['pos'], pts[2]['pos']
+        self.assertAlmostEqual(wx+ex, 1960); self.assertAlmostEqual(wz+ez, 1880)
+        scen = np.array([i['position'][::2] for i in self.man['instances'] if i['asset'] in ('tree', 'rock')])
+        for p in pts:
+            x, y, z = p['pos']
+            self.assertGreater(np.min(np.hypot(*(scen-[x, z]).T)), 16, p['id'])
+            if p['id'] == 'crossing': continue
+            rim = [kit.height(x+3.8*math.cos(a), z+3.8*math.sin(a), d) for a in np.linspace(0, math.tau, 24, endpoint=False)]
+            self.assertLess(max(rim)-min(rim), cnh_tower.MAX_TILT, p['id'])
+            self.assertAlmostEqual(y, kit.height(x, z, d), places=3)
+        x, y, z = pts[0]['pos']
+        self.assertAlmostEqual(y, build.DECK_TOP)
+        self.assertAlmostEqual(x+build.PLATFORM_R, 1000-6.5)             # bridge's west edge
+        for r in (6, 9, 11.8):                                         # the ring is standable deck
+            for a in np.linspace(0, math.tau, 12, endpoint=False):
+                t, ny = self.world.hits((x+r*math.cos(a), y+2, z+r*math.sin(a)), (0, -1, 0))
+                self.assertAlmostEqual(y+2-t[0], y, places=2); self.assertGreater(ny[0], .99)
+
+    def test_old_holler_has_its_own_look(self):
+        """An overcast procedural sky and valley mist. The sun keeps the
+        direction the lightmaps were baked with."""
+        look = self.man['look']
+        self.assertNotIn('sun_direction', look)
+        self.assertGreater(look['sky']['cloud_cover'], .7)
+        self.assertLess(look['sun_disc'], .5)
+        self.assertGreater(look['height_fog']['density'], 0)
+        self.assertIn('fogColor', self.man['sky'])
+        for other in ('tower-complex', 'stonehenge-clone', 'cairnhold'):
+            f = ROOT/'assets/maps'/other/'map.json'
+            if f.exists():
+                self.assertNotEqual(json.loads(f.read_text()).get('look', {}).get('sky'), look['sky'], other)
+
+
 class RouteCounts(unittest.TestCase):
     """Routes on the committed pack (assets/route_checks.py). Walking: more
     than one way into each hall, and exactly two into the generator basement
-    (the atrium stair and the service stair). Jetting: three ways into each
-    bishop flag chamber, the front door, the side door and the mitre slit.
+    (the atrium stair and the service stair). Jetting: five ways into each
+    bishop flag chamber: the four doors and the mitre slit.
     The chamber is round, so it is counted with a round region; entries at
     floor height are the doors, higher ones come in over the top through the
     slit (the over-the-top hop, or a drop from the slit's lip)."""
@@ -529,11 +654,14 @@ class RouteCounts(unittest.TestCase):
             n = g.nodes
             inside = (np.hypot(n[:, 0]-cx, n[:, 2]-cz) < base.R_IN) & (np.abs(n[:, 1]-floor) < .5)
             vol = (cx-base.R_IN, cx+base.R_IN, floor-.5, floor+1.5+rc.HEADROOM, cz-base.R_IN, cz+base.R_IN)
+            # The slit drops players onto the floor near the back door, so its
+            # crossings and the back door's cluster together; count the doors
+            # without the over-the-top hops, then find the slit with them.
+            doors = [e for e in rc.entries(g, inside, seeds, vol) if e[1]-floor < .5]
             entries = rc.entries(g, inside, seeds, vol, overhead=(7, 8, 9, 10))
-            doors = [e for e in entries if e[1]-floor < .5]
             mitre = [e for e in entries if e[1]-floor >= .5]
             want = [m.point(p) for p in self.door_points()]
-            self.assertEqual(len(doors), 2, (b['id'], entries))
+            self.assertEqual(len(doors), 4, (b['id'], entries))
             for w in want:
                 self.assertLess(min(math.hypot(e[0]-w[0], e[2]-w[2]) for e in doors), 1.5, (b['id'], w, doors))
             self.assertGreaterEqual(len(mitre), 1, (b['id'], entries))
@@ -544,7 +672,8 @@ class RouteCounts(unittest.TestCase):
     def door_points():
         """Where each door's crossing lands: just inside the inner wall."""
         r = base.R_IN-.2
-        return [(0, base.CH_FLOOR, base.TZ-r), (r, base.CH_FLOOR, base.TZ)]
+        return [(0, base.CH_FLOOR, base.TZ-r), (r, base.CH_FLOOR, base.TZ),
+                (0, base.CH_FLOOR, base.TZ+r), (-r, base.CH_FLOOR, base.TZ)]
 
 
 class SpawnForwardClearance(unittest.TestCase):

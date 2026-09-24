@@ -682,8 +682,9 @@ mod map_tests {
             let p = d.pos();
             assert!(pack.hole(p.x, p.z), "generator {} is not over a cut cell", d.id);
             let floor = pack.floor(p - Vec3::Y * 2.4).expect("generator floor").0;
-            // Base decks sit at 112; the hall floor is 10 m down, the basement 18.
-            assert!((floor - (112.0 - 18.0)).abs() < 0.01, "generator {} floor {floor}", d.id);
+            // Base decks sit at 112; the hall floor is 10 m down, the basement
+            // 19.2 (8 m clear under the hall slab).
+            assert!((floor - (112.0 - 19.2)).abs() < 0.01, "generator {} floor {floor}", d.id);
         }
     }
 

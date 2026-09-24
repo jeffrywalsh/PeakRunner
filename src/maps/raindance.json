@@ -17,13 +17,18 @@
     {"id": "east-bunker", "asset": "bunker", "position": [1390, 0, 750], "grounded": true, "yaw": -145}
   ],
   "base_equipment": [
-    {"kind": "generator", "position": [6, -18, 16]},
+    {"kind": "generator", "position": [6, -19.2, 16]},
     {"kind": "inventory", "position": [-8, -10, 4]},
     {"kind": "inventory", "position": [8, -10, 4]},
     {"kind": "repair", "position": [0, -10, -12]},
     {"kind": "sensor", "position": [-28, 8.6, 18]},
     {"kind": "turret", "position": [-23, 8.6, -19], "weapon": "plasma"},
     {"kind": "turret", "position": [23, 8.6, -19], "weapon": "plasma"}
+  ],
+  "control_points": [
+    {"id": "crossing", "name": "Crossing", "position": [980.5, 940], "platform": true},
+    {"id": "west-knoll", "name": "West Knoll", "position": [906, 780]},
+    {"id": "east-knoll", "name": "East Knoll", "position": [1054, 1100]}
   ],
   "scenery": {"trees": 115, "rocks": 80},
   "environment": {"fog_start": 450, "visibility": 1350, "water_height": 54}

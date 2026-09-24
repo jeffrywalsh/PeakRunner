@@ -3541,9 +3541,9 @@ mod spawn_point_tests {
 
     /// Old Holler's (key `raindance`) bishop flag tower, both teams. Using only
     /// inputs (facing, W, jet) and the real movement code, a player gets from
-    /// the roof into the chamber through the front door, through the side door
-    /// and over the mitre through the slit, standing on the chamber floor each
-    /// time; and leaves again by each of the three ways.
+    /// the roof into the chamber through each of the four doors and over the
+    /// mitre through the slit, standing on the chamber floor each time; and
+    /// leaves again the same way.
     #[test]
     fn old_holler_flag_tower_entries_and_exits_are_flyable() {
         const FLOOR: f32 = 17.6;
@@ -3556,22 +3556,26 @@ mod spawn_point_tests {
         let slit_out = (sx * 9. + lx, 25.1, TZ + sz * 9. + lz);
         let slit_in = (sx * 1.5 + lx, 25.1, TZ + sz * 1.5 + lz);
         // (name, start on the roof, waypoints in, waypoints out); each waypoint
-        // is (local x, y above the base origin, local z, jet). The doors are
+        // is (local x, y above the base origin, local z, jet). Each door is
         // entered from a hover over the ledge round the collar (r 5.8..7.4),
-        // then around the L baffle; the slit from a hover beside the mitre.
+        // straight in: nothing stands behind the doors.
         type Route = (&'static str, (f32, f32, f32), Vec<(f32, f32, f32, bool)>, Vec<(f32, f32, f32, bool)>);
-        let routes: [Route; 3] = [
+        let routes: [Route; 5] = [
             ("front", (0., 8.6, 8.),
-                vec![(0., FLOOR + 1., 13.3, true), (0., FLOOR, 15.9, false), (-2.6, FLOOR, 16.3, false),
-                     (-3.5, FLOOR, 17.6, false), (-2., FLOOR, 20., false), (0., FLOOR, 20., false)],
-                vec![(-3.5, FLOOR, 17.6, false), (-2.6, FLOOR, 16.3, false), (0., FLOOR, 15.9, false),
-                     (0., 8.6, 9.5, false)]),
-            ("side", (14., 8.6, 20.),
-                vec![(6.7, FLOOR + 1., 20., true), (4.3, FLOOR, 20., false), (3.9, FLOOR, 22.4, false),
-                     (2.9, FLOOR, 23.3, false), (1.2, FLOOR, 22.5, false), (0., FLOOR, 20., false)],
-                vec![(1.2, FLOOR, 22.5, false), (2.9, FLOOR, 23.3, false), (3.9, FLOOR, 22.4, false),
-                     (4.3, FLOOR, 20., false), (6.7, FLOOR, 20., false), (10.5, FLOOR + 1., 20., true),
+                vec![(0., FLOOR + 1., 13.3, true), (0., FLOOR, 16.2, false), (0., FLOOR, 20., false)],
+                vec![(0., FLOOR, 16.2, false), (0., FLOOR, 13.4, false), (0., 8.6, 9.5, false)]),
+            ("east", (14., 8.6, 20.),
+                vec![(6.7, FLOOR + 1., 20., true), (3.8, FLOOR, 20., false), (0., FLOOR, 20., false)],
+                vec![(3.8, FLOOR, 20., false), (6.6, FLOOR, 20., false), (10.5, FLOOR + 1., 20., true),
                      (14., 8.6, 20., false)]),
+            ("back", (8., 8.6, 26.),
+                vec![(0., FLOOR + 1., 26.6, true), (0., FLOOR, 23.8, false), (0., FLOOR, 20., false)],
+                vec![(0., FLOOR, 23.8, false), (0., FLOOR, 26.6, false), (7.5, FLOOR + 1., 27.5, true),
+                     (8., 8.6, 26., false)]),
+            ("west", (-14., 8.6, 14.),
+                vec![(-6.7, FLOOR + 1., 20., true), (-3.8, FLOOR, 20., false), (0., FLOOR, 20., false)],
+                vec![(-3.8, FLOOR, 20., false), (-6.6, FLOOR, 20., false), (-10.5, FLOOR + 1., 20., true),
+                     (-14., 8.6, 14., false)]),
             ("slit", (-13., 8.6, 26.),
                 vec![(slit_out.0, slit_out.1, slit_out.2, true), (slit_in.0, slit_in.1, slit_in.2, true),
                      (slit_in.0, FLOOR, slit_in.2, false)],
@@ -3608,6 +3612,61 @@ mod spawn_point_tests {
                 let p = &world.players[0];
                 assert!(Vec2::new(p.pos.x - axis.x, p.pos.z - axis.z).length() > 7.6,
                     "team {team} {name}: did not leave the tower, at {:?}", p.pos);
+            }
+        }
+    }
+
+    /// Old Holler's four flag-chamber doors line up in opposite pairs through
+    /// the flag. An enemy flying straight through at 20, 30 or 40 m/s, jetting
+    /// only to hold height, grabs the flag without touching a wall and leaves
+    /// through the opposite door at nearly full speed, both ways and on both
+    /// teams' towers.
+    #[test]
+    fn old_holler_flag_chamber_fly_through_grabs_the_flag_at_speed() {
+        const FLOOR: f32 = 17.6;
+        const TZ: f32 = 20.0;
+        for team in [0u8, 1] {
+            let to_world = |x: f32, y: f32, z: f32| if team == 0 {
+                Vec3::new(1160. - x, 112. + y, 480. - z) } else { Vec3::new(800. + x, 112. + y, 1400. + z) };
+            // (name, local start, local direction): front to back and east to west.
+            let passes = [("front-back", (0., TZ - 15.)), ("back-front", (0., TZ + 15.)),
+                          ("east-west", (15., TZ)), ("west-east", (-15., TZ))];
+            for (name, (x0, z0)) in passes {
+                for speed in [20.0f32, 30., 40.] {
+                    let mut world = World::new();
+                    world.set_map(MapId::Raindance);
+                    world.start_match(true);
+                    world.players.truncate(1);
+                    world.player_id = 0;
+                    let fi = team as usize;
+                    let home = world.flags[fi].home;
+                    let start = to_world(x0, FLOOR + 1.9, z0);
+                    let through = to_world(-x0, FLOOR + 1.9, 2. * TZ - z0);
+                    let dir = (through - start).normalize();
+                    let p = &mut world.players[0];
+                    p.team = if team == 0 { Team::Glacier } else { Team::Ember };
+                    p.carrying = None;
+                    p.pos = start; p.vel = dir * speed; p.alive = true; p.health = 100.;
+                    p.energy = ENERGY_MAX; p.on_ground = false; p.skiing = false; p.jetting = false;
+                    p.yaw = (-dir.x).atan2(-dir.z);
+                    let hold = start.y;
+                    let mut slowest = speed;
+                    let mut crossed = false;
+                    for _ in 0..240 {
+                        let (pos, vel) = (world.players[0].pos, world.players[0].vel);
+                        if (pos - start).dot(dir) > 30. { crossed = true; break; }
+                        let mut input = Input::default();
+                        input.jet = pos.y + vel.y * vel.y.abs() / 40. < hold;
+                        world.input = input;
+                        world.step_players(STEP);
+                        world.step_flags(STEP);
+                        slowest = slowest.min(Vec2::new(world.players[0].vel.x, world.players[0].vel.z).length());
+                    }
+                    let p = &world.players[0];
+                    assert!(crossed, "team {team} {name} at {speed}: stuck at {:?}", p.pos);
+                    assert_eq!(world.flags[fi].carrier, Some(0), "team {team} {name} at {speed}: flag not grabbed (home {home:?})");
+                    assert!(slowest > 0.9 * speed, "team {team} {name} at {speed}: slowed to {slowest}, hit something");
+                }
             }
         }
     }
@@ -3770,17 +3829,18 @@ mod line_of_sight_tests {
         } else {Vec3::new(info.glacier.x+lx,info.glacier.y+y,info.glacier.z+lz)};
         let flat=|team:u8,lx:f32,lz:f32| {let p=to_world(team,lx,0.,lz);Vec2::new(p.x,p.z)};
         // Inner faces of the open openings (local x0, z0, x1, z1): Level 1 front
-        // door and bridge doors, the rear tunnel mouths, Level 3 windows.
-        let inner=11.2;
-        let local:[(f32,f32,f32,f32);9]=[(-11.,-inner,-7.,-inner),(-2.,-inner,2.,-inner),(7.,-inner,11.,-inner),
-            (-10.,inner,-6.,inner),(6.,inner,10.,inner),
+        // door and 6 m bridge doors, the 8 m rear tunnel mouths, Level 3
+        // window bands (the side bands also cover the Level 2 side doors).
+        let inner=11.6;
+        let local:[(f32,f32,f32,f32);9]=[(-12.,-inner,-6.,-inner),(-3.,-inner,3.,-inner),(6.,-inner,12.,-inner),
+            (-12.,inner,-4.,inner),(4.,inner,12.,inner),
             (-9.,-inner,9.,-inner),(-9.,inner,9.,inner),(-inner,-9.,-inner,9.),(inner,-9.,inner,9.)];
         let openings:Vec<(Vec2,Vec2)>=[0u8,1].iter().flat_map(|&t|local.iter().map(move |&(x0,z0,x1,z1)|(t,x0,z0,x1,z1)))
             .map(|(t,x0,z0,x1,z1)|(flat(t,x0,z0),flat(t,x1,z1))).collect();
         // (x0,x1,z0,z1,floor levels to probe from)
         let rooms:[(f32,f32,f32,f32,&[f32]);7]=[
-            (-11.5,11.5,-11.5,11.5,&[0.,7.,14.]),   // tower L1-L3
-            (-10.,-6.,12.,26.,&[0.]),(6.,10.,12.,26.,&[0.]),   // tunnels
+            (-11.5,11.5,-11.5,11.5,&[0.,8.,17.]),   // tower: atrium floor, balconies
+            (-11.5,-4.5,12.,26.,&[0.]),(4.5,11.5,12.,26.,&[0.]),   // tunnels
             (-12.5,-3.5,26.5,35.5,&[0.]),(3.5,12.5,26.5,35.5,&[0.]),   // armory, ship room
             (-8.,8.,-8.,8.,&[-8.]),   // keel-level generator room
             (8.6,13.3,-2.,2.,&[-8.])];   // keel hatch passage
@@ -3882,13 +3942,15 @@ mod line_of_sight_tests {
             Vec3::new(1160.-lx,112.+y,480.-lz)} else {Vec3::new(800.+lx,112.+y,1400.+lz)};
         // (x0, x1, z0, z1, floor above the base origin): hall, basement, passage,
         // and the whole of the bishop tower's flag chamber (axis at local z 20,
-        // inner radius 5.2, kept to 4.7 for a body). Its front (-Z) and side
-        // (+X) doors are open; DOOR_DEPTH past their inner faces is allowed.
-        let rooms:&[(f32,f32,f32,f32,f32)]=&[(-29.,29.,-25.,25.,-10.),(-10.5,10.5,-5.5,23.5,-18.),(-4.5,-1.5,25.3,31.3,-18.),
+        // inner radius 5.2, kept to 4.7 for a body). Its four doors (front -Z,
+        // east +X, back +Z, west -X; 2.7 m wide at the inner face) are open;
+        // DOOR_DEPTH past their inner faces is allowed.
+        let rooms:&[(f32,f32,f32,f32,f32)]=&[(-29.,29.,-25.,25.,-10.),(-10.5,10.5,-5.5,23.5,-19.2),(-4.5,-1.5,25.3,31.3,-19.2),
             (-4.8,4.8,15.2,24.8,17.6)];
         let flat=|team:u8,lx:f32,lz:f32| {let p=to_world(team,lx,0.,lz);Vec2::new(p.x,p.z)};
-        let openings:Vec<(Vec2,Vec2)>=[0u8,1].iter().flat_map(|&t|[(flat(t,-0.8,14.8),flat(t,0.8,14.8)),
-            (flat(t,5.2,19.2),flat(t,5.2,20.8))]).collect();
+        let openings:Vec<(Vec2,Vec2)>=[0u8,1].iter().flat_map(|&t|[(flat(t,-1.35,14.8),flat(t,1.35,14.8)),
+            (flat(t,5.2,18.65),flat(t,5.2,21.35)),(flat(t,-1.35,25.2),flat(t,1.35,25.2)),
+            (flat(t,-5.2,18.65),flat(t,-5.2,21.35))]).collect();
         let (mut sampled,mut chamber,mut seen)=(0,0,Vec::new());
         for d in defs.iter().filter(|d|matches!(d.kind,Kind::Turret)) {
             for team in [0u8,1] { for &(x0,x1,z0,z1,level) in rooms {
@@ -4735,12 +4797,75 @@ mod capture_and_hold_tests {
         assert_eq!(m.world.mode, SupportedMode::CaptureAndHold);
         m.rotate_to_mode(MapId::Raindance, SupportedMode::Ctf);
         assert_eq!(m.world.mode, SupportedMode::Ctf);
-        assert!(m.world.points.is_empty(), "shipped maps declare no control points yet");
+        // Back to Old Holler's own three points, none of them CTF-active.
+        assert_eq!(m.world.points.len(), 3);
+        assert!(m.world.points.iter().all(|p| !p.active && p.owner.is_none()));
+    }
+
+    /// Old Holler (key `raindance`) places three Capture & Hold towers: the
+    /// Crossing platform beside the bridge at mid-span and two knolls that
+    /// mirror each other through the map centre. None runs in CTF.
+    #[test]
+    fn old_holler_declares_three_capture_and_hold_points() {
+        let pack = crate::map_pack::on(MapId::Raindance).expect("embedded");
+        let points = &pack.manifest.control_points;
+        assert_eq!(points.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["crossing", "west-knoll", "east-knoll"]);
+        assert!(points.iter().all(|p| !p.ctf_active && p.drain.is_none() && p.radius == 12.0));
+        let (w, e) = (Vec3::from_array(points[1].pos), Vec3::from_array(points[2].pos));
+        assert!((w.x + e.x - 1960.0).abs() < 0.01 && (w.z + e.z - 1880.0).abs() < 0.01, "knolls mirror through (980, 940)");
+        // Every point's ring is standable floor under its centre.
+        for p in points {
+            let c = Vec3::from_array(p.pos);
+            let floor = crate::terrain::support_on(MapId::Raindance, c + Vec3::new(8.0, 1.2, 0.0)).0;
+            assert!((floor - c.y).abs() < 2.1, "{} ring floor {floor} vs {}", p.id, c.y);
+        }
+        let (mut m, a, _) = {
+            let mut m = Match::new(MapId::Raindance);
+            m.world.set_mode(SupportedMode::CaptureAndHold);
+            let a = m.join(1, "Alpha").unwrap(); let b = m.join(2, "Bravo").unwrap();
+            for _ in 0..240 { m.step(&[]); if m.phase == Phase::Playing { break; } }
+            (m, a, b)
+        };
+        assert_eq!(m.world.points.len(), 3);
+        assert!(m.world.points.iter().all(|p| p.active), "all three run in Capture & Hold");
+        let crossing = m.world.points[0].pos;
+        hold(&mut m, a, crossing, 10.2);
+        assert!(m.world.points[0].owner.is_some(), "the Crossing platform captures");
+    }
+
+    #[test]
+    fn tower_complex_holds_three_mirrored_capture_towers() {
+        let map = MapId::BroadsideClone;
+        let pack = crate::map_pack::on(map).expect("embedded");
+        let points = &pack.manifest.control_points;
+        assert_eq!(points.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Summit", "Westfall", "Eastfall"]);
+        for p in points {
+            assert!(!p.ctf_active && p.drain.is_none(), "{} is Capture & Hold only", p.name);
+            assert_eq!(p.radius, 12.0);
+            let ground = crate::terrain::height_on(map, p.pos[0], p.pos[2]);
+            assert!((ground - p.pos[1]).abs() < 0.2, "{} ring centre {:?} off the ground ({ground})", p.name, p.pos);
+        }
+        let (a, b) = (points[1].pos, points[2].pos);
+        assert_eq!((a[0] + b[0], a[2] + b[2]), (2.0 * points[0].pos[0], 2.0 * points[0].pos[2]));
+        let mut m = Match::new(map);
+        m.world.set_mode(SupportedMode::CaptureAndHold);   // points come from the manifest
+        let a = m.join(1, "Alpha").unwrap();
+        let b = m.join(2, "Bravo").unwrap();
+        for _ in 0..240 { m.step(&[]); if m.phase == Phase::Playing { break; } }
+        assert_eq!(m.phase, Phase::Playing);
+        assert_eq!(m.world.points.len(), 3);
+        assert!(m.world.points.iter().all(|p| p.active));
+        m.world.players[b].pos = Vec3::new(100.0, 500.0, 100.0);
+        let summit = m.world.points[0].pos;
+        hold(&mut m, a, summit, 10.2);
+        assert!(m.world.points[0].owner.is_some(), "the Summit ring captures on its plateau");
+        m.world.set_mode(SupportedMode::Ctf);
+        assert!(m.world.points.iter().all(|p| !p.active), "no CTF-active point on Tower Complex");
     }
 
     #[test]
     fn shipped_packs_are_unchanged_and_declare_no_points() {
-        for map in [MapId::Raindance, MapId::BroadsideClone, MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone] {
+        for map in [MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone] {
             let pack = crate::map_pack::on(map).expect("embedded");
             assert!(pack.manifest.control_points.is_empty(), "{map:?}");
         }

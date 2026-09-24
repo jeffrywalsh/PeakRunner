@@ -265,3 +265,67 @@ hatch (generator room) keeps its baffle. Level 3's two spawns moved to
 Level 2 and the ship room, since the open windows exposed them; the new
 `test_no_indoor_spawn_shows_through_an_opening_from_the_field` checks it.
 `tower_entries_walk_straight_in` replaces the baffle-route test.
+
+## Atrium rework, v7 (2026-09-24)
+
+Supersedes the tower layout, ramp, terrain and gap notes above where they
+differ. Asset id `tower-complex-v7`.
+
+**Tower.** Levels are now L1 0 m, L2 8 m, L3 17 m, roof 26 m. Level 2 and
+Level 3 are balcony rings round a 14 × 12 m void, so the atrium is open from
+the Level 1 floor to the roof slab (25 m clear). Balconies have 7–8 m of
+headroom. Entries: a 6 × 6.5 m front door and two 6 × 6.5 m bridge doors on
+Level 1, all open onto the atrium; two new 6 × 6.5 m doors on the Level 2
+east and west faces, each onto an outside 5 × 7 m jet ledge with its own
+small keel; Level 3 window bands (0.4 m sill, 5.2 m head) on every face;
+8 × 6.5 m rear tunnels (were 4 × 4.6) into 9 m-tall rear rooms. The L1→L2
+ramp climbs the west wall and the L2→L3 ramp the front balcony; floors above
+each ramp are cut back to leave 3.2 m over it. The tube now runs only from the
+atrium floor down to the keel room, so the generator keeps exactly two
+entrances (the tube hole, the keel hatch). The flag sits on the rear Level 2
+balcony overlooking the atrium; inventory stations moved to the rear Level 3
+balcony above it. The last front baffle is gone: pod turrets keep the `arc1`
+field of fire and never see the atrium (sim test updated).
+
+**Routes** (`route_checks.py`, airborne model, both teams): main floors 6,
+Level 2 6, generator exactly 2. New `route_checks.flag_routes` counts
+distinct (entry, approach) pairs: each way from the field into the tower
+times each way from that entry into the flag's stretch of balcony. Tower
+Complex scores 10 per flag (5 entries × 2 approaches: ramp arrival and the
+jump from the atrium, or the two ends of the balcony from the Level 2
+doors). The suite requires at least 10.
+
+**Terrain.** Rewritten as one continuous landscape: domain-warped broad hills
+(no short-wavelength peaks), meandering drainage valleys, a basin between the
+bases and a shoulder behind each, then thermal erosion (talus 36°) and a light
+blur. Hull, pad and tower clearances use smooth minimums, not hard caps, so
+there are no flat plates. Before → after (play area): median slope 20.3° →
+17.8°, 90th percentile 40° → 31.5°, under 3° 1.7% → 2.1%, local maxima over
+the grid 451 → 94, isolated peaks (more than 20 m over the median within
+80 m) 8 → 0, midfield dip 32 → 29 m. The shared helpers `_hash`, `_value`,
+`_fbm`, `_smooth` are unchanged (Cairnhold, Frostline and Dustreach use them).
+
+**Capture & Hold.** New shared asset `scripts/assets/cnh_tower.py`: a
+tapered octagonal pylon on a plinth with a lit beacon crown, four waist-high
+cover walls on the diagonals (open approaches on the axes) and eight
+render-only marker posts on the 12 m ring. Ground-contact solids sink 2 m.
+Three towers: Summit at the field centre, Westfall and Eastfall mirrored
+through it, each on a gently levelled plateau. Manifest `control_points`
+declares them (`ctf_active: false`), so Capture & Hold is available on Tower
+Complex and the offline menu enables it.
+
+**Look.** Manifest `look`: a procedural sky (clear blue zenith, pale horizon,
+42% cloud), exposure 1.05, a cool sky ambient, light valley haze, and fog
+colour matched to the horizon. The sun stays the baked default. The dark red
+front is lit instead by baked floodlights on the bridges and ledges.
+
+**Surfaces.** `scripts/assets/surface_checks.py` finds coplanar, same-facing,
+overlapping triangles with different materials (flicker), ignoring faces
+sealed back-to-back or buried inside a solid. The old pack had 84 such pairs
+(67 m²); v7 has none, and the suite and the C&H tower now test for it. The
+C&H test also checks every plinth and cover-wall edge meets the ground (no
+hovering edges).
+
+Collision: 2,442 triangles per base (budget 4,500), 216 per C&H tower, 5,972
+for the whole map. 13 lightmap pages. Captures:
+`research/screenshots/tc-rework-*.png`.

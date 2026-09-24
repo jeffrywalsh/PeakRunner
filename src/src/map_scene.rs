@@ -166,7 +166,8 @@ mod tests {
     #[test]
     fn uniform_layout_matches_the_shader_and_defaults_keep_the_old_values() {
         use peakrunner_core::terrain::MapId;
-        let pack=super::map_pack::on(MapId::Raindance).unwrap();
+        // Cairnhold (key stonehenge-clone) sets no look fields.
+        let pack=super::map_pack::on(MapId::StonehengeClone).unwrap();
         let frame=crate::drawlist::build_frame(&crate::sim::World::new(),1.6,0.016);
         let data=super::uniform_data(pack,&frame);
         assert_eq!(data.len(),super::UNIFORM_FLOATS);

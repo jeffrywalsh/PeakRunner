@@ -1,21 +1,28 @@
 """Original rolling terrain for Tower Complex.
 
-Generated only from PeakRunner's own hash noise, ridge functions and base
-placement; no heightfield from any other game is read, resampled or fitted.
+Generated only from PeakRunner's own hash noise and base placement; no
+heightfield from any other game is read, resampled or fitted.
 
-Shape: a basin between the two floating bases, ringed by broken ridges with
-passes, each base sitting over a hill shoulder that falls toward the basin, so
-a player leaving either base has a long downhill run, a climb, and several
-routes around the ring. Rolling fractal detail keeps most of the ground on a
-skiable slope; there are few flats.
+Shape: one continuous landscape of broad, domain-warped hills rather than a
+floor with mounds on it. Sinuous valleys wind through it where a low-frequency
+field crosses its midline, so the ground reads as drained rather than dotted
+with spikes. A gentle basin lies between the two floating bases, and each base
+sits over a shoulder that rises behind it, so leaving either base is a long
+downhill ski toward the middle. A thermal-erosion pass then relaxes any slope
+steeper than the talus angle, which rounds off isolated summits and softens
+creases. Ground under the hulls, the landing pads and the Capture & Hold
+towers is lowered or levelled with smooth blends, never with hard caps, so no
+flat plates or ledges appear.
 """
 import numpy as np
 
 N, STEP = 256, 8.0
 PAD_CLEARANCE = 34   # deck to ground under a landing pad; keel tip 16 m down
-# Midfield peak pairs: (u along the base axis, w across it, height, radius), m.
-# Each is mirrored through the field centre.
-PEAKS = ((35, 85, 86, 46), (-62, 50, 62, 36), (112, -58, 52, 30), (5, 158, 72, 42), (-150, 118, 48, 38))
+PAD_REACH = 70       # ...and at most this far, so a jet from the ground reaches it
+HULL_CLEARANCE = 62  # deck to ground under a base (deepest keel tip is 34 m down)
+TALUS_DEG = 36.0     # thermal erosion relaxes slopes steeper than this
+EROSION_STEPS = 60
+POINT_FLAT = 24.0    # C&H plateau radius (the ring is 12 m); blends out to 2x
 
 
 def _hash(ix, iz, seed):
@@ -36,6 +43,8 @@ def _value(x, z, seed):
 
 
 def _fbm(x, z, wavelength, octaves, seed, ridged=False):
+    # Shared with the Cairnhold, Frostline and Dustreach terrain modules:
+    # changing this changes their packs.
     total, amp, norm = 0.0, 1.0, 0.0
     for o in range(octaves):
         n = _value(x/wavelength, z/wavelength, seed+o*101)
@@ -50,63 +59,98 @@ def _smooth(a, b, t):
     return t*t*(3-2*t)
 
 
-def heights(bases, seed, deck_y=240.0, pads=()):
+def _smin(a, b, k):
+    """Smooth minimum: equals min(a, b) far from the crossover, blended over
+    about k metres around it, so a clearance cap never leaves a plate."""
+    h = np.clip(.5+.5*(b-a)/k, 0, 1)
+    return b*(1-h)+a*h-k*h*(1-h)
+
+
+def _erode(h, steps=EROSION_STEPS, talus=TALUS_DEG, rate=.35):
+    """Thermal erosion: wherever the drop to a neighbour exceeds the talus
+    height, move a share of the excess downhill. Deterministic and local."""
+    limit = STEP*np.tan(np.radians(talus))
+    h = h.copy()
+    offsets = ((1, 0), (-1, 0), (0, 1), (0, -1))
+    for _ in range(steps):
+        p = np.pad(h, 1, mode='edge')
+        moved = np.zeros_like(h)
+        for dz, dx in offsets:
+            nb = p[1+dz:N+1+dz, 1+dx:N+1+dx]
+            excess = np.maximum(h-nb-limit, 0)*rate*.25
+            moved -= excess
+            # Deposit on the neighbour: shift the excess field onto it.
+            dep = np.zeros_like(h)
+            zs = slice(max(dz, 0), N+min(dz, 0)); zd = slice(max(-dz, 0), N+min(-dz, 0))
+            xs = slice(max(dx, 0), N+min(dx, 0)); xd = slice(max(-dx, 0), N+min(-dx, 0))
+            dep[zs, xs] = excess[zd, xd]
+            moved += dep
+        h += moved
+    return h
+
+
+def _blur(h, passes=2):
+    for _ in range(passes):
+        p = np.pad(h, 1, mode='edge')
+        h = (p[:-2, 1:-1]+p[2:, 1:-1]+p[1:-1, :-2]+p[1:-1, 2:]+4*p[1:-1, 1:-1])/8
+    return h
+
+
+def heights(bases, seed, deck_y=240.0, pads=(), points=()):
     """256x256 heights in metres (row = z cell, column = x cell).
 
-    `pads` are (x, z, deck_y) landing pads; the ground under each is held
-    PAD_CLEARANCE below its deck so the keel floats and a jet can reach it."""
+    `pads` are (x, z, deck_y) landing pads: the ground under each stays
+    PAD_CLEARANCE below its deck. `points` are (x, z) Capture & Hold tower
+    sites: the ground is levelled into a gentle plateau there so the ring is
+    walkable."""
     z, x = np.mgrid[0:N, 0:N].astype(np.float64)*STEP
     (rx, rz), (bx, bz) = [(b[0], b[2]) for b in bases]
     cx, cz = (rx+bx)/2, (rz+bz)/2
     axis = np.array([bx-rx, bz-rz], dtype=np.float64); half = np.linalg.norm(axis)/2; axis /= 2*half
-    # Coordinates along (u) and across (w) the base-to-base line.
     u = (x-cx)*axis[0]+(z-cz)*axis[1]
     w = -(x-cx)*axis[1]+(z-cz)*axis[0]
-    # Warp so ridges and valleys curve instead of running straight.
-    wu = u+38*(_fbm(x+900, z, 420, 3, seed+7)-.5)*2
-    ww = w+46*(_fbm(x, z+900, 380, 3, seed+11)-.5)*2
-    r = np.hypot(wu/(half+230), ww/300)
+    # Domain warp shared by every layer, so hills and valleys curve together.
+    wx = x+140*(_fbm(x+900, z, 700, 3, seed+7)-.5)*2
+    wz = z+140*(_fbm(x, z+900, 700, 3, seed+11)-.5)*2
 
-    basin = 112+84*(1-np.exp(-1.3*r*r))              # bowl between the bases
-    ring = 78*np.exp(-((r-1.05)/.26)**2)             # encircling ridge
-    angle = np.arctan2(ww, wu)
-    passes = 1-.78*np.maximum.reduce([np.exp(-((np.angle(np.exp(1j*(angle-a))))/.2)**2)
-                                     for a in (1.1, 2.05, -1.1, -2.05)])
-    h = basin+ring*passes
-    # Each base sits over a shoulder that falls toward the basin, rising
-    # behind the base for a downhill start.
+    # Broad rolling hills (long wavelengths only: no spikes to begin with).
+    h = 150+100*(_fbm(wx, wz, 520, 3, seed)-.5)*2
+    h = h+46*(_fbm(wx+300, wz+500, 230, 3, seed+3)-.5)*2
+    h = h+14*(_fbm(x, z, 100, 2, seed+5)-.5)*2
+    # Drainage: meandering valleys where a slow field crosses its midline.
+    river = _fbm(wx*.9+2000, wz*.9, 820, 2, seed+13)
+    h = h-34*np.exp(-((river-.5)/.055)**2)
+    # A shallow basin between the bases and a broad rim around the play space.
+    r = np.hypot(u/(half+260), w/320)
+    h = h-62*np.exp(-3.0*r*r)+46*_smooth(.9, 1.35, r)
+    # Each base sits over a shoulder that rises behind it (downhill start).
     for sx, sz, sign in ((rx, rz, -1), (bx, bz, 1)):
         du = (x-sx)*axis[0]+(z-sz)*axis[1]
         dw = -(x-sx)*axis[1]+(z-sz)*axis[0]
-        behind = du*sign
-        shoulder = 58*np.exp(-(dw/170)**2)*_smooth(-90, 170, behind)
-        h = h+shoulder
-    # Midfield peaks: point-symmetric pairs (u,w) / (-u,-w) so neither team's
-    # half is favoured. They stand off the flag-to-flag axis (|w| >= 45 m or
-    # far forward of a base), leaving a clear line down the middle, and sit
-    # clear of the passes and the landing pads. Profiles sharpen toward the
-    # summit so they read as peaks, with a warped outline so no two match.
-    for pu, pw, ph, pr in PEAKS:
-        for s in (1, -1):
-            du, dw = wu-s*pu, ww-s*pw
-            d = np.hypot(du, dw)*(1+.18*(_fbm(x+s*pu*3, z+s*pw*3, 70, 2, seed+17)-.5)*2)
-            h = h+ph*np.exp(-(d/pr)**1.9)
-    # Rolling fractal hills everywhere plus ridged detail on the high ground.
-    h = h+34*(_fbm(x, z, 240, 4, seed)-.5)*2
-    h = h+14*(_fbm(x+700, z+200, 110, 3, seed+9)-.5)*2
-    h = h+22*_fbm(x+300, z+500, 190, 3, seed+3, ridged=True)*_smooth(150, 210, h)
-    h = h+7*(_fbm(x, z, 48, 2, seed+5)-.5)*2
+        h = h+48*np.exp(-(dw/190)**2)*_smooth(-120, 200, du*sign)
     # Outer edge: climb into bounding hills beyond the play space.
     edge = np.maximum(np.abs(x-1024), np.abs(z-1024))
-    h = h+60*_smooth(800, 1010, edge)
-    # Keep every hull clear: ground under each base stays well below the keels.
+    h = h+70*_smooth(780, 1010, edge)
+
+    h = _blur(_erode(h), 1)
+
+    # Clearance under the floating hulls and pads, with smooth blends.
     for sx, sz in ((rx, rz), (bx, bz)):
         d = np.hypot(x-sx, z-sz)
-        cap = deck_y-62+np.maximum(d-48, 0)*.9
-        h = np.minimum(h, cap)
+        cap = deck_y-HULL_CLEARANCE+np.maximum(d-40, 0)*.55
+        h = _smin(h, cap, 14)
     for px, pz, py in pads:
         d = np.hypot(x-px, z-pz)
-        h = np.minimum(h, py-PAD_CLEARANCE+np.maximum(d-26, 0)*.8)
+        h = _smin(h, py-PAD_CLEARANCE+np.maximum(d-20, 0)*.6, 10)
+        # ...and a rise below it, so the deck stays in jet reach of the ground.
+        h = -_smin(-h, -(py-PAD_REACH-np.maximum(d-24, 0)*.9), 10)
+    # Capture & Hold plateaus: blend toward the local mean height.
+    for px, pz in points:
+        d = np.hypot(x-px, z-pz)
+        near = d < POINT_FLAT
+        level = float(h[near].mean())
+        t = .2+.8*_smooth(POINT_FLAT, 2*POINT_FLAT, d)   # keep a gentle tilt, not a plate
+        h = level+(h-level)*t
     return np.clip(h, 2, 2040)
 
 

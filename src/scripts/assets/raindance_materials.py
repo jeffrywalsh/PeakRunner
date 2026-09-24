@@ -1,14 +1,19 @@
 """Deterministic original Raindance surfaces: rain-darkened highland
 concrete and slate. No reference images are sampled.
 
-Kit slots repainted for this pack (terrain, sky, water, bark and leaf keep
+Kit slots repainted for this pack (rock, soil, sky, water, bark and leaf keep
 the kit's original highland set):
+  meadow    wet highland grass: isotropic tufts and clover patches, no
+            directional streaks (the kit's meadow banded along one axis)
+  moss      dark damp moss in the same isotropic style
   concrete  board-formed concrete with rain streaks and a damp lower band
   panel     slate roof and deck plates with drainage seams
   grate     galvanised grating for ramps and hall floors
   trim      dark oiled steel for frames, bands and fittings
   ember / glacier  team enamel panels with a chevron stripe
-  light     cool lamp glow (the map shader has no emissive term)
+  light     cool lamp glow: a smooth lit diffuser panel, bright at its centre
+            line and soft at the edges (the map shader has no emissive term;
+            the old version read as a checkerboard)
 
 Textures tile every 4 m (64 px per metre); walls use u along the wall and
 v up the wall, so vertical streaks read as rain run-off.
@@ -19,7 +24,8 @@ TEAM = {'ember': (176, 64, 30), 'glacier': (30, 118, 162)}
 
 def texture(name, seed, noise, value_noise):
     palettes = {'concrete': (104, 112, 114), 'panel': (58, 66, 72), 'grate': (86, 94, 98),
-                'trim': (34, 40, 45), 'light': (214, 238, 240), **TEAM}
+                'trim': (34, 40, 45), 'light': (214, 238, 240), 'meadow': (66, 88, 42),
+                'moss': (46, 66, 36), **TEAM}
     data = bytearray()
     for y in range(256):
         for x in range(256):
@@ -56,8 +62,21 @@ def texture(name, seed, noise, value_noise):
                 value = grain*.25+mottling*.2
                 chevron = (abs((x % 64)-32)+y) % 64
                 if chevron < 10: rgb, value = (226, 222, 210), grain*.2
+            elif name in ('meadow', 'moss'):
+                # Isotropic: several octaves of value noise at equal scale in
+                # both axes, blade-scale grain and scattered clover patches.
+                broad = (value_noise(x/64, y/64, 4, seed+3)-.5)*26
+                tuft = (value_noise(x/9, y/9, 29, seed+11)-.5)*22
+                clover = value_noise(x/20, y/20, 13, seed+19)
+                value = grain*.9+broad+tuft+mottling*.4
+                if name == 'meadow':
+                    k = min(1., max(0., (clover-.6)/.3))      # soft clover patches
+                    rgb = tuple(round(c*(1-k*.35)+g*k*.35) for c, g in zip(rgb, (58, 94, 46)))
+                if name == 'moss': value += (value_noise(x/5, y/5, 52, seed+23)-.5)*14
             else:  # light
-                value = grain*.1+(6 if (x//8+y//8) % 2 else 0)
+                # Diffuser panel: bright along v's centre line, soft to the edges.
+                edge = abs((y % 64)-31.5)/31.5
+                value = grain*.06-edge*edge*14
             data.extend(max(0, min(255, round(c+value))) for c in rgb)
             data.append(255)
     return bytes(data)

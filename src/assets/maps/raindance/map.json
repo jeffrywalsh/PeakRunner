@@ -1,5 +1,5 @@
 {
-  "texture_count": 45,
+  "texture_count": 47,
   "terrain_layers": [
     0,
     1,
@@ -20,7 +20,7 @@
     "scale": "720 150 1"
   },
   "lightmap": {
-    "pages": 25,
+    "pages": 27,
     "first_layer": 20,
     "texel_m": 0.5,
     "sun": [
@@ -28,7 +28,7 @@
       0.57735,
       -0.57735
     ],
-    "lamps": 210,
+    "lamps": 242,
     "baker_sha256": "66d1c04a0581f283b62d4a01a9229abd22fbd18a738474c8c5c148db84800fed"
   },
   "version": 1,
@@ -339,7 +339,52 @@
   ],
   "sky": {
     "visibleDistance": "1350",
-    "fogDistance": "450"
+    "fogDistance": "450",
+    "fogColor": "0.62 0.66 0.68"
+  },
+  "look": {
+    "sun_color": [
+      0.86,
+      0.88,
+      0.92
+    ],
+    "sun_disc": 0.35,
+    "exposure": 1.05,
+    "ambient_sky": [
+      0.56,
+      0.6,
+      0.64
+    ],
+    "ambient_ground": [
+      0.47,
+      0.5,
+      0.44
+    ],
+    "height_fog": {
+      "density": 0.006,
+      "base": 70.0,
+      "falloff": 30.0
+    },
+    "sky": {
+      "zenith": [
+        0.36,
+        0.41,
+        0.46
+      ],
+      "horizon": [
+        0.62,
+        0.66,
+        0.68
+      ],
+      "cloud_cover": 0.85,
+      "cloud_color": [
+        0.7,
+        0.72,
+        0.74
+      ],
+      "cloud_scale": 1.4,
+      "sun_size": 0.035
+    }
   },
   "ambient_emitters": [
     [
@@ -357,7 +402,7 @@
       "kind": "generator",
       "position": [
         1154.0,
-        96.5,
+        95.3,
         464.0
       ],
       "team": 0,
@@ -458,7 +503,7 @@
       "kind": "generator",
       "position": [
         806.0,
-        96.5,
+        95.3,
         1416.0
       ],
       "team": 1,
@@ -651,6 +696,16 @@
             460.0
           ],
           [
+            1160.0,
+            129.6,
+            453.4
+          ],
+          [
+            1166.6,
+            129.6,
+            460.0
+          ],
+          [
             1165.303300858899,
             138.8,
             454.6966991411009
@@ -697,7 +752,7 @@
         ],
         "generator_room": [
           1160.0,
-          95.2,
+          94.0,
           464.0
         ],
         "stair_head": [
@@ -741,6 +796,16 @@
           ],
           [
             806.6,
+            129.6,
+            1420.0
+          ],
+          [
+            800.0,
+            129.6,
+            1426.6
+          ],
+          [
+            793.4,
             129.6,
             1420.0
           ],
@@ -791,7 +856,7 @@
         ],
         "generator_room": [
           800.0,
-          95.2,
+          94.0,
           1416.0
         ],
         "stair_head": [
@@ -805,6 +870,33 @@
           1429.8
         ]
       }
+    },
+    {
+      "asset": "cnh_tower",
+      "id": "crossing",
+      "position": [
+        980.5,
+        105.7,
+        940
+      ]
+    },
+    {
+      "asset": "cnh_tower",
+      "id": "west-knoll",
+      "position": [
+        906,
+        104.73176328510128,
+        780
+      ]
+    },
+    {
+      "asset": "cnh_tower",
+      "id": "east-knoll",
+      "position": [
+        1054,
+        107.85662326581183,
+        1100
+      ]
     },
     {
       "id": "ember-landing",
@@ -2694,6 +2786,42 @@
       "yaw": 119.13854624283377
     }
   ],
+  "control_points": [
+    {
+      "id": "crossing",
+      "name": "Crossing",
+      "pos": [
+        980.5,
+        105.7,
+        940
+      ],
+      "radius": 12.0,
+      "ctf_active": false
+    },
+    {
+      "id": "west-knoll",
+      "name": "West Knoll",
+      "pos": [
+        906,
+        104.73176328510128,
+        780
+      ],
+      "radius": 12.0,
+      "ctf_active": false
+    },
+    {
+      "id": "east-knoll",
+      "name": "East Knoll",
+      "pos": [
+        1054,
+        107.85662326581183,
+        1100
+      ],
+      "radius": 12.0,
+      "ctf_active": false
+    }
+  ],
+  "cnh_asset": "cnh-tower-v1",
   "materials": [
     "meadow",
     "rock",
@@ -2725,18 +2853,18 @@
     "rock"
   ],
   "provenance": "PeakRunner original procedural kit v2 (cleaned Raindance); no extracted assets",
-  "base_asset": "raindance-base-v4",
-  "structures_asset": "raindance-structures-v2",
-  "base_asset_sha256": "12b2e5f3d60e7e4c97eedbe022701d8b92abf99ff568852cc4a648d9edc915df",
-  "structures_asset_sha256": "2168bd8af5ee259d70362d060f006095d3065f853be12cf5d512ade9a638067b",
-  "material_source_sha256": "fe226cf2d1f451356c001f0da50bebb734c1f8cc260864d3ba6b6f94a07ae8ad",
-  "definition_sha256": "38bbd0cbb27eceb37ec0916ec5426daed5c33bd31314b6aa85e78db28582e494",
+  "base_asset": "raindance-base-v5",
+  "structures_asset": "raindance-structures-v3",
+  "base_asset_sha256": "af1ae38216a5f60cde1c0d151a578eceb1869154e488455e1c6e058d8a44e2c1",
+  "structures_asset_sha256": "bbd5f4a11418fff0358ddb915e3964922ba114da6762e4e9143e97b36db34a8f",
+  "material_source_sha256": "dd83ab464ed17fb65a14768b5acefe8c872514396bf8d356dd4126310120182b",
+  "definition_sha256": "deb9f5050b74cb797e0acf005c7bc74e788f91a1675b89126c084c2022943968",
   "files": {
     "height.bin": "7305d9f6ff06e086d7a831130da4116c42522d3e7606f28ebdf5d682bbf16eeb",
     "weights.rgba": "f8e2504e4779325a8afe4f46e269c02dbee2eaf61bbb06bbfbeb3d3eab8da19d",
-    "vertices.bin": "b7bee3d2cc0f08ff68b27c15d83cb178dbe019660510c67ad7a86f1e21232ee1",
-    "collision.bin": "3ff76870d4bf25c68db267449f2b354f68d39fddb1fb1fd437a08df748680eb0",
-    "textures.rgba": "b168a0ab3e556f8c961611b77da329b2829289f839ed739b1aaefbafb6b8f736",
+    "vertices.bin": "e3d15f07d580ac7f6ecd62d4d455f304d1622815048cc1710791594ee349c79e",
+    "collision.bin": "9295a0c2ee48b945c59481f18486b41025e65a51a1abcc9225fa9583ed9acfda",
+    "textures.rgba": "c097ebea6a9f8ac14b8f735771915801a7185474ed52c4b162801b6cde50deca",
     "ambient.f32": "52b06180983895f8fc9e5a9f2fc4d10f05f9bcc3d23aaf1f58142e3c47aec29e"
   }
 }

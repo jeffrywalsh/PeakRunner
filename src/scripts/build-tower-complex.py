@@ -16,6 +16,7 @@ from assets import tower_complex_terrain
 from assets import landing_pad
 from assets import pack_writer
 from assets import turret_arcs
+from assets import cnh_tower
 
 ROOT = Path(__file__).resolve().parent.parent
 loader = importlib.util.spec_from_file_location('kit', ROOT/'scripts/build-original-map.py')
@@ -26,7 +27,8 @@ def terrain_grid(spec):
     """Original rolling terrain (see assets/tower_complex_terrain.py)."""
     return tower_complex_terrain.heights([b['position'] for b in spec['bases']], spec['seed'],
                                          pads=[(p['position'][0], p['position'][2], p['position'][1])
-                                               for p in spec.get('pads', [])])
+                                               for p in spec.get('pads', [])],
+                                         points=[(c['x'], c['z']) for c in spec.get('control_points', [])])
 
 def terrain_height(x, z, grid):
     """Bilinear sample of the grid, matching the engine's heightfield lookup."""
@@ -56,6 +58,16 @@ def build(output, bake=True):
             anchors={name: [mesh.point(p) for p in value] if isinstance(value, list) else mesh.point(value)
                      for name, value in anchors.items()}))
     grid = terrain_grid(spec)
+    # Capture & Hold towers, standing on the levelled plateau at each point.
+    control_points = []
+    for c in spec.get('control_points', []):
+        ground = round(terrain_height(c['x'], c['z'], grid), 3)
+        mesh.origin = (c['x'], ground, c['z']); mesh.yaw = 0.0
+        anchors = cnh_tower.build(mesh)
+        instances.append(dict(asset=cnh_tower.ASSET_ID, id=c['id'], position=[c['x'], ground, c['z']],
+                              anchors={k: mesh.point(v) for k, v in anchors.items()}))
+        control_points.append({'id': c['id'], 'name': c['name'], 'pos': [c['x'], ground, c['z']],
+                               'radius': cnh_tower.RING, 'ctf_active': False})
     heights = bytearray(struct.pack('<65536H', *[round(float(v)*32) for v in grid.ravel()]))
     weights = bytearray(tower_complex_terrain.weights(grid).tobytes())
     if sys.byteorder != 'little': mesh.vertices.byteswap(); mesh.collision.byteswap()
@@ -81,7 +93,9 @@ def build(output, bake=True):
     if lightmap: manifest['lightmap']=lightmap
     manifest.update(version=1, id=spec['id'], name=spec['name'], flags=flags, spawns=spawns,
         exact_spawns=True, spawn_points=spawn_points, holes=[], entities=turret_arcs.assign(mesh.entities, flags), instances=instances, ambient_emitters=[],
-        sky={'visibleDistance':'2500','fogDistance':'1500'},
+        sky={'visibleDistance':'2500','fogDistance':'1500','fogColor':'0.74 0.80 0.88'},
+        control_points=control_points, look=spec['look'],
+        cnh_asset_sha256=pack_writer.source_hash(cnh_tower.__file__),
         asset_sha256=pack_writer.source_hash(tower_complex.__file__),
         pad_asset_sha256=pack_writer.source_hash(landing_pad.__file__),
         terrain_source_sha256=pack_writer.source_hash(tower_complex_terrain.__file__),

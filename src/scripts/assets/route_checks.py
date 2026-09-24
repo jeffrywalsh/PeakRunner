@@ -39,6 +39,9 @@ can walk to). It adds, on top of walking:
   down onto it: the only way in through a slit or hatch high in a room's
   wall or roof. Off by default, so existing counts do not change.
 
+Flag routes (flag_routes): distinct (entry, approach) pairs from open
+ground to a flag, see that function.
+
 A crossing's entry point is where its path first enters the region's volume
 (the node box raised by HEADROOM), so every route through one door or one
 shaft opening lands in one cluster.
@@ -280,13 +283,19 @@ def entries(graph, inside, outside_seeds, volume=None, overhead=()):
     each given height above the inside node, cross there and drop straight
     down: a slit or hatch in a room's ceiling or upper wall."""
     outside = graph.reach(outside_seeds, inside)
-    cross = [(graph.nodes[i]+graph.nodes[j])/2 for i in np.flatnonzero(outside) for j in graph.adj[i] if inside[j]]
+    return [np.mean([p for p, _ in c], 0) for c in _clusters(_crossings(graph, inside, outside, volume, overhead))]
+
+
+def _crossings(graph, inside, outside, volume, overhead=()):
+    """(point, inside node) for every walk edge, drop and hop from a node in
+    the `outside` mask into the `inside` mask."""
+    cross = [((graph.nodes[i]+graph.nodes[j])/2, j) for i in np.flatnonzero(outside) for j in graph.adj[i] if inside[j]]
     if graph.airborne:
         for i in np.flatnonzero(outside):
             for j in graph.down[i]:
                 if inside[j]:
                     a, b = graph.nodes[i], graph.nodes[j]
-                    cross.append(first_inside([a, (b[0], a[1], b[2]), b], volume))
+                    cross.append((first_inside([a, (b[0], a[1], b[2]), b], volume), j))
         # Every real opening has an outside standing spot close to it (a
         # bridge by a door, a shaft floor under a hole, a ledge by a hatch),
         # so each inside edge node tries only its HOP_TRIES nearest outside
@@ -309,22 +318,27 @@ def entries(graph, inside, outside_seeds, volume=None, overhead=()):
                               for dh in overhead if b[1]+dh > a[1]]
                     path = next((p for p in paths if path_clear(graph.pack, p)), None)
                     if path is not None:
-                        cross.append(first_inside(path, volume)); break
+                        cross.append((first_inside(path, volume), j)); break
+    return cross
+
+
+def _clusters(cross):
+    """Group crossings whose points lie within ENTRY_MERGE of each other."""
     clusters = []
-    for p in cross:
+    for item in cross:
         for c in clusters:
-            if min(np.linalg.norm(p-q) for q in c) < ENTRY_MERGE: c.append(p); break
-        else: clusters.append([p])
+            if min(np.linalg.norm(item[0]-q[0]) for q in c) < ENTRY_MERGE: c.append(item); break
+        else: clusters.append([item])
     # Merge clusters that grew into each other.
     merged = True
     while merged:
         merged = False
         for i in range(len(clusters)):
             for j in range(i+1, len(clusters)):
-                if min(np.linalg.norm(p-q) for p in clusters[i] for q in clusters[j]) < ENTRY_MERGE:
+                if min(np.linalg.norm(p[0]-q[0]) for p in clusters[i] for q in clusters[j]) < ENTRY_MERGE:
                     clusters[i] += clusters.pop(j); merged = True; break
             if merged: break
-    return [np.mean(c, 0) for c in clusters]
+    return clusters
 
 
 def box_region(graph, x0, x1, y0, y1, z0, z1):
@@ -357,3 +371,41 @@ def open_ground(graph, cx, cz, radius):
     far = np.hypot(n[:, 0]-cx, n[:, 2]-cz) >= radius
     ground = np.array([abs(y-graph.pack.terrain(x, z)) < .3 for x, y, z in n])
     return np.flatnonzero(far & ground)
+
+
+def flag_routes(pack, centre, building, flag_zone, extent=64.0, seed_radius=48.0, airborne=False, overhead=()):
+    """Distinct routes to a flag (docs/map-pipeline.md: "two main entrances
+    but ~10 ways of getting to the flag").
+
+    A route is a pair (entry, approach): an entry is a distinct way from open
+    ground into the `building` box (as base_entries counts it), and an
+    approach is a distinct way into the `flag_zone` box (a few metres round
+    the flag) that a player coming through that entry can reach while
+    staying inside the building. Walks, drops and (airborne) jet hops all
+    count; crossings within ENTRY_MERGE metres are one entry or approach.
+    An entry that lands straight in the flag zone is one route by itself.
+    Returns {'entries': [...], 'approaches': [[...] per entry], 'routes': n}.
+    Both boxes are world-space (x0, x1, y0, y1, z0, z1)."""
+    pack = pack if isinstance(pack, Pack) else Pack(pack)
+    cx, cz = centre
+    g = Graph(pack, cx-extent, cx+extent, cz-extent, cz+extent, airborne=airborne)
+    seeds = list(open_ground(g, cx, cz, seed_radius))
+    if airborne: seeds += [i for i in range(len(g.nodes)) if g.structure(i) and g.open_sky(i)]
+    inside_b = box_region(g, *building)
+    zone = box_region(g, *flag_zone)
+    bx0, bx1, by0, by1, bz0, bz1 = building
+    fx0, fx1, fy0, fy1, fz0, fz1 = flag_zone
+    outside = g.reach(seeds, inside_b)
+    entry_clusters = _clusters(_crossings(g, inside_b, outside, (bx0, bx1, by0, by1+HEADROOM, bz0, bz1), overhead))
+    fence = zone | ~inside_b
+    out = {'entries': [], 'approaches': [], 'routes': 0}
+    for cluster in entry_clusters:
+        landing = sorted({j for _, j in cluster})
+        out['entries'].append(np.mean([p for p, _ in cluster], 0))
+        if any(zone[j] for j in landing):
+            out['approaches'].append([np.mean([p for p, _ in cluster], 0)]); out['routes'] += 1; continue
+        mine = g.reach(landing, fence)
+        found = [np.mean([p for p, _ in c], 0)
+                 for c in _clusters(_crossings(g, zone, mine, (fx0, fx1, fy0, fy1+HEADROOM, fz0, fz1), overhead))]
+        out['approaches'].append(found); out['routes'] += len(found)
+    return out

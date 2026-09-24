@@ -288,3 +288,47 @@ Supersedes the L baffle above: the bishop tower's chamber doors are open
 straight through to the flag. Turrets face the field with a 200 degree field
 of fire beyond 15 m (`turret_arcs.py`), and none of them engages the chamber
 floor.
+
+## Old Holler rework (2026-09-24)
+
+Asset `raindance-base-v5`, `raindance-structures-v3`.
+
+- **Four-door flag cabin.** The bishop chamber now has four doors, one per
+  side (front -Z, east +X, back +Z, west -X), each 3.0 m wide at the outer
+  face (2.7 m inside) and 4.5 m tall, plus the mitre slit. The tower is lathed
+  with 24 sides so each door is two whole panels centred on its axis, and
+  opposite doors line up through the flag. `old_holler_flag_chamber_fly_through_grabs_the_flag_at_speed`
+  (sim.rs) flies an enemy straight through at 20, 30 and 40 m/s on both
+  towers and both axes, jetting only to hold height: it grabs the flag and
+  never drops below 90% of its entry speed. Walk-and-jet routes through every
+  door and the slit are checked by `old_holler_flag_tower_entries_and_exits_are_flyable`.
+- **Flag access** (`route_checks.py`, jet mode): 5 ways into each chamber (4
+  doors and the slit, was 3); hall 4 walking entries; generator exactly 2.
+- **Basement** floor lowered 1.2 m to 19.2 m below the base deck: 8.0 m clear,
+  flyable. The atrium stair is 16.6 m long (29 degrees); the generator stays at
+  exactly two entrances.
+- **Field bunkers**: 7.0 m ceiling (was 5.1 m), a second 6 m wide, 5.5 m tall
+  opening through the back wall with a ramp down to the ground, and a
+  foundation reaching 2.8 m below the floor top. Landing pads stand on a 4 m
+  concrete plinth, so no edge hovers over sloping ground (the audit counted
+  180 hovering pad edges).
+- **Capture & Hold**: three `cnh_tower` points. West Knoll (906, 780) and East
+  Knoll (1054, 1100) mirror each other through the map centre (980, 940) on
+  flat, tree-free ground, 393 m from their nearer base. The centre lies over
+  the flooded ravine, so the Crossing tower stands on a 13 m platform on a pier
+  from the ravine floor, joined to the west side of the bridge at mid-span
+  with its deck level with the bridge deck (494 m from both flags). None is
+  CTF-active. Capture & Hold is playable on Old Holler.
+- **Look**: overcast procedural sky (heavy cloud, faint sun disc), cooler
+  sun colour at the baked direction, sky and ground ambient, valley mist
+  (height fog base 70 m) and a matching fog colour.
+- **Materials**: Old Holler's own meadow and moss (isotropic, no directional
+  streaks; the kit meadow banded), and a smooth lit diffuser for light strips
+  (the old one read as a checkerboard).
+- **Z-fighting**: the render mesh has no same-facing coplanar overlaps of
+  different materials outside kit equipment models (tested). The audit's 28
+  pairs were hidden equipment underside faces.
+
+Collision: 3,316 triangles per base (budget 4,500); 12,983 for the map.
+Not playtested: whether four doors make the flag too easy to take, and the
+Crossing's reach from the bridge (players hop the 1 m bridge rail).

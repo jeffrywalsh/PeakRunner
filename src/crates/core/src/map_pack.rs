@@ -480,8 +480,9 @@ mod tests {
         }
         use crate::terrain::MapId;
         // Maps without fogColor keep the historical grey.
-        assert_eq!(on(MapId::Raindance).unwrap().fog_color(), DEFAULT_FOG);
-        assert_eq!(on(MapId::BroadsideClone).unwrap().fog_color(), DEFAULT_FOG);
+        assert_eq!(on(MapId::StonehengeClone).unwrap().fog_color(), DEFAULT_FOG);
+        assert_eq!(on(MapId::Raindance).unwrap().fog_color(), [0.62, 0.66, 0.68]);
+        assert_eq!(on(MapId::BroadsideClone).unwrap().fog_color(), [0.74, 0.80, 0.88]);
         assert_eq!(on(MapId::DesertOfDeathClone).unwrap().fog_color(), [0.80, 0.69, 0.52]);
         assert_eq!(on(MapId::SnowblindClone).unwrap().fog_color(), [0.84, 0.87, 0.90]);
     }

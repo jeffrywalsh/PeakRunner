@@ -41,5 +41,62 @@
       ],
       "yaw": 0
     }
-  ]
+  ],
+  "control_points": [
+    {
+      "id": "summit",
+      "name": "Summit",
+      "x": 1024,
+      "z": 1024
+    },
+    {
+      "id": "westfall",
+      "name": "Westfall",
+      "x": 880,
+      "z": 952
+    },
+    {
+      "id": "eastfall",
+      "name": "Eastfall",
+      "x": 1168,
+      "z": 1096
+    }
+  ],
+  "look": {
+    "exposure": 1.05,
+    "ambient_sky": [
+      0.6,
+      0.66,
+      0.76
+    ],
+    "ambient_ground": [
+      0.44,
+      0.42,
+      0.38
+    ],
+    "height_fog": {
+      "density": 0.002,
+      "base": 160,
+      "falloff": 35
+    },
+    "sky": {
+      "zenith": [
+        0.2,
+        0.36,
+        0.66
+      ],
+      "horizon": [
+        0.74,
+        0.8,
+        0.88
+      ],
+      "cloud_cover": 0.42,
+      "cloud_color": [
+        0.95,
+        0.94,
+        0.91
+      ],
+      "cloud_scale": 1.2
+    }
+  }
 }

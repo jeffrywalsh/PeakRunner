@@ -15,6 +15,7 @@ import random
 import struct
 import sys
 
+from assets import cnh_tower
 from assets import pack_writer
 from assets import turret_arcs
 from assets import raindance_base
@@ -26,7 +27,22 @@ loader = importlib.util.spec_from_file_location('kit', ROOT/'scripts/build-origi
 kit = importlib.util.module_from_spec(loader)
 loader.loader.exec_module(kit)
 
-PAINTED = ['concrete', 'panel', 'grate', 'trim', 'ember', 'glacier', 'light']
+PAINTED = ['meadow', 'moss', 'concrete', 'panel', 'grate', 'trim', 'ember', 'glacier', 'light']
+# Old Holler's own look (manifest `look`, peakrunner_core::look): a low
+# overcast over rainy hollows. The sun keeps the baked direction (the
+# lightmaps assume it), dimmed and cooled, with only a faint disc through the
+# cloud; mist settles in the ravine below the bases (height fog).
+FOG_COLOR = '0.62 0.66 0.68'
+LOOK = {
+    'sun_color': [0.86, 0.88, 0.92],
+    'sun_disc': 0.35,
+    'exposure': 1.05,
+    'ambient_sky': [0.56, 0.6, 0.64],
+    'ambient_ground': [0.47, 0.5, 0.44],
+    'height_fog': {'density': 0.006, 'base': 70.0, 'falloff': 30.0},
+    'sky': {'zenith': [0.36, 0.41, 0.46], 'horizon': [0.62, 0.66, 0.68], 'cloud_cover': 0.85,
+            'cloud_color': [0.7, 0.72, 0.74], 'cloud_scale': 1.4, 'sun_size': 0.035},
+}
 
 
 def spec():
@@ -61,6 +77,33 @@ def place(mesh, obj, definition):
     return {}
 
 
+# Capture & Hold points (docs/capture-and-hold.md). The knolls stand on flat,
+# tree-free ground (terrain tilt under the plinth well inside
+# cnh_tower.MAX_TILT) and mirror each other through the map centre (980, 940).
+# The centre lies over the flooded ravine, so the Crossing tower stands on a
+# round platform on a pier from the ravine floor, joined to the west side of
+# the bridge at mid-span; its deck is level with the bridge deck.
+PLATFORM_R, DECK_TOP, PIER_R = 13.0, 105.7, 4.0
+
+
+def control_point(mesh, cp, d):
+    """Build one point's structure; returns its manifest entry."""
+    x, z = cp['position']
+    if cp.get('platform'):
+        ground = kit.height(x, z, d)
+        mesh.origin = (x, 0, z); mesh.yaw = 0.0
+        mesh.column((0, ground-2, 0), PIER_R, DECK_TOP-1.4-(ground-2), 'concrete', 12)
+        mesh.column((0, DECK_TOP-1.4, 0), PLATFORM_R, 1.0, 'trim', 24)
+        mesh.column((0, DECK_TOP-.4, 0), PLATFORM_R, .4, 'grate', 24)
+        y = DECK_TOP
+    else:
+        y = kit.height(x, z, d)
+    mesh.origin = (x, y, z); mesh.yaw = 0.0
+    cnh_tower.build(mesh)
+    mesh.instances.append(dict(asset='cnh_tower', id=cp['id'], position=[x, y, z]))
+    return {'id': cp['id'], 'name': cp['name'], 'pos': [x, y, z], 'radius': cnh_tower.RING, 'ctf_active': False}
+
+
 def build(output, bake=True):
     if output.exists(): raise ValueError(f'Refusing to overwrite {output}; use a new output directory')
     d = spec()
@@ -76,6 +119,7 @@ def build(output, bake=True):
             k: [mesh.point(p) for p in v] if isinstance(v, list) else mesh.point(v)
             for k, v in anchors.items() if k != 'spawn_points'}))
     base_triangles = len(mesh.collision)//9
+    points = [control_point(mesh, cp, d) for cp in d.get('control_points', [])]
     for obj in d['objects']:
         p = list(obj['position'])
         if obj.get('grounded'): p[1] = kit.height(p[0], p[2], d)
@@ -136,8 +180,10 @@ def build(output, bake=True):
              'ambient.f32': kit.base_ambient(d['seed'])}
     e = d['environment']
     manifest.update(version=1, name=d['name'], flags=flags, spawns=spawns, spawn_points=spawn_points,
-        holes=sorted(set(holes)), sky={'visibleDistance': str(e['visibility']), 'fogDistance': str(e['fog_start'])},
+        holes=sorted(set(holes)), sky={'visibleDistance': str(e['visibility']), 'fogDistance': str(e['fog_start']), 'fogColor': FOG_COLOR},
+        look=LOOK,
         ambient_emitters=[[1000, 100, 940, .35, 200, 2000]], entities=turret_arcs.assign(mesh.entities, flags), instances=mesh.instances,
+        control_points=points, cnh_asset=cnh_tower.ASSET_ID,
         materials=list(kit.MATERIALS), asset_catalog=list(kit.ASSETS),
         provenance='PeakRunner original procedural kit v2 (cleaned Raindance); no extracted assets',
         base_asset=raindance_base.ASSET_ID, structures_asset=raindance_structures.ASSET_ID,

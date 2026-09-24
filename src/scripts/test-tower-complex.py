@@ -30,25 +30,26 @@ def floor_heights_at(collision, x, z):
 class TowerComplexTests(unittest.TestCase):
     def test_level_floors_and_headroom_away_from_shaft(self):
         mesh=kit.Mesh(); tower_complex.build(mesh,0,'one')
-        # Sample points clear of the shaft hole (|x| or |z| > SHAFT_HALF) and
-        # clear of the switchback ramp lanes (x != +-9).
+        # Sample points on the east lane / balcony, clear of the atrium void,
+        # the tube hole and both ramps.
         for y in (tower_complex.L1, tower_complex.L2, tower_complex.L3):
-            for x,z in [(6,6),(-6,-6),(6,-6),(-6,6)]:
+            for x,z in [(9.5,4),(9.5,-4)]:
                 heights=floor_heights_at(mesh.collision,x,z)
                 self.assertTrue(any(abs(h-y)<.6 for h in heights),(x,z,y,'floor'))
                 self.assertFalse(any(y+.6<h<y+2.5 for h in heights),(x,z,y,'headroom'))
 
     def test_ramps_keep_headroom_up_to_the_next_floor(self):
         mesh=kit.Mesh(); tower_complex.build(mesh,0,'one')
-        T=tower_complex.TOWER_HALF
-        Z0=tower_complex.RAMP1_Z0
-        ramps=[(-9,lambda z:7*(z-Z0)/(T-1-Z0),range(int(Z0)+1,11)),(9,lambda z:7+7*(T-1-z)/(2*T-2),range(-10,11))]
-        for x,surface,zs in ramps:
-            for z in zs:
-                y=surface(z)
-                heights=floor_heights_at(mesh.collision,x,z)
-                self.assertTrue(any(abs(h-y)<.05 for h in heights),(x,z,'ramp surface'))
-                self.assertFalse(any(y+.2<h<y+2.2 for h in heights),(x,z,y,'ramp headroom'))
+        tc=tower_complex
+        # A body is 2.56 m tall; ramps keep that clear all the way up.
+        for z in range(-10,11):
+            y=tc.ramp1_height(z); heights=floor_heights_at(mesh.collision,tc.RAMP1['x'],z)
+            self.assertTrue(any(abs(h-y)<.05 for h in heights),(z,'ramp 1 surface'))
+            self.assertFalse(any(y+.2<h<y+2.6 for h in heights),(z,y,'ramp 1 headroom'))
+        for x in range(-10,11):
+            y=tc.ramp2_height(x); heights=floor_heights_at(mesh.collision,x,tc.RAMP2['z'])
+            self.assertTrue(any(abs(h-y)<.05 for h in heights),(x,'ramp 2 surface'))
+            self.assertFalse(any(y+.2<h<y+2.6 for h in heights),(x,y,'ramp 2 headroom'))
 
     def test_shaft_drops_to_the_keel_with_one_open_face_per_level(self):
         import numpy as np
@@ -86,8 +87,8 @@ class TowerComplexTests(unittest.TestCase):
             def __init__(self):
                 super().__init__(); self.floor_rects=[]
             def box(self,p,size,mat='concrete',solid=True):
-                floor_ys={tower_complex.L1,tower_complex.L2,tower_complex.L3,tower_complex.ROOF,
-                          tower_complex.L1+5,19,29}
+                tc=tower_complex
+                floor_ys={tc.L1,tc.L2,tc.L3,tc.ROOF,tc.KEEL,tc.L1+tc.TUNNEL_H,tc.L1+tc.ROOM_H}
                 # Only thin floor/roof plates (slab's 1 m boxes), not tall walls
                 # whose top happens to land on the same level height.
                 if solid and mat in ('panel','grate','concrete') and size[1]<=1.2 and any(abs(p[1]+size[1]/2-y)<1e-6 for y in floor_ys):
@@ -114,7 +115,7 @@ class TowerComplexTests(unittest.TestCase):
         self.assertTrue(all(e['team']==1 and e['circuit']=='two' for e in b.entities))
         self.assertEqual(sum(e['kind']=='turret' for e in b.entities),2)
         self.assertEqual(sum(e['kind']=='generator' for e in b.entities),1)
-        self.assertEqual(len(moved['entrances']),5)
+        self.assertEqual(len(moved['entrances']),9)
         self.assertLess(len(b.collision)//9, budgets.COLLISION_TRIS_PER_BASE)
 
     def test_two_instances_have_unique_equipment_ids_and_independent_power(self):
@@ -191,8 +192,8 @@ class TowerComplexTests(unittest.TestCase):
                 self.assertEqual(hits(solid,a2,b2),0,(a2,'blocked'))
             self.assertEqual(hits(render,a,b),0,(a,'view blocked'))
         # Sill and head stay solid wall.
-        self.assertGreater(hits(solid,(1.5,tower_complex.L3+.6,10),(1.5,tower_complex.L3+.6,14)),0)
-        self.assertGreater(hits(solid,(1.5,tower_complex.L3+4.4,10),(1.5,tower_complex.L3+4.4,14)),0)
+        self.assertGreater(hits(solid,(1.5,tower_complex.L3+.2,10),(1.5,tower_complex.L3+.2,14)),0)
+        self.assertGreater(hits(solid,(1.5,tower_complex.HEAD+tower_complex.L3+.4,10),(1.5,tower_complex.HEAD+tower_complex.L3+.4,14)),0)
         # The front banner strip stays solid wall.
         self.assertGreater(hits(render,(0,y,-10),(0,y,-14)),0)
 
@@ -237,13 +238,59 @@ class TowerComplexTests(unittest.TestCase):
         # The tube's keel face is open toward -x, its other keel faces closed.
         self.assertFalse(blocked((0,y,0),(-5,y,0)))
         for fx,fz in ((5,0),(0,5),(0,-5)): self.assertTrue(blocked((0,y,0),(fx,y,fz)))
-        # Ledge: open sky, standable.
+        # Ledge: standable, with nothing solid for 12 m above it (the Level 2
+        # jet ledge is 16 m up), so a jetting player flies straight in.
         lx=(tc.HATCH_OUT+tc.LEDGE_OUT)/2
-        self.assertEqual([h for h in floor_heights_at(mesh.collision,lx,3.5) if h>tc.KEEL+.1],[])
+        self.assertEqual([h for h in floor_heights_at(mesh.collision,lx,3.5) if tc.KEEL+.1<h<tc.KEEL+12],[])
         # Engine pods and the lower keel stay below the keel-level floor.
         inside=tris[(np.abs(tris[:,:,0]).max(1)<tc.KEEL_IN-.05)&(np.abs(tris[:,:,2]).max(1)<tc.KEEL_IN-.05)]
         low=inside[:,:,1].min(1)
         self.assertFalse(((low>tc.KEEL-.9)&(low<tc.KEEL-.05)).any(),'solid poking up through the keel floor')
+
+    def test_atrium_is_open_from_the_atrium_floor_to_the_roof(self):
+        tc=tower_complex; mesh=kit.Mesh(); tc.build(mesh,0,'one')
+        vx0,vx1,vz0,vz1=tc.VOID
+        for x,z in [(vx0+1.5,vz0+1.5),(vx1-1.5,vz1-1.5),(vx0+1.5,vz1-1.5),(vx1-1.5,0)]:
+            heights=floor_heights_at(mesh.collision,x,z)
+            # Atrium floor at L1, then nothing solid until the roof slab.
+            self.assertTrue(any(abs(h-tc.L1)<.05 for h in heights),(x,z))
+            self.assertFalse(any(tc.L1+2.6<h<tc.ROOF-1.01 for h in heights),(x,z,heights))
+        self.assertGreaterEqual(tc.ROOF-1-tc.L1,20)
+        # Balcony rings keep flyable headroom over each level.
+        for level,above in ((tc.L2,tc.L3-1),(tc.L3,tc.ROOF-1)):
+            self.assertGreaterEqual(above-level,7.9)
+
+    def test_doorways_are_six_metres_wide_and_open(self):
+        import numpy as np
+        tc=tower_complex; mesh=kit.Mesh(); tc.build(mesh,0,'one')
+        tris=np.array(mesh.collision).reshape(-1,3,3)
+        def blocked(a,b):
+            a,b=np.array(a,float),np.array(b,float); d=b-a
+            for p0,p1,p2 in tris:
+                e1,e2=p1-p0,p2-p0; h=np.cross(d,e2); det=e1@h
+                if abs(det)<1e-9: continue
+                s=a-p0; u=(s@h)/det; q=np.cross(s,e1); v=(d@q)/det; t=(e2@q)/det
+                if u>=0 and v>=0 and u+v<=1 and 0<=t<=1: return True
+            return False
+        T=tc.TOWER_HALF
+        # Front door and both bridge doors on L1, the two L2 side doors: 6 m
+        # wide and at least 6 m tall, open straight through the wall.
+        doors=[('z',-T,(-3,3),tc.L1),('z',-T,(6,12),tc.L1),('z',-T,(-12,-6),tc.L1),
+               ('x',-T,(-3,3),tc.L2),('x',T,(-3,3),tc.L2)]
+        for axis,plane,(u0,u1),y0 in doors:
+            self.assertGreaterEqual(u1-u0,6)
+            for u in (u0+.6,(u0+u1)/2,u1-.6):
+                for h in (.5,3,6):
+                    a=(u,y0+h,plane-1.5) if axis=='z' else (plane-1.5,y0+h,u)
+                    b=(u,y0+h,plane+1.5) if axis=='z' else (plane+1.5,y0+h,u)
+                    self.assertFalse(blocked(a,b),(axis,plane,u,h))
+
+    def test_no_z_fighting_surfaces(self):
+        from assets import surface_checks, cnh_tower
+        mesh=kit.Mesh(); tower_complex.build(mesh,0,'one')
+        self.assertEqual(surface_checks.z_fighting(mesh.vertices,mesh.collision),[])
+        mesh=kit.Mesh(); cnh_tower.build(mesh)
+        self.assertEqual(surface_checks.z_fighting(mesh.vertices,mesh.collision),[])
 
     def test_collision_budget(self):
         mesh=kit.Mesh(); tower_complex.build(mesh,0,'one')
@@ -309,6 +356,16 @@ class TowerComplexTests(unittest.TestCase):
         (rx,_,rz),(bx,_,bz)=[b['position'] for b in spec['bases']]
         profile=[build.terrain_height(rx+(bx-rx)*t,rz+(bz-rz)*t,grid) for t in np.linspace(0,1,41)]
         self.assertGreater(min(profile[0],profile[-1])-min(profile),25)
+        # "An actual terrain": continuous hills, not scattered spikes. Count
+        # cells higher than all 8 neighbours, and those standing more than
+        # 20 m over the median of the 80 m round them (the v6 peaks had 8).
+        from numpy.lib.stride_tricks import sliding_window_view as window
+        c=grid[1:-1,1:-1]
+        nb=np.stack([grid[1+dz:255+dz,1+dx:255+dx] for dz in (-1,0,1) for dx in (-1,0,1) if dz or dx])
+        maxima=c>nb.max(0)
+        med=np.median(window(np.pad(grid,5,mode='edge'),(11,11)).reshape(256,256,-1),axis=2)[1:-1,1:-1]
+        self.assertLess(int(maxima.sum()),160)
+        self.assertEqual(int((maxima&(c-med>20)).sum()),0)
 
     def test_standing_support_is_the_floor_top_everywhere(self):
         """The engine finds a standing player's floor with a ray from 0.15 m
@@ -331,7 +388,9 @@ class TowerComplexTests(unittest.TestCase):
             order=np.argsort(t[m]); return list(zip((y0-t[m])[order],n[m][order,1]))
         checked=0
         regions=[(-11.4,11.4,-11.4,11.4,y) for y in (tower_complex.L1,tower_complex.L2,tower_complex.L3)]
-        regions+=[(-12.4,-3.6,26.6,35.4,0),(3.6,12.4,26.6,35.4,0),(-9.6,-6.4,12.2,25.8,0),(6.4,9.6,12.2,25.8,0)]
+        regions+=[(-12.4,-3.6,26.6,35.4,0),(3.6,12.4,26.6,35.4,0),(-11.4,-4.6,12.2,25.8,0),(4.6,11.4,12.2,25.8,0)]
+        L2,T,LE=tower_complex.L2,tower_complex.TOWER_HALF,tower_complex.LEDGE
+        regions+=[(T+.4,T+LE-.4,-3.1,3.1,L2),(-T-LE+.4,-T-.4,-3.1,3.1,L2)]
         K,KEEL=tower_complex.KEEL_IN,tower_complex.KEEL
         regions+=[(-K+.3,K-.3,-K+.3,K-.3,KEEL),(K+.7,tower_complex.LEDGE_OUT-.3,-1.9,1.9,KEEL),
                   (tower_complex.HATCH_OUT+.3,tower_complex.LEDGE_OUT-.3,-4.2,4.2,KEEL)]
@@ -361,8 +420,10 @@ class TowerComplexTests(unittest.TestCase):
                            or (tower_complex.KEEL-.5<=y<=tower_complex.KEEL+.5 and K<x<=tower_complex.LEDGE_OUT
                                and abs(z)<=tower_complex.HATCH_HALF+2.3))
             if y<tower_complex.L1-.5 and not in_keel_level: continue   # keels, engine pods
-            if abs(abs(x)-9)<=2.01 and abs(z)<=tower_complex.TOWER_HALF: continue  # ramps
-            if math.hypot(x-tower_complex.FLAG_X,z)<1.8 and abs(y-tower_complex.L2-.15)<.3: continue
+            if abs(x)>tower_complex.TOWER_HALF+.1 and y<tower_complex.L2-.9: continue   # Level 2 ledge keels
+            if abs(x-tower_complex.RAMP1['x'])<=2.01 and abs(z)<=tower_complex.TOWER_HALF and y<=tower_complex.L2+.01: continue  # ramps
+            if abs(z-tower_complex.RAMP2['z'])<=2.01 and tower_complex.L2-.01<=y<=tower_complex.L3+.01: continue
+            if math.hypot(x-tower_complex.FLAG[0],z-tower_complex.FLAG[1])<1.8 and abs(y-tower_complex.L2-.15)<.3: continue
             if any(math.hypot(x-e[0],z-e[2])<3.3 for e in ents): continue
             self.fail(('accidental slope',round(float(n[i,1]),4),cen[i]))
 
@@ -398,26 +459,28 @@ class TowerComplexTests(unittest.TestCase):
         import numpy as np
         mesh=kit.Mesh(); tower_complex.build(mesh,0,'one')
         tris=np.array(mesh.collision).reshape(-1,3,3)
-        def first_x(o,d):
+        def first(o,d):
             o,d=np.array(o,float),np.array(d,float); a,b,c=tris[:,0],tris[:,1],tris[:,2]
             e1,e2=b-a,c-a; h=np.cross(d,e2); det=np.einsum('ij,ij->i',e1,h)
             ok=np.abs(det)>1e-9; s=o-a; det=np.where(ok,det,1)
             u=np.einsum('ij,ij->i',s,h)/det; q=np.cross(s,e1); v=(q@d)/det; t=np.einsum('ij,ij->i',e2,q)/det
             m=ok&(u>=0)&(v>=0)&(u+v<=1)&(t>=0)
-            return o[0]+d[0]*t[m].min() if m.any() else None
-        L1,L2=tower_complex.L1,tower_complex.L2
-        T=tower_complex.TOWER_HALF
-        Z0=tower_complex.RAMP1_Z0
-        under1=lambda z: 7*(z-Z0)/(T-1-Z0)-.6      # ramp underside above its floor
-        under2=lambda z: 7*(T-1-z)/(2*T-2)-.6
-        tested=0
+            return o+d*t[m].min() if m.any() else None
+        tc=tower_complex; tested=0
+        r1,r2=tc.RAMP1,tc.RAMP2
+        edge1=r1['x']+r1['width']/2; edge2=r2['z']+r2['width']/2
         for h in (.3,1.,1.8):
-            for z in np.arange(Z0+.3,Z0+(tower_complex.RAMP_HEADROOM+.6)*(T-1-Z0)/7,.5):   # under the L1->L2 ramp's low end
-                if h>=under1(z): continue
-                x=first_x((-4,L1+h,z),(-1,0,0)); self.assertIsNotNone(x); self.assertGreater(x,-7.06,(z,h)); tested+=1
-            for z in np.arange(1.6,8.6,.5):       # under the L2->L3 ramp's low end
-                if h>=under2(z): continue
-                x=first_x((4,L2+h,z),(1,0,0)); self.assertIsNotNone(x); self.assertLess(x,7.06,(z,h)); tested+=1
+            # Under the L1->L2 ramp's low end: a probe from the room side toward
+            # the wall stops at the skirt on the ramp's room edge.
+            for z in np.arange(r1['z0']+.3,r1['z0']+(tc.RAMP_HEADROOM+.6)*(r1['z1']-r1['z0'])/(tc.L2-tc.L1),.5):
+                if h>=tc.ramp1_height(z)-.6-tc.L1: continue
+                p=first((edge1+2.5,tc.L1+h,z),(-1,0,0)); self.assertIsNotNone(p)
+                self.assertGreater(p[0],edge1-.06,(z,h)); tested+=1
+            # Under the L2->L3 ramp's low end, probing toward the front wall.
+            for x in np.arange(r2['x0']-.3,r2['x0']-(tc.RAMP_HEADROOM+.6)*(r2['x0']-r2['x1'])/(tc.L3-tc.L2),-.5):
+                if h>=tc.ramp2_height(x)-.6-tc.L2: continue
+                p=first((x,tc.L2+h,edge2+2.5),(0,0,-1)); self.assertIsNotNone(p)
+                self.assertGreater(p[2],edge2-.06,(x,h)); tested+=1
         self.assertGreater(tested,20)
 
     def _pad(self):
@@ -500,6 +563,50 @@ class TowerComplexTests(unittest.TestCase):
                     self.assertLess(build.terrain_height(x+dx,z+dz,grid),y-landing_pad.KEEL-8,(p['team'],dx,dz))
             self.assertLessEqual(y-build.terrain_height(x,z,grid),80,'reachable by jetting from the ground')
 
+class CaptureTowers(unittest.TestCase):
+    """Capture & Hold towers: three, mirrored, standing on a walkable plateau
+    with no hovering edge anywhere their solids meet the ground."""
+    def test_towers_sit_on_levelled_ground(self):
+        import json, numpy as np
+        from assets import cnh_tower, tower_complex_terrain as terrain
+        loader=importlib.util.spec_from_file_location('tc_build',Path(__file__).with_name('build-tower-complex.py'))
+        build=importlib.util.module_from_spec(loader);loader.loader.exec_module(build)
+        root=Path(__file__).resolve().parent.parent
+        spec=json.loads((root/'maps/tower-complex.json').read_text())
+        grid=build.terrain_grid(spec)
+        points=spec['control_points']
+        self.assertEqual(len(points),3)
+        centre=(1024,1024)
+        self.assertEqual((points[0]['x'],points[0]['z']),centre)
+        (ax,az),(bx,bz)=[(p['x'],p['z']) for p in points[1:]]
+        self.assertEqual((ax+bx,az+bz),(2*centre[0],2*centre[1]),'side towers mirror through the centre')
+        for p in points:
+            x,z=p['x'],p['z']; ground=round(build.terrain_height(x,z,grid),3)
+            # Plinth and cover walls: terrain lies between their buried base and their top.
+            outline=[(math.cos(a)*(cnh_tower.PLINTH_R+.4),math.sin(a)*(cnh_tower.PLINTH_R+.4)) for a in np.linspace(0,2*math.pi,16,endpoint=False)]
+            for k in range(4):
+                a=math.pi/4+k*math.pi/2
+                for off in (-cnh_tower.COVER_LEN/2,0,cnh_tower.COVER_LEN/2):
+                    outline.append((math.cos(a)*cnh_tower.COVER_R-math.sin(a)*off,math.sin(a)*cnh_tower.COVER_R+math.cos(a)*off))
+            for dx,dz in outline:
+                h=build.terrain_height(x+dx,z+dz,grid)
+                self.assertGreater(h,ground-cnh_tower.SINK+.2,(p['id'],dx,dz,'base shows above ground'))
+                self.assertLess(h,ground+cnh_tower.PLINTH_H-.05,(p['id'],dx,dz,'buried'))
+            # The ring is walkable: gentle ground everywhere inside it.
+            slope=terrain.slope_degrees(grid)
+            ix,iz=int(x/8),int(z/8)
+            self.assertLess(slope[iz-1:iz+3,ix-1:ix+3].max(),14,p['id'])
+
+    def test_committed_pack_declares_the_points(self):
+        import json
+        root=Path(__file__).resolve().parent.parent
+        m=json.loads((root/'assets/maps/tower-complex/map.json').read_text())
+        pts=m['control_points']
+        self.assertEqual([p['id'] for p in pts],['summit','westfall','eastfall'])
+        self.assertTrue(all(p['radius']==12 and p['ctf_active'] is False for p in pts))
+        self.assertIn('sky',m['look'])
+
+
 class RouteCounts(unittest.TestCase):
     """Ways in on the committed pack (assets/route_checks.py, airborne model:
     open-sky decks, drops and short jet hops). docs/map-pipeline.md asks for
@@ -524,9 +631,32 @@ class RouteCounts(unittest.TestCase):
                 return (xs[0],xs[1],oy+y0,oy+y1,zs[0],zs[1])
             found=route_checks.base_entries(pack,(ox,oz),{k:world(v) for k,v in local.items()},airborne=True)
             n={k:len(v) for k,v in found.items()}
-            self.assertGreaterEqual(n['main floors'],3,(base['team'],n))
-            self.assertGreaterEqual(n['flag level'],2,(base['team'],n))
+            self.assertGreaterEqual(n['main floors'],6,(base['team'],n))
+            self.assertGreaterEqual(n['flag level'],4,(base['team'],n))
             self.assertEqual(n['generator'],2,(base['team'],n))
+
+    def test_many_distinct_routes_to_each_flag(self):
+        """User rule: "two main entrances but ~10 ways of getting to the flag".
+        route_checks.flag_routes counts (entry, approach) pairs: every way from
+        the field into the tower (Level 1 to Level 3) times every way from that
+        entry into the flag's stretch of the rear balcony."""
+        import json
+        from assets import route_checks
+        tc=tower_complex
+        root=Path(__file__).resolve().parent.parent
+        pack=route_checks.Pack(root/'assets/maps/tower-complex')
+        spec=json.loads((root/'maps/tower-complex.json').read_text())
+        fx,fz=tc.FLAG
+        for base in spec['bases']:
+            ox,oy,oz=base['position']; s=-1 if base['yaw']==180 else 1
+            def world(b):
+                x0,x1,y0,y1,z0,z1=b
+                xs=sorted((ox+s*x0,ox+s*x1)); zs=sorted((oz+s*z0,oz+s*z1))
+                return (xs[0],xs[1],oy+y0,oy+y1,zs[0],zs[1])
+            r=route_checks.flag_routes(pack,(ox,oz),world((-11.6,11.6,tc.L1-.5,tc.L3+.5,-11.6,11.6)),
+                                       world((fx-5,fx+5,tc.L2-.5,tc.L2+.8,fz-2.8,11.6)),airborne=True)
+            self.assertGreaterEqual(len(r['entries']),6,(base['team'],r['entries']))
+            self.assertGreaterEqual(r['routes'],10,(base['team'],[len(a) for a in r['approaches']]))
 
 
 class SpawnForwardClearance(unittest.TestCase):

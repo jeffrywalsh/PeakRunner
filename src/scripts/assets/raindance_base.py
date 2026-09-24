@@ -1,4 +1,4 @@
-"""Old Holler base (asset raindance-base-v4; the map key stays `raindance`).
+"""Old Holler base (asset raindance-base-v5; the map key stays `raindance`).
 
 Same layout as the original kit base (basement hall, atrium, wide ski ramps,
 front roof deck) with the pipeline checklist applied, and the flag in a
@@ -6,11 +6,14 @@ bishop-shaped tower behind the deck (v4, replacing the solid service spire
 and the exposed roof flag stand):
 
 - The tower's lower half is solid; its chamber floor is 9 m above the roof,
-  with the flag on it. Three ways in: a front door (-Z), a side door (+X),
-  and a slit cut diagonally through the mitre's back-left face. The doors
-  are open, with nothing behind them: attackers can shoot and fly straight
-  in. Turrets face the enemy flag with a limited field of fire
-  (`turret_arcs.py`), so none of them fires back into the chamber.
+  with the flag on it. Five ways in (v5): four doors, one per side (front
+  -Z, east +X, back +Z, west -X), 3 m wide and 4.5 m tall, and a slit cut
+  diagonally through the mitre's back-left face. Opposite doors line up
+  through the flag, so a jetting player flies in one side, grabs it and
+  flies out the other without slowing. The doors are open, with nothing
+  behind them: attackers can shoot and fly straight in. Turrets face the
+  enemy flag with a limited field of fire (`turret_arcs.py`), so none of
+  them fires back into the chamber.
 - The chamber is reached by jetting: from the front deck up to the ledge
   round the collar, or over the mitre and in through the slit.
 
@@ -29,6 +32,7 @@ The earlier cleanup items still hold:
 - The generator sits in a basement under the hall with exactly two ways in:
   a stair down from the atrium floor, and a service stair that climbs from
   a passage behind the basement to a shed against the hall's back wall.
+  Its ceiling is 8 m above the floor (v5), so it can be jetted in.
   Everything underground stays inside the hall's existing terrain cut
   (local |x| < 32, -56 < z < 32; the 8 m cells align with the base origin).
 
@@ -39,17 +43,17 @@ import math
 
 from assets.structure_kit import Builder
 
-ASSET_ID = 'raindance-base-v4'
+ASSET_ID = 'raindance-base-v5'
 FLOOR, WALL_TOP, ROOF_TOP, APRON_TOP = -10.0, 7.4, 8.6, .03
 LIFT = 1.2
 UNDER, HEADROOM = .6, 2.4
 # Openings in each roof half above the upper end of its hall ramp.
 HOLE_X, HOLE_Z = (15.5, 24.5), (10.0, 19.0)
 # Basement: floor top, ceiling (the hall slab's underside) and interior box.
-B_FLOOR, B_CEIL = -18.0, FLOOR-1.2
+B_FLOOR, B_CEIL = -19.2, FLOOR-1.2       # 8 m clear
 B_X, B_Z0, B_Z1 = 11.0, -6.0, 24.0
 # Atrium stair: 4 m wide at x = 0, down from the hall floor to the basement.
-STAIR_W, STAIR_Z1 = 4.0, 8.4
+STAIR_W, STAIR_Z1 = 4.0, 10.6          # 9.2 m drop over 16.6 m, 29 degrees
 OPEN_Z1 = 1.5            # hall-floor opening ends where stair headroom passes 2.6 m
 # Service route: door in the basement's back wall, passage and landing,
 # then a stair along +x in the rear strip up to a shed at ground level.
@@ -61,11 +65,17 @@ CEIL_END = 19.6          # where the rear apron ends and the shed begins
 SHED_X1, SHED_ROOF, DOOR_LINTEL = 32.0, 3.4, 3.0
 # Bishop flag tower: a lathed body on the roof behind the front deck. Heights
 # are above ROOF_TOP; the lower half is solid and the chamber above it is hollow.
-TZ, SIDES, PHASE = 20.0, 20, math.pi/20      # panel 14 faces -Z, panel 19 faces +X
+TZ, SIDES, PHASE = 20.0, 24, 0.0            # panel i spans i*15..(i+1)*15 degrees from +X
 CH_FLOOR = ROOF_TOP+9.0                      # chamber floor and outer ledge top
 R_OUT, R_IN, R_LEDGE = 5.8, 5.2, 7.4         # stem outer / inner radius at the floor, ledge rim
-DOOR_PANELS = (14, 19)                       # front (-Z) and side (+X) doors
-CH_LINTEL = CH_FLOOR+3.4                     # both doors are one panel (1.6 m) wide, 3.4 m tall
+# Four doors, one per side, two panels (3.0 m at the outer face) each and
+# 4.5 m tall, centred on -Z (front), +X, +Z and -X. Opposite doors line up
+# through the flag on the axis, so a jetting player flies straight through.
+DOORS = {'front': (17, 18), 'east': (23, 0), 'back': (5, 6), 'west': (11, 12)}
+DOOR_PANELS = frozenset(i for pair in DOORS.values() for i in pair)
+DOOR_H = 4.5
+CH_LINTEL = CH_FLOOR+DOOR_H
+R_OUT_L, R_IN_L = 5.645, 5.045               # shell radii at the lintel
 R_BULB = 6.5                                 # widest part of the mitre
 SLIT_DIR = (-math.sqrt(.5), math.sqrt(.5))   # the mitre slit faces back-left (-X, +Z)
 SLIT_Y, SLIT_W, SLIT_TILT = ROOF_TOP+18.2, 3.6, math.radians(40)
@@ -236,10 +246,10 @@ def _slit_cut(prof):
 def bishop_tower(mesh, b, accent):
     """Each team's flag tower, shaped like a chess bishop: ringed plinth,
     flared foot, stem, a collar whose top is the chamber floor and an outer
-    landing ledge, a hollow upper stem and mitre, and a ball finial. Three
-    ways into the chamber: a front door (-Z), a side door (+X) and the slit
-    cut diagonally through the mitre's back-left face. The doors are open
-    straight through to the chamber floor."""
+    landing ledge, a hollow upper stem and mitre, and a ball finial. Five
+    ways into the chamber: four doors, one per side, and the slit cut
+    diagonally through the mitre's back-left face. The doors are open
+    straight through to the chamber floor and line up in opposite pairs."""
     lift = lambda prof: [(ROOF_TOP+h, r) for h, r in prof]
     # Solid lower half: sealed underneath, stepped rings, flare, stem, collar.
     annulus(mesh, ROOF_TOP, 0, 7.6, 'trim', False)
@@ -252,18 +262,18 @@ def bishop_tower(mesh, b, accent):
     annulus(mesh, ROOF_TOP+8.2, 5.5, R_LEDGE, 'trim', False)
     lathe(mesh, lift([(8.2, R_LEDGE), (9.0, R_LEDGE)]), 'trim')
     annulus(mesh, CH_FLOOR, 0, R_LEDGE, 'grate', True)
-    # Hollow stem with the two doors cut through both shells, then the neck.
+    # Hollow stem with the four doors cut through both shells, then the neck.
     door = lambda i, k: k == 0 and i in DOOR_PANELS
-    outer = lift([(9, R_OUT), (12.4, 5.7), (14.4, 5.6)])
-    inner = lift([(9, R_IN), (12.4, 5.1), (14.4, 5.0)])
+    outer = lift([(9, R_OUT), (9+DOOR_H, R_OUT_L), (14.4, 5.6)])
+    inner = lift([(9, R_IN), (9+DOOR_H, R_IN_L), (14.4, 5.0)])
     lathe(mesh, outer, 'concrete', skip=door)
     lathe(mesh, inner, 'panel', inward=True, skip=door)
-    for i in DOOR_PANELS:
-        for j, s in ((i, 1), (i+1, -1)):         # jambs close the wall's thickness
+    for first, last in DOORS.values():
+        for j, s in ((first, 1), (last+1, -1)):  # jambs close the wall's thickness
             a, bb = _pt(R_OUT, CH_FLOOR, j), _pt(R_IN, CH_FLOOR, j)
-            c, d = _pt(5.1, CH_LINTEL, j), _pt(5.7, CH_LINTEL, j)
+            c, d = _pt(R_IN_L, CH_LINTEL, j), _pt(R_OUT_L, CH_LINTEL, j)
             mesh.quad(a, bb, c, d, 'trim') if s > 0 else mesh.quad(a, d, c, bb, 'trim')
-        annulus(mesh, CH_LINTEL, 5.1, 5.7, 'trim', False, only={i})
+        annulus(mesh, CH_LINTEL, R_IN_L, R_OUT_L, 'trim', False, only={first, last})
     annulus(mesh, ROOF_TOP+14.4, 5.6, 6.1, 'trim', False)
     lathe(mesh, lift([(14.4, 6.1), (15.2, 6.1)]), 'trim')
     lathe(mesh, lift([(14.95, 6.13), (15.1, 6.13)]), accent, solid=False)
@@ -283,7 +293,7 @@ def bishop_tower(mesh, b, accent):
     # Team trim and light: flag ring on the floor, glow strips on the inner
     # wall between the doors, a lit ring under the neck.
     lathe(mesh, [(CH_FLOOR+.02, 1.6), (CH_FLOOR+.02, 1.2)], accent, solid=False)
-    for i in (3, 7, 10):
+    for i in (2, 8, 14, 20):                     # midway between the doors
         a = (i+.5)*math.tau/SIDES+PHASE; r = 5.05
         cx, cz, tx, tz = r*math.cos(a), TZ+r*math.sin(a), -math.sin(a)*.22, math.cos(a)*.22
         y0, y1 = CH_FLOOR+1, CH_FLOOR+5
@@ -349,8 +359,10 @@ def build(mesh, team, circuit, equipment):
     return {
         'flag': (0, CH_FLOOR+.35, TZ),
         'flag_tower': (0, CH_FLOOR, TZ),
-        # Front door, side door and the mitre slit, each just outside the tower.
+        # The four doors (front, east, back, west) and the mitre slit, each
+        # just outside the tower.
         'tower_entries': [(0, CH_FLOOR, TZ-R_OUT-.8), (R_OUT+.8, CH_FLOOR, TZ),
+                          (0, CH_FLOOR, TZ+R_OUT+.8), (-R_OUT-.8, CH_FLOOR, TZ),
                           (SLIT_DIR[0]*(R_BULB+1), SLIT_Y, TZ+SLIT_DIR[1]*(R_BULB+1))],
         'spawn': (48, 0, -65),
         # (x, y, z, local yaw): yaw 0 faces the entrance (-Z), pi faces +Z.
