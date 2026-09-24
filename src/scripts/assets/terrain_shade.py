@@ -169,6 +169,10 @@ def casters(vertex_bytes, skip_materials=()):
     """Opaque render triangles (N,3,3) from kit vertex bytes."""
     v = np.frombuffer(vertex_bytes, '<f4').reshape(-1, 3, 12)
     keep = ~np.isin(v[:, 0, 10], list(skip_materials))   # column 10: material layer
+    # Terrain-encoded lids over cut cells (column 11 == -2) are the ground
+    # itself: the heightfield already self-shadows, and as casters they sit
+    # exactly on the texels being baked and shadow them.
+    keep &= v[:, 0, 11] != -2
     return v[keep][:, :, :3].astype(np.float64)
 
 

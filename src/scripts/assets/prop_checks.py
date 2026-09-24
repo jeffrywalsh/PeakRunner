@@ -93,6 +93,22 @@ def check_instances(test, pack, m, protect, terrain):
     test.assertGreater(float(a[..., 0].mean()), 170, 'most ground is lit')
     test.assertLess(int(a[..., 1].min()), 245, 'no ambient occlusion anywhere')
     test.assertEqual(m['terrain_shade']['size'], terrain_shade.SIZE)
+    # Terrain-copy lids over cut cells must bake as lit as the ground round
+    # them; as shadow casters they once self-shadowed into dark stripes.
+    v = np.frombuffer((pack/'vertices.bin').read_bytes(), '<f4').reshape(-1, 3, 12)
+    lid = v[v[:, 0, 11] == -2]
+    if len(lid):
+        # Compare with what the heightfield alone casts there: nearby
+        # structures may still shade a lid, but not by the ~100 levels the
+        # self-casting lids used to.
+        texel = 2048/terrain_shade.SIZE
+        xz = lid[:, :, [0, 2]].mean(1)
+        on = [float(a[min(int(z/texel), terrain_shade.SIZE-1), min(int(x/texel), terrain_shade.SIZE-1), 0]) for x, z in xz]
+        grid = terrain_shade.heights((pack/'height.bin').read_bytes())
+        x, z = xz[:, 0].astype(np.float64), xz[:, 1].astype(np.float64)
+        terrain_only = terrain_shade.terrain_visibility(grid, x, z, terrain_shade.sample(grid, x, z),
+                                                        np.asarray(m['terrain_shade']['sun'], np.float64))*255
+        test.assertGreater(np.mean(on), terrain_only.mean()-45, 'lid cells bake darker than the terrain casts')
 
 
 MIN_COVER = 12

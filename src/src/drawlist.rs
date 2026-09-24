@@ -105,7 +105,10 @@ pub fn build_frame_with(world: &World, aspect: f32, dt: f32, fx: &mut Effects) -
     let view = Mat4::look_to_rh(eye, dir, Vec3::Y);
     let size = crate::terrain::info(world.map).size;
     let far = (size * 1.05).max(480.0);
-    let proj_gl = Mat4::perspective_rh(fov.to_radians(), aspect.max(0.1), 0.14, far);
+    // The menu orbit keeps 28 m above everything, so a far nearer plane buys
+    // ~30x depth precision for distant shorelines and trim while it spins.
+    let near = if world.state == MatchState::Flyby {4.0} else {0.14};
+    let proj_gl = Mat4::perspective_rh(fov.to_radians(), aspect.max(0.1), near, far);
     let proj = clip_correct(proj_gl);
     let vp = proj * view;
     let inv_vp = vp.inverse();

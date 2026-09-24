@@ -2314,6 +2314,8 @@ mod shader_check {
                     format!("local-assets/stonehenge-clone/qa-{name}.png")
                 } else if std::env::var_os("QA_REFERENCE").is_some() {
                     format!("screenshots/broadside-reference-{name}.png")
+                } else if name.starts_with("menu-clip") {
+                    format!("screenshots/{name}.png")
                 } else { format!("screenshots/grass-look-{name}.png") };
                 let mut encoder = png::Encoder::new(std::fs::File::create(&path).unwrap(), w, h);
                 encoder.set_color(png::ColorType::Rgba);
@@ -2354,6 +2356,30 @@ mod shader_check {
                 world.set_map(map);world.start_match(true);
                 assert_eq!(world.score,[0,0]);
                 assert_eq!(world.flags[0].home,glam::Vec3::from_array(pack.manifest.flags[0]));
+                return;
+            }
+            if std::env::var_os("QA_LID_PROBE").is_some() {
+                world.set_map(MapId::DesertOfDeathClone); world.start_match(true); world.players.truncate(1);
+                for (name,pos,pitch) in [("menu-clip-lid-high",[1076.,420.,760.],-1.25_f32),("menu-clip-lid-low",[1076.,200.,700.],-0.9)] {
+                    world.players[0].pos=Vec3::from_array(pos); world.players[0].yaw=std::f32::consts::PI; world.players[0].pitch=pitch;
+                    shoot(&mut scene,&world,name,1280,800);
+                }
+                return;
+            }
+            if let Ok(tag)=std::env::var("QA_MENU_CLIP") {
+                // Menu flyby at six points round the orbit, each as a pair of
+                // frames 0.05 s apart: depth fighting flickers between them.
+                for map in [MapId::Raindance, MapId::BroadsideClone,
+                    MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone] {
+                    world.set_map(map);
+                    world.state=crate::sim::MatchState::Flyby;
+                    for i in 0..6 {
+                        for (j,dt) in [(0,0.0_f32),(1,0.05)] {
+                            world.flyby=i as f32*std::f32::consts::TAU/0.18/6.+dt;
+                            shoot(&mut scene,&world,&format!("menu-clip-{tag}-{}-{i}{}",map.key(),["a","b"][j]),1280,800);
+                        }
+                    }
+                }
                 return;
             }
             if std::env::var_os("QA_ROTATION").is_some() {

@@ -2321,8 +2321,8 @@
       0.57735,
       -0.57735
     ],
-    "shaded_fraction": 0.0175,
-    "baker_sha256": "648b7389e15de81bcf2fd010617202e83b15002faec60138b858d466a637bc6b"
+    "shaded_fraction": 0.0174,
+    "baker_sha256": "981ed46e40de6348d03e479856a4b7fb985d238650b23c0ce951077761b47f6c"
   },
   "files": {
     "height.bin": "b51809e63702b0c2b9024c8e9edfa70ecd8963b37b75a7c846d34558eebe10cb",
@@ -2332,6 +2332,6 @@
     "textures.rgba": "d00a9963a9e7c12b60ecc2a41c3ab016dc040c5604e4c5e123787c965b71f6d5",
     "ambient.f32": "a3938b139d99dbdde7156268f817497624177809ab733a0f0ccc8ccce3782462",
     "props.bin": "2dfa3096a1c00cb31a73f73204f57d8d3a3bfb2068bff9314c7be793338241d5",
-    "shade.rg": "f6d5e6bd2cff1a32df439032a996422ee2b27bc85fcf4a000d6478191d316921"
+    "shade.rg": "1891886cf0de72ca3f98ce416a26ac56dff4ae0ef0b15d75d244b004dd4debe3"
   }
 }

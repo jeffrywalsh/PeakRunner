@@ -3295,14 +3295,22 @@ mod equipment_tests {
     use crate::equipment::{self,Kind};
     #[test]
     fn entire_menu_orbit_clears_terrain_and_solid_scenery() {
-        for map in [MapId::Valley, MapId::Raindance] {
+        for map in [MapId::Valley, MapId::Raindance, MapId::BroadsideClone, MapId::StonehengeClone,
+            MapId::SnowblindClone, MapId::DesertOfDeathClone] {
             let mut w=World::new(); w.set_map(map);
+            // Render-only masts and spires can stand above the solid scenery.
+            let render_top=crate::map_pack::on(map).map_or(f32::NEG_INFINITY,|pack| {
+                let bytes=pack.asset("vertices.bin").expect("vertices");
+                bytes.chunks_exact(48).map(|v|f32::from_le_bytes(v[4..8].try_into().unwrap()))
+                    .fold(f32::NEG_INFINITY,f32::max)
+            });
             for step in 0..720 {
                 w.flyby=step as f32 * std::f32::consts::TAU / 720. / 0.18;
                 let (eye,dir,_)=w.camera();
                 assert!(eye.is_finite() && dir.is_normalized());
-                assert!(eye.y >= w.ground(eye.x,eye.z)+27.9);
-                if let Some(pack)=crate::map_pack::on(map) { assert!(eye.y >= pack.highest_solid()+27.9); }
+                assert!(eye.y >= w.ground(eye.x,eye.z)+27.9, "{map:?} orbit meets terrain");
+                if let Some(pack)=crate::map_pack::on(map) { assert!(eye.y >= pack.highest_solid()+27.9, "{map:?} orbit meets solid"); }
+                assert!(eye.y >= render_top+20.0, "{map:?} orbit {} passes render geometry topping {render_top}", eye.y);
             }
         }
     }
