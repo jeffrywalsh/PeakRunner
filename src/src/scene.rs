@@ -49,7 +49,7 @@ pub fn bloom_settings(level: u8) -> (usize, f32) {
 }
 const WORLD_SIZE: u64 = 304;
 const SKY_SIZE: u64 = 96;
-const EMIT_SIZE: u64 = 96;
+const EMIT_SIZE: u64 = 112;
 
 fn precipitation_count(map: MapId, available: usize) -> usize {
     match map { MapId::Valley => available, MapId::Raindance | MapId::BroadsideClone | MapId::StonehengeClone | MapId::SnowblindClone | MapId::DesertOfDeathClone => 0 }
@@ -93,6 +93,7 @@ struct EmitUniform {
     mvp: [[f32; 4]; 4],
     color: [f32; 4],
     fog: [f32; 4],
+    params: [f32; 4],
 }
 
 struct Mesh {
@@ -112,7 +113,7 @@ pub struct SceneGpu {
     sky_layout: wgpu::BindGroupLayout,
     emit_layout: wgpu::BindGroupLayout,
     blit_layout: wgpu::BindGroupLayout,
-    meshes: [Mesh; 6],
+    meshes: [Mesh; 7],
     sampler: wgpu::Sampler,
     uniform: wgpu::Buffer,
     uniform_slots: u32,
@@ -375,6 +376,7 @@ impl SceneGpu {
             upload(device, "disc", &disc_mesh()),
             upload(device, "beveled housing", &bevel_mesh()),
             upload(device, "chamfered armor", &armor_mesh()),
+            upload(device, "decal", &decal_mesh()),
         ];
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("scene"),
@@ -781,6 +783,7 @@ fn emit_uniform(draw: &EmitDraw, vp: Mat4, fog: [f32; 4]) -> EmitUniform {
         mvp: (vp * draw.model).to_cols_array_2d(),
         color: draw.color,
         fog,
+        params: [if draw.mesh == MeshId::Decal { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
     }
 }
 
@@ -1453,6 +1456,22 @@ fn armor_mesh() -> (Vec<f32>, Vec<u16>) {
         face(&points);
     }
     (vertices,indices)
+}
+
+/// Unit flat disc in the XZ plane facing +Y, top face only: a ground mark
+/// must be a single layer, or the alpha-blended pass darkens it twice.
+fn decal_mesh() -> (Vec<f32>, Vec<u16>) {
+    let n = 24u16;
+    let mut v = vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+    for i in 0..n {
+        let a = i as f32 / n as f32 * std::f32::consts::TAU;
+        v.extend_from_slice(&[a.cos(), 0.0, a.sin(), 0.0, 1.0, 0.0]);
+    }
+    let mut idx = Vec::new();
+    for i in 0..n {
+        idx.extend_from_slice(&[0, 1 + (i + 1) % n, 1 + i]);
+    }
+    (v, idx)
 }
 
 fn disc_mesh() -> (Vec<f32>, Vec<u16>) {

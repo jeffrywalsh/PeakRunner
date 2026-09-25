@@ -23,6 +23,9 @@ pub enum MeshId {
     Disc = 3,
     Bevel = 4,
     Armor = 5,
+    /// Flat top-only disc for ground marks (scorch); the smoke pass gives it
+    /// a soft radial edge instead of the sphere-edge fade.
+    Decal = 6,
 }
 
 #[derive(Clone)]

@@ -29,6 +29,8 @@ struct EmitUniforms {
     color: vec4<f32>,
     // Smoke pass only: fog colour and this draw's fog amount (0..1).
     fog: vec4<f32>,
+    // x: 1 for a flat ground decal (scorch), 0 otherwise.
+    params: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> world: WorldUniforms;
@@ -217,6 +219,12 @@ struct EmitOut {
 fn vs_emit(in: LitIn) -> EmitOut {
     var out: EmitOut;
     out.clip = emit_u.mvp * vec4<f32>(in.pos, 1.0);
+    if (emit_u.params.x > 0.5) {
+        // A decal is flat, so a facing fade would hide it at grazing views.
+        // Carry 1 at the centre falling to 0 at the rim for a soft edge.
+        out.facing = 1.0 - length(in.pos.xz);
+        return out;
+    }
     let view_axis = normalize(vec3<f32>(emit_u.mvp[0].w, emit_u.mvp[1].w, emit_u.mvp[2].w));
     out.facing = dot(in.n, view_axis);
     return out;
@@ -237,7 +245,10 @@ fn fs_emit(in: EmitOut) -> @location(0) vec4<f32> {
 // lit world so a plume sinks into haze instead of glowing through it.
 @fragment
 fn fs_smoke(in: EmitOut) -> @location(0) vec4<f32> {
-    let soft = pow(clamp(abs(in.facing), 0.0, 1.0), 1.5);
+    var soft = pow(clamp(abs(in.facing), 0.0, 1.0), 1.5);
+    if (emit_u.params.x > 0.5) {
+        soft = smoothstep(0.0, 0.55, in.facing);
+    }
     let rgb = mix(emit_u.color.rgb, emit_u.fog.rgb, emit_u.fog.a);
     return vec4<f32>(rgb, emit_u.color.a * soft);
 }

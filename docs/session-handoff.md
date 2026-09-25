@@ -365,9 +365,11 @@ agents (they inherit the conversation context). Patterns that worked:
   shaft/tunnel optimally.
 - C&H mode tuning (scores, point placement) after play.
 - Selected-map-only admission and independent pack updates (older roadmap).
-- **Scorch decals are invisible:** the fade in `vs_emit` uses the wrong
-  transform on the flattened disc, so only a ~1 cm rim renders. Found while
-  fixing the black lines; not yet fixed.
+- Scorch decals (fixed 2026-09-24): the flattened disc lost its faces to the
+  smoke pass's facing fade, leaving a ~1 cm rim. Scorch now uses the flat
+  top-only `MeshId::Decal`; the emit uniform's `params.x` flag gives decals a
+  soft radial edge instead (`scorch_marks_draw_as_unflattened_decals`;
+  captures `research/screenshots/scorch-fix-after-*.png`).
 - The last fix of the session: incoming discs showed as black lines because
   the round's hub was dark and thicker than its rim (plus a NaN tracer at zero
   velocity). The hub is now self-lit; `projectile_draws_never_render_dark` and

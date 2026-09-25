@@ -451,9 +451,9 @@ impl Effects {
                 Kind::Scorch => {
                     let a = p.alpha * (1.0 - t);
                     let rot = glam::Quat::from_rotation_arc(Vec3::Y, p.normal.normalize_or(Vec3::Y));
-                    smoke.push(EmitDraw { mesh: MeshId::Disc,
+                    smoke.push(EmitDraw { mesh: MeshId::Decal,
                         model: Mat4::from_translation(p.pos) * Mat4::from_quat(rot) * Mat4::from_rotation_y(p.spin)
-                            * Mat4::from_scale(Vec3::new(p.size, 0.01, p.size * 0.8)),
+                            * Mat4::from_scale(Vec3::new(p.size, 1.0, p.size * 0.8)),
                         color: [p.color[0], p.color[1], p.color[2], a] });
                 }
                 Kind::Spark => {
@@ -573,6 +573,25 @@ mod tests {
         fx.draw(&mut lit, &mut emit, &mut smoke, eye);
         for d in lit.iter() { assert!(d.model.is_finite()); }
         for d in emit.iter().chain(&smoke) { assert!(d.model.is_finite() && d.color.iter().all(|c| c.is_finite())); }
+    }
+
+    #[test]
+    fn scorch_marks_draw_as_unflattened_decals() {
+        // A scorch drawn as a disc flattened by a tiny Y scale lost its faces to
+        // the facing fade, leaving only a thin rim on screen.
+        let mut w = world();
+        let eye = w.camera().0;
+        w.explosions.push(Explosion { pos: eye + Vec3::new(0.0, -2.0, -20.0), age: 0.0, max_r: 9.0, kind: 2 });
+        let mut fx = Effects::default();
+        fx.update(&w, eye, 1.0 / 60.0);
+        assert_eq!(fx.count(Kind::Scorch), 1);
+        let (mut lit, mut emit, mut smoke) = (Vec::new(), Vec::new(), Vec::new());
+        fx.draw(&mut lit, &mut emit, &mut smoke, eye);
+        let decals: Vec<_> = smoke.iter().filter(|d| d.mesh == MeshId::Decal).collect();
+        assert_eq!(decals.len(), 1);
+        assert!(!smoke.iter().any(|d| d.mesh == MeshId::Disc));
+        let up = decals[0].model.transform_vector3(Vec3::Y).length();
+        assert!(up > 0.5, "decal flattened by its model scale: {up}");
     }
 
     #[test]
