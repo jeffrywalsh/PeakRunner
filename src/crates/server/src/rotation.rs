@@ -143,6 +143,15 @@ mod tests {
     }
 
     #[test]
+    fn the_deployed_vps_rotations_parse() {
+        let compose = include_str!("../../../deploy/vps/compose.yaml");
+        let rotations: Vec<&str> = compose.lines().filter_map(|l| l.trim().strip_prefix("PEAKRUNNER_MATCH_ROTATION: '"))
+            .map(|r| r.trim_end_matches('\'')).collect();
+        assert_eq!(rotations.len(), 2, "main and football servers");
+        for r in rotations { let parsed = Rotation::parse(r).unwrap_or_else(|e| panic!("{r}: {e}")); assert!(!parsed.maps.is_empty()); }
+    }
+
+    #[test]
     fn playlists_expand_to_every_supported_map() {
         let r = Rotation::parse(r#"[{"playlist":"ctf_cnh"}]"#).unwrap();
         let ctf = peakrunner_core::map_catalog::maps_for(SupportedMode::Ctf);

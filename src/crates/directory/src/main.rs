@@ -11,7 +11,9 @@ async fn main() -> std::io::Result<()> {
     if !bind.parse::<std::net::SocketAddr>().is_ok_and(|a| a.ip().is_loopback()) && !trusted {
         return Err(std::io::Error::other("non-loopback HTTP origin requires trusted Cloudflare mode and an isolated network"));
     }
-    peakrunner_directory::serve(&bind,
+    // Trusted (tunnel) mode reads the announcer's address from Cloudflare's
+    // client IP header; otherwise from the socket.
+    peakrunner_directory::serve_with(&bind,
         std::env::var("PEAKRUNNER_STATUS_URL").unwrap_or("quic://play.peakrunner.net:7777".into()),
-        std::env::var("PEAKRUNNER_PUBLIC_URL").unwrap_or("quic://play.peakrunner.net:7777".into())).await
+        std::env::var("PEAKRUNNER_PUBLIC_URL").unwrap_or("quic://play.peakrunner.net:7777".into()), trusted).await
 }

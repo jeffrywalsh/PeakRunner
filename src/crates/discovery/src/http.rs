@@ -9,6 +9,16 @@ pub fn http_get(url: &str, https_only: bool) -> io::Result<Vec<u8>> {
     if bytes.len() > 262_144 { return Err(invalid("directory response too large")); }
     Ok(bytes)
 }
+/// POST a small JSON body; returns the HTTP status (errors only for
+/// transport failures). Used by hosted servers to announce themselves.
+pub fn http_post_json<T: serde::Serialize>(url: &str, body: &T, https_only: bool) -> io::Result<u16> {
+    let config = ureq::Agent::config_builder().https_only(https_only).http_status_as_error(false)
+        .max_redirects(0).timeout_global(Some(Duration::from_secs(12))).build();
+    let json = serde_json::to_string(body).map_err(io::Error::other)?;
+    let response = ureq::Agent::new_with_config(config).post(url)
+        .header("content-type", "application/json").send(json).map_err(io::Error::other)?;
+    Ok(response.status().as_u16())
+}
 pub fn browse_https(url: &str) -> io::Result<Vec<ServerAdvert>> {
     let data: PublicDirectory = serde_json::from_slice(&http_get(url, true)?).map_err(io::Error::other)?;
     if data.protocol != PROTOCOL || data.servers.len() > 128 { return Err(invalid("incompatible directory")); }

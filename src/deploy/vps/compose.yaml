@@ -7,13 +7,50 @@ services:
     environment:
       PEAKRUNNER_MATCH_NAME: Springdale Central
       PEAKRUNNER_MATCH_MAP: Raindance
-      # Every CTF map in CTF, then every Capture & Hold map in Capture & Hold.
-      # A football server uses '[{"playlist":"football"}]'. Explicit
-      # {"map":...,"mode":...} entries still work and mix with playlists.
-      PEAKRUNNER_MATCH_ROTATION: '[{"playlist":"ctf_cnh"}]'
+      # Every CTF map in CTF, then every Capture & Hold map, then Team
+      # Deathmatch on every non-stadium map. Explicit {"map":...,"mode":...}
+      # entries still work and mix with playlists.
+      PEAKRUNNER_MATCH_ROTATION: '[{"playlist":"ctf_cnh"},{"playlist":"team_deathmatch"}]'
       PEAKRUNNER_MATCH_PASSWORD: ${PEAKRUNNER_MATCH_PASSWORD:-}
+      # Announce to the public directory (it is also its configured backend,
+      # so this only keeps the listing current).
+      PEAKRUNNER_DIRECTORY_URL: https://dir.peakrunner.net/announce
+      PEAKRUNNER_ADVERTISE_URL: quic://play.peakrunner.net:7777
     ports:
       - "7777:7777/udp"
+    volumes:
+      - ./secrets/certs:/run/peakrunner:ro
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 384m
+    cpus: 1.0
+    pids_limit: 64
+    healthcheck:
+      test: [CMD, peakrunner-server, --healthcheck]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+  # Football only, on host UDP 7778. It announces itself to the directory,
+  # which checks the address and queries its status before listing it.
+  football:
+    image: ${PEAKRUNNER_IMAGE:?Set the tested immutable image tag or digest}
+    command: [peakrunner-server]
+    user: "10001:10001"
+    environment:
+      PEAKRUNNER_MATCH_NAME: Springdale Football
+      PEAKRUNNER_MATCH_MAP: Longfield
+      PEAKRUNNER_MATCH_ROTATION: '[{"playlist":"football"}]'
+      PEAKRUNNER_MATCH_PASSWORD: ${PEAKRUNNER_FOOTBALL_PASSWORD:-}
+      PEAKRUNNER_DIRECTORY_URL: https://dir.peakrunner.net/announce
+      PEAKRUNNER_ADVERTISE_URL: quic://play.peakrunner.net:7778
+    ports:
+      - "7778:7777/udp"
     volumes:
       - ./secrets/certs:/run/peakrunner:ro
     restart: unless-stopped
