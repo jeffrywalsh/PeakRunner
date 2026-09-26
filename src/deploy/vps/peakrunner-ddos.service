@@ -1,0 +1,13 @@
+[Unit]
+Description=PeakRunner game-port flood filtering (nftables)
+After=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /opt/peakrunner/ddos.nft
+ExecStop=/usr/sbin/nft delete table inet peakrunner_ddos
+
+[Install]
+WantedBy=multi-user.target

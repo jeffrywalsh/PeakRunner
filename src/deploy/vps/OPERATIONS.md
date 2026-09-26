@@ -123,3 +123,50 @@ No container registry account is required. Git stores source/config, not images.
   separate encrypted backup. Never commit them or print full container metadata.
 - Roll back only to a recorded compatible protocol release. Use maintenance
   routing for an unavailable game rather than sending raw UDP to Cloudflare Tunnel.
+
+## Game-port flood filtering (`ddos.nft`)
+
+`ddos.nft` is an nftables table (`inet peakrunner_ddos`) that filters UDP
+7777–7790 only. SSH and every other port are untouched. It hooks prerouting
+at priority -150: after connection tracking, and before Docker's port
+translation. It has to sit there because Docker's published ports are
+forwarded to the containers and never pass through the input hook.
+
+**Rules:**
+- **Size and fragments:** oversized datagrams (over 1500 bytes) and UDP
+  fragments are dropped.
+- **New flows:** each source IP may open 20 new flows per minute (burst 10).
+  A UDP flow stays "new" until the server replies, and a real server replies
+  at once.
+- **Packet rate:** each source IP may send 400 packets/s (burst 800). A real
+  client sends about 70–130. A source over the limit is blocked for 20 s.
+  The block is short because UDP sources can be spoofed to get a real player
+  blocked.
+
+**Tested** on dellcon in an isolated privileged container (its own network
+namespace) against a replying UDP server:
+- a normal client at 120/s delivered 351/351 packets;
+- a 3000/s flood delivered 969/4661 before its source was blocked;
+- the same IP was then blocked;
+- 1600-byte packets were all dropped.
+
+**Limits:** this stops floods that reach the host. A flood that fills the
+uplink itself needs the provider's upstream DDoS filtering. It also doesn't
+protect the website, which is behind Cloudflare's tunnel and needs no
+inbound port.
+
+**Install** (keeps working across reboots; nothing is applied until you run
+it):
+
+    sudo -n install -m 644 ddos.nft /opt/peakrunner/ddos.nft
+    sudo -n nft -c -f /opt/peakrunner/ddos.nft          # dry run
+    sudo -n install -m 644 peakrunner-ddos.service /etc/systemd/system/
+    sudo -n systemctl daemon-reload && sudo -n systemctl enable --now peakrunner-ddos
+
+**Inspect or remove:**
+
+    sudo -n nft list table inet peakrunner_ddos
+    sudo -n systemctl disable --now peakrunner-ddos     # deletes the table
+
+**Verify** after install: rerun `public_smoke` against both ports and check
+that the counters stay near zero for real traffic.

@@ -1,0 +1,42 @@
+#!/usr/sbin/nft -f
+# PeakRunner game-port flood filtering (UDP 7777-7790 only; SSH and every
+# other port are untouched). Drops floods in the kernel before they reach a
+# match server. It cannot stop an attack that fills the uplink itself; that
+# needs the provider's upstream filtering.
+#
+# Budgets: a real client sends 60 input packets/s plus QUIC acks and control
+# traffic, roughly 70-130 packets/s. Each source IP may send 400 packets/s
+# with a burst of 800 (room for several players behind one NAT) and open 20
+# new flows per minute. QUIC datagrams never exceed 1500 bytes; oversized
+# packets are dropped.
+table inet peakrunner_ddos
+delete table inet peakrunner_ddos
+table inet peakrunner_ddos {
+    set flood4 { type ipv4_addr; size 65536; flags dynamic, timeout; timeout 20s; }
+    set flood6 { type ipv6_addr; size 65536; flags dynamic, timeout; timeout 20s; }
+
+    chain game {
+        # Oversized datagrams: no legitimate QUIC packet is this large.
+        meta length > 1500 counter drop
+        # Sources caught flooding stay dropped for 20 s.
+        ip saddr @flood4 counter drop
+        ip6 saddr @flood6 counter drop
+        # New flows per source: at most 20 per minute (burst 10).
+        ct state new meter newflow4 size 65536 { ip saddr limit rate over 20/minute burst 10 packets } counter drop
+        ct state new meter newflow6 size 65536 { ip6 saddr limit rate over 20/minute burst 10 packets } counter drop
+        # Packet rate per source; over it, the source is blocked for 20 s (short, because UDP sources can be spoofed to get a real player blocked).
+        meter rate4 size 65536 { ip saddr limit rate over 400/second burst 800 packets } add @flood4 { ip saddr } counter drop
+        meter rate6 size 65536 { ip6 saddr limit rate over 400/second burst 800 packets } add @flood6 { ip6 saddr } counter drop
+    }
+
+    chain prerouting {
+        # Docker publishes the game ports by DNAT, so their packets are
+        # forwarded to containers and never pass the input hook. Filter at
+        # prerouting: after connection tracking (-200, so ct state works) and
+        # before Docker's destination NAT (-100, so dports are still the
+        # published ones), ahead of ufw.
+        type filter hook prerouting priority -150; policy accept;
+        ip frag-off & 0x1fff != 0 udp dport 7777-7790 counter drop
+        udp dport 7777-7790 jump game
+    }
+}

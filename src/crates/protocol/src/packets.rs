@@ -73,3 +73,41 @@ impl Reassembly {
 
 
 impl Reassembly { pub fn pending_frames(&self) -> usize { self.frames.len() } }
+
+#[cfg(test)]
+mod size_probe {
+    use super::*;
+    use peakrunner_core::{sim::Match, terrain::MapId};
+    /// Largest compressed snapshot in a busy full match, and the per-player
+    /// share of it. Run with --ignored --nocapture.
+    #[test]
+    #[ignore = "measurement"]
+    fn snapshot_size_probe() {
+        let mut m = Match::new(MapId::Raindance);
+        for i in 0..MAX_PLAYERS { m.join(100 + i as u32, &format!("Player {i}")).unwrap(); }
+        let (mut max_raw, mut max_lz, mut max_parts, mut players_raw) = (0, 0, 0, 0);
+        for seq in 1..=600u64 {
+            let commands: Vec<Option<Command>> = (0..MAX_PLAYERS).map(|i| Some(Command { seq, move_z: 1.0,
+                move_x: if i % 2 == 0 { -0.5 } else { 0.5 }, yaw: i as f32 + seq as f32 * 0.01, jet: seq % 240 < 100,
+                fire: true, weapon: ((seq / 120) % 3) as u8, ..Command::default() })).collect();
+            m.step(&commands);
+            if seq % 3 == 0 {
+                let s = m.snapshot_for(0);
+                let raw = postcard::to_allocvec(&s).unwrap();
+                let lz = lz4_flex::compress_prepend_size(&raw);
+                players_raw = players_raw.max(postcard::to_allocvec(&s.players).unwrap().len());
+                max_raw = max_raw.max(raw.len()); max_lz = max_lz.max(lz.len());
+                max_parts = max_parts.max(chunks(&s).map(|c| c.len()).unwrap_or(99));
+            }
+        }
+        let t = std::time::Instant::now();
+        for seq in 601..=1200u64 {
+            let commands: Vec<Option<Command>> = (0..MAX_PLAYERS).map(|i| Some(Command { seq, move_z: 1.0, yaw: i as f32 + seq as f32 * 0.01,
+                fire: true, weapon: ((seq / 120) % 3) as u8, ..Command::default() })).collect();
+            m.step(&commands);
+        }
+        println!("step: {:.3} ms per tick at {} players (budget 16.7 ms)", t.elapsed().as_secs_f64() * 1000.0 / 600.0, MAX_PLAYERS);
+        println!("{} players: max raw {max_raw} B (players {players_raw} B, {} B each), max compressed {max_lz} B, {max_parts} datagrams; 20 Hz = {:.0} kbit/s per client",
+            MAX_PLAYERS, players_raw / MAX_PLAYERS, max_lz as f64 * 20.0 * 8.0 / 1000.0);
+    }
+}
