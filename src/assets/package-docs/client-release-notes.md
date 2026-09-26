@@ -1,17 +1,24 @@
 # PeakRunner native playtest
 
-Original Old Holler, Tower Complex, Cairnhold, Frostline, Dustreach,
-Longfield and Highgoal (football) map assets are embedded in the standalone executable. No Tribes install or separate asset download is needed.
-Version .20260921.1 requires a matching server and map collection; older
-.20260919.4 clients and servers are incompatible. This release adds saved Find
-match preferences (never passwords) and server-selected CTF map rotation.
-All five rotation maps are original: Tower Complex, Cairnhold, Frostline and
-Dustreach replace the four earlier reference layouts, and Skybreak Bastions is
-removed. Raindance is renamed Old Holler and keeps its layout but is cleaned
-up: no flickering overlapping surfaces, hall ramps that reach the roof, 8 spawn
-points per team, new materials and baked lighting, and a generator basement
-under each hall reached by an atrium stair or a service stair from outside. No separate private map packs ship. Map traversal and balance still need human playtesting. Approved
-movement constants are unchanged.
+Every map is original and embedded in the standalone executable: Old Holler,
+Tower Complex, Cairnhold, Frostline, Dustreach, Ozarktic Blast and Reefbreak
+(CTF, Capture & Hold and Team Deathmatch), plus Longfield and Highgoal
+(football). No Tribes install or separate asset download is needed.
+
+Version .20260926.1 requires a matching server; older .20260921.1 clients and
+servers are incompatible. New in this release:
+- Loadouts: light and heavy armor, limited ammo, the mortar, the repair tool,
+  inventory stations with a buy screen, deployable turrets, walls, force
+  fields and ammo stations, hand grenades (G) and mines (M), a laser rifle
+  (light) and railgun (heavy) with zoom (E), third person (R) and a Controls
+  screen for rebinding keys. The dead drop a pack of what they carried.
+- Football on Longfield and Highgoal, on its own server (UDP 7778).
+- Team Deathmatch on every non-football map, each round with a random time of
+  day, weather and a twist.
+- Two new maps: Ozarktic Blast (a ridge, a dock valley, hovering ships) and
+  Reefbreak (an atoll with floating freighter bases).
+Map traversal and balance still need human playtesting. Approved CTF movement
+constants are unchanged.
 
 - macOS: Apple Silicon only. Extract the ZIP and open PeakRunner.app. The bundle
   is ad-hoc signed for integrity, not Developer ID signed or Apple notarized.

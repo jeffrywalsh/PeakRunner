@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use peakrunner_core::sim::{Command, Snapshot};
 pub use peakrunner_discovery::{PROTOCOL, ServerAdvert};
 pub mod packets;
-pub const GAME_VERSION: &str = "0.1.0-private.20260921.1";
+pub const GAME_VERSION: &str = "0.1.0-playtest.20260926.1";
 
 /// A different local map must never silently join a server simulating another
 /// layout. Keep directory discovery independent of gameplay/map assets.
