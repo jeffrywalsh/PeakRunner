@@ -3,7 +3,7 @@
   "base_revision": "a8522459c926bec92c3e85a5b4b6b9ed84697860",
   "branch": "release/20260926",
   "source_kind": "git archive of the pushed commit (src/ only); a clean Git reproduction",
-  "status": "staged",
+  "status": "deployed 2026-09-26: match (7777) and football (7778) healthy; WAN smoke PASS on both",
   "version": "0.1.0-playtest.20260926.1",
   "source_archive": "/data/peakrunner/releases/20260926-playtest1/source-a852245.tar.gz",
   "source_sha256": "a638fcf7bcbd0ff797b5d3fedcf295322c46273cb71785882f26a7453c1f14b7",

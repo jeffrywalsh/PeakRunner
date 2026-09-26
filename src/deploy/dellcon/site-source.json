@@ -1,11 +1,13 @@
 {
-  "tag": "peakrunner/site:20260921-private1-r2",
-  "image": "sha256:27d69f3af6be7598b09918626be5cbf9510e58f5c6d0ebcd70fcecddfa1cf0b2",
-  "source_archive": "/data/peakrunner/releases/20260921-private1/site-final-r2.tar.gz",
-  "source_sha256": "c2bdbe7fc06367a89bc741d981d613710239087b69380710b29bbeea71410906",
-  "status": "deployed and published; health, HTTPS signatures and hashes verified on 2026-09-21",
+  "tag": "peakrunner/site:20260926-playtest1",
+  "image": "sha256:d0196adb6cceaa62a03bdeeca22ce16bc5043b776fc6b6576139e1bbd51bf3c3",
+  "source_archive": "/data/peakrunner/releases/20260926-playtest1/site-54c506b.tar.gz",
+  "source_sha256": "a013eacf5141dbf364fad81376d81af8bef598e223a1515a03227342f81b249f",
+  "base_revision": "54c506b",
+  "status": "deployed and published 2026-09-26; apex/www and all six download hashes verified over HTTPS",
   "dockerfile": "site/Dockerfile",
   "downloads": "/data/peakrunner/downloads",
   "updates": "/data/peakrunner/updates/v1",
-  "note": "Working-tree release; not yet committed or pushed. Download checksums are in site/public/release.json."
+  "directory_image": "sha256:62463f16c9e7e26e08801f0c8b0a0dc9ffc09806f42e8e41b7142cc6a0bfa8f2",
+  "note": "Git archive of the pushed release/20260926 branch. Download checksums are in site/public/release.json."
 }

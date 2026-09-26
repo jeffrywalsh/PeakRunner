@@ -221,6 +221,21 @@ testing remain separate playtest work.
     package release notes. Rollback restores a compatible server/client set;
     launcher recovery needs a newly signed higher sequence, not a downgrade.
 
+### Published checkpoint — 2026-09-26 (supersedes the 2026-09-21 state below)
+
+- **Deployed and published:** game `0.1.0-playtest.20260926.1`, launcher
+  `0.1.0-r1`, feed sequence `2026092601`, built from branch
+  `release/20260926` (git archive; clean provenance). All maps are original
+  and embedded; no private packs.
+- **VPS:** services `match` (Springdale Central, UDP 7777, CTF → Capture &
+  Hold → Team Deathmatch) and `football` (Springdale Football, UDP 7778).
+  ufw allows 7778/udp.
+- **Servers self-register:** they POST to `dir.peakrunner.net/announce`, and
+  the directory verifies the caller's IP and a validated status query.
+- **Records, hashes, verification and rollback:**
+  `docs/release-20260926-1.md`.
+- Recheck live state before future work.
+
 ### Published checkpoint — 2026-09-21
 
 - **Deployed and published:** game `0.1.0-private.20260921.1`, launcher remains
