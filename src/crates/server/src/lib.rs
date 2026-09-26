@@ -76,7 +76,7 @@ mod tests {
         assert_eq!(late.lobby().snapshot.unwrap().map, MapId::Raindance);
         a.leave(); b.leave(); late.leave();
         wait(|| handle.players.load(std::sync::atomic::Ordering::Relaxed) == 0);
-        wait(|| handle.status.lock().unwrap().map == "Old Holler");
+        wait(|| handle.status.lock().unwrap().map == "Old Holler - CTF");
     }
 
     #[test]
@@ -91,7 +91,7 @@ mod tests {
         for client in [&a, &b] {
             assert_eq!(client.lobby().snapshot.unwrap().map, peakrunner_core::terrain::MapId::StonehengeClone);
         }
-        wait(|| host.status.lock().unwrap().map == "Cairnhold");
+        wait(|| host.status.lock().unwrap().map == "Cairnhold - CTF");
         a.leave(); b.leave();
         wait(|| host.players.load(std::sync::atomic::Ordering::Relaxed) == 0);
     }

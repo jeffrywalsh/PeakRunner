@@ -1,7 +1,7 @@
 # PeakRunner native playtest
 
-Original Old Holler, Tower Complex, Cairnhold, Frostline and Dustreach map
-assets are embedded in the standalone executable. No Tribes install or separate asset download is needed.
+Original Old Holler, Tower Complex, Cairnhold, Frostline, Dustreach,
+Longfield and Highgoal (football) map assets are embedded in the standalone executable. No Tribes install or separate asset download is needed.
 Version .20260921.1 requires a matching server and map collection; older
 .20260919.4 clients and servers are incompatible. This release adds saved Find
 match preferences (never passwords) and server-selected CTF map rotation.

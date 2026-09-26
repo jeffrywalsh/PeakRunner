@@ -3,7 +3,7 @@ use glam::{Mat3, Mat4, Vec3};
 use crate::effects::{Effects, ViewAnim};
 use crate::sim::{
     MatchState, Team, World, DISC_RELOAD, VM_ANCHOR_BOLT, VM_ANCHOR_DISC, VM_MUZZLE_DISC,
-    VM_TURN_X, VM_TURN_Y, VM_DISC_TURN_X, VM_DISC_TURN_Y, weapon_reload,
+    weapon_reload,
 };
 
 /// Additive effect draws per frame. World effects are pushed first, so a
@@ -62,6 +62,8 @@ pub struct DrawFrame {
     pub map: MapId,
     pub fog_density: f32,
     pub time: f32,
+    /// Deathmatch time of day and weather (the default elsewhere).
+    pub conditions: peakrunner_core::conditions::Conditions,
 }
 
 pub fn clip_correct(proj: Mat4) -> Mat4 {
@@ -208,25 +210,41 @@ pub fn build_frame_with(world: &World, aspect: f32, dt: f32, fx: &mut Effects) -
     }
 
     for (i, p) in world.players.iter().enumerate() {
-        if i == world.player_id && world.state != MatchState::Flyby {
+        // Your own body is drawn only while tackled (the camera orbits it)
+        // or in the third-person view.
+        if i == world.player_id && world.state != MatchState::Flyby && p.stun <= 0.0
+            && !(world.third_person && p.alive && !world.zoom_active()) {
             if p.alive && p.jetting {
                 push_jet(&mut emit, p.pos, p.team);
             }
             continue;
         }
         // Articulated armor; dead players collapse briefly, then vanish.
+        use crate::player_model::Hold;
+        let hold = if !world.ball.active { Hold::Weapon } else if world.ball.carried_by(i) { Hold::Ball } else { Hold::Free };
         crate::player_model::push_player(&mut lit, &mut emit, p, world.time,
-            eye.distance_squared(p.pos) < PLAYER_DETAIL_RANGE * PLAYER_DETAIL_RANGE, fx.players.motion(p.net_id));
+            eye.distance_squared(p.pos) < PLAYER_DETAIL_RANGE * PLAYER_DETAIL_RANGE, fx.players.motion(p.net_id), hold);
     }
+    push_ball(&mut lit, &mut emit, world);
 
     for d in &world.discs {
         match d.kind {
             0 => push_disc_round(&mut lit, &mut emit, d),
             2 => push_grenade_round(&mut lit, &mut emit, d, world.time),
             3 => push_plasma(&mut lit, &mut emit, d, world.time),
+            crate::sim::loadout::MORTAR_KIND => push_mortar_round(&mut lit, &mut emit, d, world.time),
+            crate::sim::throwables::GRENADE_KIND => push_hand_grenade(&mut lit, &mut emit, d, world.time),
+            crate::sim::throwables::MINE_KIND => push_mine(&mut lit, &mut emit, d, world.time),
+            crate::sim::rifles::LASER_KIND => push_laser_beam(&mut emit, d, team_accent(d.team)),
+            crate::sim::rifles::RAIL_KIND => push_rail_slug(&mut emit, d),
             _ => push_tracer(&mut lit, &mut emit, d, world.time),
         }
     }
+    for e in &world.deployables { push_deployable(&mut lit, &mut emit, e, world.time); }
+    if let Some((unit, fits)) = &world.deploy_ghost { push_deploy_ghost(&mut emit, unit, *fits, world.time); }
+    for l in &world.loot { push_loot(&mut lit, l, world.time); }
+    push_beacons(&mut lit, &mut emit, world);
+    push_repair_beams(&mut emit, world);
 
     // Persist actual sampled positions, rather than extrapolating backward:
     // smoke follows the arc and stays behind when a grenade bounces. It is
@@ -277,6 +295,12 @@ pub fn build_frame_with(world: &World, aspect: f32, dt: f32, fx: &mut Effects) -
     let viewmodel = viewmodel_draws(world, &fx.anim);
 
     let fog_density = if imported {0.0012} else {0.0072 * (256.0 / size)};
+    // Weather and night pull the fog in: scale by how much nearer it ends.
+    let conditions = world.conditions;
+    let (fog, fog_density) = {
+        let (c, _, far) = conditions.fog(fog.to_array(), 200.0, 450.0);
+        (Vec3::from_array(c), fog_density * 450.0 / far.max(1.0))
+    };
     DrawFrame {
         eye,
         sun,
@@ -294,6 +318,7 @@ pub fn build_frame_with(world: &World, aspect: f32, dt: f32, fx: &mut Effects) -
         map: world.map,
         fog_density,
         time: world.time,
+        conditions,
     }
 }
 
@@ -338,10 +363,11 @@ fn push_blast(emit: &mut Vec<EmitDraw>, e: &crate::sim::Explosion, eye: Vec3) {
     let a = (1.0 - t) * 0.85;
     let flash = (1.0 - e.age / 0.08).max(0.0);
     if flash > 0.0 {
-        let r = e.max_r * if e.kind == 4 { 0.45 } else { 0.28 } * (1.25 - flash * 0.25);
+        let mortar = e.kind == crate::sim::loadout::MORTAR_KIND;
+        let r = e.max_r * if e.kind == 4 { 0.45 } else if mortar { 0.18 } else { 0.28 } * (1.25 - flash * 0.25);
         emit.push(EmitDraw { mesh: MeshId::Sphere,
             model: Mat4::from_translation(e.pos) * Mat4::from_scale(Vec3::splat(r)),
-            color: [1.0, 0.97, 0.9, flash * 0.9] });
+            color: if mortar { [0.7, 1.0, 0.55, flash * 0.85] } else { [1.0, 0.97, 0.9, flash * 0.9] } });
     }
     // Far away only the flash reads anyway; skip the multi-draw layers.
     if e.pos.distance(eye) > crate::effects::DETAIL_RANGE { return; }
@@ -351,12 +377,18 @@ fn push_blast(emit: &mut Vec<EmitDraw>, e: &crate::sim::Explosion, eye: Vec3) {
         color });
     match e.kind {
         0 => {
-            flame_burst(emit, e.pos, e.age, true);
+            flame_burst(emit, e.pos, e.age, BURST_BLUE);
             ring(emit, e.pos + Vec3::Y * 0.2, 0.35 + e.max_r * t, [0.12, 0.55, 1.0, a * 0.18]);
         }
-        2 => {
-            flame_burst(emit, e.pos, e.age, false);
+        2 | 6 | 7 => {
+            flame_burst(emit, e.pos, e.age, BURST_FIRE);
             shock_ring(emit, e.pos + Vec3::Y * 0.3, 0.6 + e.max_r * 1.1 * t, 0.18, [1.0, 0.62, 0.3, a * 0.5], t);
+        }
+        crate::sim::loadout::MORTAR_KIND => {
+            // The mortar's green burst: two lobed flames and a wide ring.
+            flame_burst(emit, e.pos, e.age, BURST_GREEN);
+            flame_burst(emit, e.pos + Vec3::Y * (0.8 + t * 1.5), e.age, BURST_GREEN);
+            shock_ring(emit, e.pos + Vec3::Y * 0.3, 0.8 + e.max_r * 1.1 * t, 0.24, [0.45, 1.0, 0.3, a * 0.55], t);
         }
         3 => {
             let r = e.max_r * (0.2 + t * 0.7);
@@ -369,7 +401,7 @@ fn push_blast(emit: &mut Vec<EmitDraw>, e: &crate::sim::Explosion, eye: Vec3) {
             // Generator: rolling flame tongues around a hot core and a wide
             // ground shockwave, instead of one orange bubble. Cosmetic only.
             for (dx, dz) in [(0.0, 0.0), (1.6, 0.4), (-1.3, 1.1), (0.4, -1.5)] {
-                flame_burst(emit, e.pos + Vec3::new(dx, 0.6 + t * 2.5, dz), e.age, false);
+                flame_burst(emit, e.pos + Vec3::new(dx, 0.6 + t * 2.5, dz), e.age, BURST_FIRE);
             }
             // A short-lived hot core, then the flames carry the blast.
             let core = (1.0 - e.age / 0.2).max(0.0);
@@ -457,6 +489,283 @@ fn push_grenade_round(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, d: &crat
     }
 }
 
+/// Hand grenade: a stubby ribbed canister with a safety lever, tumbling in
+/// flight; its fuse light blinks faster as the two seconds run down.
+fn push_hand_grenade(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, d: &crate::sim::Disc, time: f32) {
+    let rest = crate::sim::throwables::resting(d);
+    let body = Mat4::from_translation(d.pos)
+        * if rest { Mat4::from_rotation_z(1.2) } else { Mat4::from_rotation_y(d.spin * 0.4) * Mat4::from_rotation_x(d.spin * 0.3) };
+    let olive = Vec3::new(0.24, 0.29, 0.16);
+    lit.push(LitDraw { mesh: MeshId::Sphere, model: body * Mat4::from_scale(Vec3::new(0.11, 0.14, 0.11)), color: olive, emit: 0.0, mode: 0.0 });
+    for k in [-1.0, 0.0, 1.0] {
+        lit.push(LitDraw { mesh: MeshId::Disc, model: body * Mat4::from_translation(Vec3::Y * (k * 0.055))
+            * Mat4::from_scale(Vec3::new(0.118, 0.012, 0.118)), color: olive * 0.6, emit: 0.0, mode: 0.0 });
+    }
+    lit.push(LitDraw { mesh: MeshId::Disc, model: body * Mat4::from_translation(Vec3::Y * 0.15)
+        * Mat4::from_scale(Vec3::new(0.05, 0.04, 0.05)), color: Vec3::new(0.45, 0.47, 0.5), emit: 0.0, mode: 0.0 });
+    lit.push(LitDraw { mesh: MeshId::Cube, model: body * Mat4::from_translation(Vec3::new(0.06, 0.08, 0.0)) * Mat4::from_rotation_z(-0.25)
+        * Mat4::from_scale(Vec3::new(0.018, 0.14, 0.035)), color: Vec3::new(0.45, 0.47, 0.5), emit: 0.0, mode: 0.0 });
+    let left = (d.life / crate::sim::throwables::GRENADE_FUSE).clamp(0.0, 1.0);
+    let on = (time * (3.0 + 16.0 * (1.0 - left))).fract() < 0.5 || d.life < 0.25;
+    let fuse = body.transform_point3(Vec3::Y * 0.19);
+    lit.push(LitDraw { mesh: MeshId::Sphere, model: Mat4::from_translation(fuse) * Mat4::from_scale(Vec3::splat(0.03)),
+        color: Vec3::new(1.0, 0.3, 0.08), emit: if on { 1.6 } else { 0.08 }, mode: 0.0 });
+    if on {
+        emit.push(EmitDraw { mesh: MeshId::Sphere, model: Mat4::from_translation(fuse) * Mat4::from_scale(Vec3::splat(0.08)),
+            color: [1.0, 0.32, 0.08, 0.5] });
+    }
+}
+
+/// Mine: a low dark puck with three trigger prongs and a team light that
+/// stays dim until the mine has come to rest and armed, then pulses slowly.
+fn push_mine(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, d: &crate::sim::Disc, time: f32) {
+    use crate::sim::throwables::{armed, resting};
+    let body = Mat4::from_translation(d.pos - if resting(d) { Vec3::Y * 0.07 } else { Vec3::ZERO })
+        * Mat4::from_rotation_y(if resting(d) { d.pos.x * 1.7 } else { d.spin * 0.5 })
+        * if resting(d) { Mat4::IDENTITY } else { Mat4::from_rotation_x(d.spin * 0.35) };
+    let steel = Vec3::new(0.2, 0.21, 0.22);
+    lit.push(LitDraw { mesh: MeshId::Disc, model: body * Mat4::from_scale(Vec3::new(0.24, 0.07, 0.24)), color: steel, emit: 0.0, mode: 0.0 });
+    lit.push(LitDraw { mesh: MeshId::Disc, model: body * Mat4::from_translation(Vec3::Y * 0.045)
+        * Mat4::from_scale(Vec3::new(0.16, 0.03, 0.16)), color: steel * 0.55, emit: 0.0, mode: 0.0 });
+    for k in 0..3 {
+        let a = k as f32 * std::f32::consts::TAU / 3.0;
+        lit.push(LitDraw { mesh: MeshId::Cube, model: body * Mat4::from_translation(Vec3::new(a.cos() * 0.09, 0.09, a.sin() * 0.09))
+            * Mat4::from_scale(Vec3::new(0.014, 0.06, 0.014)), color: Vec3::new(0.5, 0.52, 0.55), emit: 0.0, mode: 0.0 });
+    }
+    let team = team_accent(d.team);
+    let live = armed(d);
+    let glow = if live { 0.4 + 0.9 * (0.5 + 0.5 * (time * 2.5 + d.pos.z).sin()) } else { 0.12 };
+    lit.push(LitDraw { mesh: MeshId::Sphere, model: body * Mat4::from_translation(Vec3::Y * 0.07)
+        * Mat4::from_scale(Vec3::new(0.04, 0.025, 0.04)), color: team, emit: glow, mode: 0.0 });
+    if live && glow > 1.0 {
+        emit.push(EmitDraw { mesh: MeshId::Sphere, model: body * Mat4::from_translation(Vec3::Y * 0.07) * Mat4::from_scale(Vec3::splat(0.07)),
+            color: [team.x, team.y, team.z, 0.35] });
+    }
+}
+
+/// Mortar shell: a heavy dark finned shell with a glowing green band and a
+/// green glow round it, so a long lob reads across the map.
+fn push_mortar_round(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, d: &crate::sim::Disc, time: f32) {
+    let facing = d.vel.normalize_or(Vec3::Y);
+    let body = Mat4::from_translation(d.pos) * Mat4::from_quat(glam::Quat::from_rotation_arc(Vec3::Y, facing));
+    let green = Vec3::new(0.3, 1.0, 0.2);
+    lit.push(LitDraw { mesh: MeshId::Sphere, model: body * Mat4::from_scale(Vec3::new(0.2, 0.34, 0.2)),
+        color: Vec3::new(0.12, 0.2, 0.12), emit: 0.0, mode: 0.0 });
+    for fin in [Vec3::new(0.3, 0.12, 0.04), Vec3::new(0.04, 0.12, 0.3)] {
+        lit.push(LitDraw { mesh: MeshId::Cube, model: body * Mat4::from_translation(Vec3::new(0.0, -0.22, 0.0))
+            * Mat4::from_scale(fin), color: Vec3::new(0.26, 0.32, 0.26), emit: 0.0, mode: 0.0 });
+    }
+    let pulse = 0.5 + 0.5 * (time * 9.0).sin();
+    lit.push(LitDraw { mesh: MeshId::Cube, model: body * Mat4::from_translation(Vec3::new(0.0, 0.05, 0.0))
+        * Mat4::from_scale(Vec3::new(0.25, 0.05, 0.25)), color: green, emit: 1.2 + pulse * 0.6, mode: 0.0 });
+    emit.push(EmitDraw { mesh: MeshId::Sphere, model: Mat4::from_translation(d.pos) * Mat4::from_scale(Vec3::splat(0.3 + pulse * 0.06)),
+        color: [0.3, 1.0, 0.2, 0.3] });
+}
+
+/// The hologram of a unit being lined up: the real model as translucent
+/// light, in the team's colour where it fits and gray where it can't go.
+fn push_deploy_ghost(emit: &mut Vec<EmitDraw>, unit: &crate::sim::deploy::Deployable, fits: bool, time: f32) {
+    let (mut lit, mut glow) = (Vec::new(), Vec::new());
+    push_deployable(&mut lit, &mut glow, unit, time);
+    let tint = if fits { team_accent(unit.team) } else { Vec3::splat(0.55) };
+    let shimmer = 0.3 + 0.06 * (time * 6.0).sin();
+    for d in lit {
+        let c = d.color * 0.35 + tint * 0.65;
+        emit.push(EmitDraw { mesh: d.mesh, model: d.model, color: [c.x, c.y, c.z, shimmer] });
+    }
+    for d in glow {
+        emit.push(EmitDraw { mesh: d.mesh, model: d.model, color: [tint.x, tint.y, tint.z, d.color[3].abs().min(0.3)] });
+    }
+}
+
+/// The deployer that replaces the weapon while you line up a pack: a
+/// handheld projector with a small hologram of the unit spinning above it.
+fn deployer_draws(frame: Mat4, kind: crate::sim::deploy::DeployKind, team: Team, fits: bool, time: f32) -> Vec<LitDraw> {
+    let steel = Vec3::new(0.3, 0.33, 0.36);
+    let dark = Vec3::new(0.07, 0.08, 0.09);
+    let accent = team_accent(team);
+    let lamp = if fits { accent } else { Vec3::splat(0.55) };
+    let mut draws = Vec::with_capacity(24);
+    let mut put = |mesh, at: Vec3, size: Vec3, color: Vec3, emit: f32| draws.push(LitDraw { mesh,
+        model: frame * Mat4::from_translation(at) * Mat4::from_scale(size), color, emit, mode: 0.0 });
+    put(MeshId::Bevel, Vec3::new(0.0, -0.05, 0.05), Vec3::new(0.2, 0.12, 0.34), steel, 0.0);
+    put(MeshId::Bevel, Vec3::new(0.0, -0.16, 0.14), Vec3::new(0.08, 0.16, 0.1), dark, 0.0);
+    put(MeshId::Disc, Vec3::new(0.0, 0.02, -0.06), Vec3::new(0.09, 0.02, 0.09), dark, 0.0);
+    put(MeshId::Disc, Vec3::new(0.0, 0.035, -0.06), Vec3::new(0.07, 0.01, 0.07), lamp, 0.9);
+    put(MeshId::Cube, Vec3::new(0.101, -0.05, 0.05), Vec3::new(0.004, 0.03, 0.26), accent, 0.4);
+    // A small hologram of the unit above the emitter.
+    let unit = crate::sim::deploy::Deployable { kind, team, pos: Vec3::ZERO, yaw: time * 0.8,
+        health: crate::sim::deploy::max_health(kind), cooldown: 0.0, aim: Vec3::NEG_Z };
+    let (mut lit, mut glow) = (Vec::new(), Vec::new());
+    push_deployable(&mut lit, &mut glow, &unit, time);
+    let scale = match kind { crate::sim::deploy::DeployKind::Wall | crate::sim::deploy::DeployKind::Field => 0.035, _ => 0.07 };
+    let mini = frame * Mat4::from_translation(Vec3::new(0.0, 0.06, -0.06)) * Mat4::from_scale(Vec3::splat(scale));
+    for d in lit {
+        draws.push(LitDraw { mesh: d.mesh, model: mini * d.model, color: d.color * 0.4 + lamp * 0.6, emit: 0.45, mode: 0.0 });
+    }
+    draws
+}
+
+/// Deployables: a squat tripod turret, a solid wall panel, a glowing force
+/// field in its team's colour between two posts, or an ammo station crate.
+fn push_deployable(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, e: &crate::sim::deploy::Deployable, time: f32) {
+    use crate::sim::deploy::{DeployKind, PANEL_HALF};
+    let team = team_accent(e.team);
+    let steel = Vec3::new(0.32, 0.36, 0.40);
+    let dark = Vec3::new(0.08, 0.09, 0.11);
+    let hurt = (e.health / crate::sim::deploy::max_health(e.kind)).clamp(0.0, 1.0);
+    let base = Mat4::from_translation(e.pos) * Mat4::from_rotation_y(e.yaw);
+    match e.kind {
+        DeployKind::Turret => {
+            for k in 0..3 {
+                let a = k as f32 / 3.0 * std::f32::consts::TAU;
+                let foot = Vec3::new(a.sin() * 0.75, 0.0, a.cos() * 0.75);
+                let top = Vec3::new(0.0, 0.8, 0.0);
+                let mid = (foot + top) * 0.5;
+                let dir = (top - foot).normalize();
+                lit.push(LitDraw { mesh: MeshId::Cube, model: Mat4::from_translation(e.pos + mid)
+                    * Mat4::from_quat(glam::Quat::from_rotation_arc(Vec3::Y, dir)) * Mat4::from_scale(Vec3::new(0.08, (top - foot).length(), 0.08)),
+                    color: dark, emit: 0.0, mode: 0.0 });
+            }
+            let aim = e.aim.normalize_or(Vec3::NEG_Z);
+            let head = Mat4::from_translation(e.pos + Vec3::Y * 0.95)
+                * Mat4::from_quat(glam::Quat::from_rotation_arc(Vec3::NEG_Z, aim));
+            lit.push(LitDraw { mesh: MeshId::Bevel, model: head * Mat4::from_scale(Vec3::new(0.5, 0.36, 0.6)), color: steel, emit: 0.0, mode: 0.0 });
+            lit.push(LitDraw { mesh: MeshId::Cube, model: head * Mat4::from_translation(Vec3::new(0.0, 0.0, -0.55))
+                * Mat4::from_scale(Vec3::new(0.09, 0.09, 0.6)), color: dark, emit: 0.0, mode: 0.0 });
+            lit.push(LitDraw { mesh: MeshId::Cube, model: head * Mat4::from_translation(Vec3::new(0.0, 0.19, 0.0))
+                * Mat4::from_scale(Vec3::new(0.52, 0.04, 0.4)), color: team, emit: 0.3, mode: 0.0 });
+        }
+        DeployKind::Wall => {
+            // A plated panel: pale armor plate in a dark frame, dulling as it's damaged.
+            let plate = Vec3::new(0.62, 0.64, 0.66) * (0.55 + 0.45 * hurt);
+            lit.push(LitDraw { mesh: MeshId::Cube, model: base * Mat4::from_translation(Vec3::Y * PANEL_HALF.y)
+                * Mat4::from_scale(PANEL_HALF * 2.0), color: plate, emit: 0.0, mode: 0.0 });
+            for s in [-1.0f32, 1.0] {
+                lit.push(LitDraw { mesh: MeshId::Cube, model: base * Mat4::from_translation(Vec3::new(s * PANEL_HALF.x, PANEL_HALF.y, 0.0))
+                    * Mat4::from_scale(Vec3::new(0.16, PANEL_HALF.y * 2.0 + 0.1, PANEL_HALF.z * 2.4)), color: dark, emit: 0.0, mode: 0.0 });
+            }
+            lit.push(LitDraw { mesh: MeshId::Cube, model: base * Mat4::from_translation(Vec3::Y * 1.0)
+                * Mat4::from_scale(Vec3::new(PANEL_HALF.x * 2.0, 0.18, PANEL_HALF.z * 2.1)), color: team, emit: 0.15, mode: 0.0 });
+            lit.push(LitDraw { mesh: MeshId::Cube, model: base * Mat4::from_translation(Vec3::Y * (PANEL_HALF.y * 2.0 - 0.25))
+                * Mat4::from_scale(Vec3::new(PANEL_HALF.x * 2.02, 0.12, PANEL_HALF.z * 2.1)), color: team, emit: 0.2, mode: 0.0 });
+        }
+        DeployKind::Ammo => {
+            use crate::sim::deploy::AMMO_HALF;
+            // A supply crate: dark body, team band, lid, and glowing cells.
+            lit.push(LitDraw { mesh: MeshId::Bevel, model: base * Mat4::from_translation(Vec3::Y * AMMO_HALF.y)
+                * Mat4::from_scale(AMMO_HALF * 2.0), color: Vec3::new(0.24, 0.27, 0.22) * (0.6 + 0.4 * hurt), emit: 0.0, mode: 0.0 });
+            lit.push(LitDraw { mesh: MeshId::Cube, model: base * Mat4::from_translation(Vec3::Y * AMMO_HALF.y * 1.2)
+                * Mat4::from_scale(Vec3::new(AMMO_HALF.x * 2.04, 0.1, AMMO_HALF.z * 2.04)), color: team, emit: 0.2, mode: 0.0 });
+            lit.push(LitDraw { mesh: MeshId::Cube, model: base * Mat4::from_translation(Vec3::Y * (AMMO_HALF.y * 2.0 + 0.03))
+                * Mat4::from_scale(Vec3::new(AMMO_HALF.x * 1.8, 0.06, AMMO_HALF.z * 1.8)), color: steel, emit: 0.0, mode: 0.0 });
+            let glow = 0.8 + 0.4 * (time * 2.5 + e.pos.z).sin().abs();
+            for k in [-1.0f32, 0.0, 1.0] {
+                lit.push(LitDraw { mesh: MeshId::Cube, model: base * Mat4::from_translation(Vec3::new(k * 0.28, AMMO_HALF.y * 0.7, -AMMO_HALF.z - 0.01))
+                    * Mat4::from_scale(Vec3::new(0.14, 0.24, 0.03)), color: Vec3::new(1.0, 0.78, 0.25), emit: glow, mode: 0.0 });
+            }
+        }
+        DeployKind::Field => {
+            for s in [-1.0f32, 1.0] {
+                lit.push(LitDraw { mesh: MeshId::Cube, model: base * Mat4::from_translation(Vec3::new(s * PANEL_HALF.x, PANEL_HALF.y, 0.0))
+                    * Mat4::from_scale(Vec3::new(0.14, PANEL_HALF.y * 2.0 + 0.2, 0.3)), color: dark, emit: 0.0, mode: 0.0 });
+            }
+            let pulse = 0.8 + 0.2 * (time * 3.0 + e.pos.x).sin();
+            let col = [team.x, team.y, team.z, 0.28 * pulse * (0.4 + 0.6 * hurt)];
+            emit.push(EmitDraw { mesh: MeshId::Cube, model: base * Mat4::from_translation(Vec3::Y * PANEL_HALF.y)
+                * Mat4::from_scale(Vec3::new(PANEL_HALF.x * 2.0, PANEL_HALF.y * 2.0, 0.06)), color: col });
+        }
+    }
+}
+
+/// Where the first-person repair tool sits in view space, and its emitter tip.
+const REPAIR_TOOL_VM: Vec3 = Vec3::new(0.3, -0.27, -0.72);
+const REPAIR_TOOL_SCALE: f32 = 0.62;
+const REPAIR_TIP_VM: Vec3 = Vec3::new(0.3, -0.27, -0.72 - 0.41 * REPAIR_TOOL_SCALE);
+
+/// A control point's light colour: its owner's (Ember red, Glacier blue,
+/// neutral white), shifting toward the capturing team's as progress fills. Red
+/// and blue pass through purple on the way, not through a muddy grey.
+pub fn beacon_color(p: &peakrunner_core::control::Point) -> Vec3 {
+    let rgb = |t: Option<u8>| match t {
+        Some(0) => Vec3::new(1.0, 0.16, 0.08),
+        Some(1) => Vec3::new(0.1, 0.45, 1.0),
+        _ => Vec3::new(0.86, 0.88, 0.92),
+    };
+    let from = rgb(p.owner);
+    let Some(to) = p.capturing.filter(|_| p.progress > 0.0) else { return from };
+    let t = p.progress.clamp(0.0, 1.0);
+    let to_rgb = rgb(Some(to));
+    if p.owner.is_some() {
+        let purple = Vec3::new(0.62, 0.12, 0.95);
+        if t < 0.5 { from.lerp(purple, t * 2.0) } else { purple.lerp(to_rgb, t * 2.0 - 1.0) }
+    } else {
+        from.lerp(to_rgb, t)
+    }
+}
+
+/// A beacon light on top of whatever stands at each active control point (a
+/// tower's crown, or floating over open ground), coloured by `beacon_color`.
+/// Contested points flicker.
+fn push_beacons(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, world: &World) {
+    for (k, p) in world.points.iter().enumerate().filter(|(_, p)| p.active) {
+        let top = peakrunner_core::terrain::support_on(world.map, p.pos + Vec3::Y * 60.0).0;
+        let at = Vec3::new(p.pos.x, top + 1.8, p.pos.z);
+        let col = beacon_color(p);
+        let flicker = if p.contested { 0.55 + 0.45 * (world.time * 14.0 + k as f32).sin().abs() } else { 1.0 };
+        let spin = world.time * 0.6 + k as f32;
+        lit.push(LitDraw { mesh: MeshId::Sphere, model: Mat4::from_translation(at) * Mat4::from_rotation_y(spin)
+            * Mat4::from_scale(Vec3::new(0.45, 0.85, 0.45)), color: col, emit: 1.6 * flicker, mode: 0.0 });
+        emit.push(EmitDraw { mesh: MeshId::Sphere, model: Mat4::from_translation(at) * Mat4::from_scale(Vec3::splat(1.7)),
+            color: [col.x, col.y, col.z, -0.35 * flicker] });
+        emit.push(EmitDraw { mesh: MeshId::Sphere, model: Mat4::from_translation(at + Vec3::Y * 6.0)
+            * Mat4::from_scale(Vec3::new(0.12, 6.0, 0.12)), color: [col.x, col.y, col.z, 0.18 * flicker] });
+    }
+}
+
+/// A dropped ammo pack: a small olive pack with a glowing strap; it blinks
+/// in its last seconds before it vanishes.
+fn push_loot(lit: &mut Vec<LitDraw>, l: &crate::sim::loadout::Loot, time: f32) {
+    let left = crate::sim::loadout::LOOT_SECONDS - l.age;
+    if left < 4.0 && (time * 6.0).fract() < 0.35 { return; }
+    let bob = Mat4::from_translation(l.pos + Vec3::Y * (0.28 + 0.05 * (time * 2.0).sin())) * Mat4::from_rotation_y(time * 0.8);
+    lit.push(LitDraw { mesh: MeshId::Bevel, model: bob * Mat4::from_scale(Vec3::new(0.5, 0.38, 0.32)),
+        color: Vec3::new(0.3, 0.33, 0.2), emit: 0.0, mode: 0.0 });
+    lit.push(LitDraw { mesh: MeshId::Cube, model: bob * Mat4::from_scale(Vec3::new(0.52, 0.07, 0.34)),
+        color: Vec3::new(1.0, 0.78, 0.25), emit: 0.6, mode: 0.0 });
+}
+
+/// Repair tool beams: a pulsing green line from each repairer's tool to
+/// what they're fixing.
+fn push_repair_beams(emit: &mut Vec<EmitDraw>, world: &World) {
+    for (i, p) in world.players.iter().enumerate() {
+        let Some(to) = p.repair_beam.filter(|_| p.alive) else { continue };
+        // Repairing yourself: no beam into your own chest (the HUD says so).
+        if to.distance(p.pos) < 1.5 { continue; }
+        let (fwd, right) = (Vec3::new(-p.yaw.sin(), 0.0, -p.yaw.cos()), Vec3::new(p.yaw.cos(), 0.0, -p.yaw.sin()));
+        let from = if i == world.player_id {
+            // From the first-person tool's emitter, placed the way the
+            // viewmodel's narrower field of view draws it.
+            let (eye, look, fov) = world.camera();
+            let widen = (fov * 0.5).to_radians().tan() / (crate::sim::VM_FOV * 0.5).to_radians().tan();
+            let side = look.cross(Vec3::Y).normalize_or(right);
+            let up = side.cross(look).normalize_or(Vec3::Y);
+            eye + side * REPAIR_TIP_VM.x * widen + up * REPAIR_TIP_VM.y * widen + look * -REPAIR_TIP_VM.z
+        } else { p.pos + Vec3::Y * 1.3 + fwd * 0.75 + right * 0.2 };
+        let dir = to - from;
+        let len = dir.length();
+        if len < 0.2 { continue; }
+        let pulse = 0.6 + 0.4 * (world.time * 18.0 + i as f32).sin();
+        let along = Mat4::from_translation(from + dir * 0.5) * Mat4::from_quat(glam::Quat::from_rotation_arc(Vec3::Y, dir / len));
+        emit.push(EmitDraw { mesh: MeshId::Sphere, model: along * Mat4::from_scale(Vec3::new(0.035, len * 0.5, 0.035)),
+            color: [0.4, 1.0, 0.5, 0.9 * pulse] });
+        emit.push(EmitDraw { mesh: MeshId::Sphere, model: along * Mat4::from_scale(Vec3::new(0.12, len * 0.5, 0.12)),
+            color: [0.2, 0.9, 0.35, -0.3] });
+        emit.push(EmitDraw { mesh: MeshId::Sphere, model: Mat4::from_translation(to) * Mat4::from_scale(Vec3::splat(0.3 * pulse)),
+            color: [0.5, 1.0, 0.6, 0.6] });
+    }
+}
+
 /// Turret plasma: a flickering hot core inside two halo shells, and a trail.
 fn push_plasma(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, d: &crate::sim::Disc, time: f32) {
     let flicker = 0.88 + 0.12 * (time * 37.0 + d.pos.x * 3.1).sin();
@@ -477,6 +786,42 @@ fn push_plasma(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, d: &crate::sim:
 
 /// Chaingun round. Every third round of a burst is a long bright tracer with
 /// a soft glow; the rest are faint streaks, which gives the stream a rhythm.
+/// A laser shot: a bright core and a soft team-tinted glow along the beam
+/// (`vel` holds start to end), fading over its short life.
+fn push_laser_beam(emit: &mut Vec<EmitDraw>, d: &crate::sim::Disc, team: Vec3) {
+    let length = d.vel.length();
+    if length < 0.1 { return; }
+    let f = d.vel/length;
+    let mut r = f.cross(Vec3::Y).normalize_or_zero();
+    if r.length_squared() < 0.01 { r = Vec3::X; }
+    let u = r.cross(f).normalize_or_zero();
+    let fade = (d.life/crate::sim::rifles::LASER_FADE).clamp(0.0, 1.0);
+    let beam = |mesh, w: f32, color: [f32; 4]| EmitDraw { mesh,
+        model: Mat4::from_cols((r*w).extend(0.0), (u*w).extend(0.0), (f*length*if mesh == MeshId::Sphere { 0.5 } else { 1.0 }).extend(0.0),
+            (d.pos+d.vel*0.5).extend(1.0)), color };
+    emit.push(beam(MeshId::Cube, 0.03, [0.9, 1.0, 1.0, 0.95*fade]));
+    emit.push(beam(MeshId::Sphere, 0.14, [0.3+team.x*0.2, 0.85, 1.0, 0.35*fade]));
+    emit.push(EmitDraw { mesh: MeshId::Sphere, model: Mat4::from_translation(d.pos+d.vel)*Mat4::from_scale(Vec3::splat(0.5*fade+0.1)),
+        color: [0.8, 1.0, 1.0, 0.6*fade] });
+}
+
+/// A railgun slug: a hot white-blue dart with a long ionised streak behind it.
+fn push_rail_slug(emit: &mut Vec<EmitDraw>, d: &crate::sim::Disc) {
+    let f = d.vel.normalize_or(Vec3::NEG_Z);
+    let mut r = f.cross(Vec3::Y).normalize_or_zero();
+    if r.length_squared() < 0.01 { r = Vec3::X; }
+    let u = r.cross(f).normalize_or_zero();
+    let flown = (crate::sim::rifles::RAIL_LIFE-d.life)*d.vel.length();
+    let length = flown.min(28.0);
+    let streak = |w: f32, len: f32, color: [f32; 4]| EmitDraw { mesh: MeshId::Sphere,
+        model: Mat4::from_cols((r*w).extend(0.0), (u*w).extend(0.0), (f*len*0.5).extend(0.0), (d.pos-f*len*0.5).extend(1.0)), color };
+    emit.push(streak(0.05, 1.2, [1.0, 1.0, 1.0, 1.0]));
+    if length > 0.5 {
+        emit.push(streak(0.06, length, [0.55, 0.8, 1.0, 0.55]));
+        emit.push(streak(0.2, length*0.7, [0.3, 0.55, 1.0, 0.18]));
+    }
+}
+
 fn push_tracer(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, d: &crate::sim::Disc, time: f32) {
     // A round at rest still needs a full basis; a zero axis gives the lit
     // body a singular normal matrix, which shades as NaN (black).
@@ -509,9 +854,18 @@ fn push_tracer(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, d: &crate::sim:
     });
 }
 
-fn flame_burst(emit:&mut Vec<EmitDraw>,pos:Vec3,age:f32,blue:bool) {
+/// Flame burst colours: outer and inner lobes (rgb + strength), core and sparks.
+struct Burst { extent: f32, outer: [f32; 4], inner: [f32; 4], core: [f32; 3], spark: [f32; 3] }
+const BURST_BLUE: &Burst = &Burst { extent: 2.2, outer: [0.04, 0.22, 1.0, 0.65], inner: [0.35, 0.85, 1.0, 0.9],
+    core: [0.7, 0.95, 1.0], spark: [0.3, 0.75, 1.0] };
+const BURST_FIRE: &Burst = &Burst { extent: 3.2, outer: [1.0, 0.07, 0.005, 0.7], inner: [1.0, 0.75, 0.04, 0.95],
+    core: [1.0, 0.95, 0.4], spark: [1.0, 0.4, 0.02] };
+const BURST_GREEN: &Burst = &Burst { extent: 3.8, outer: [0.08, 0.75, 0.05, 0.7], inner: [0.55, 1.0, 0.3, 0.95],
+    core: [0.85, 1.0, 0.6], spark: [0.4, 1.0, 0.2] };
+
+fn flame_burst(emit:&mut Vec<EmitDraw>,pos:Vec3,age:f32,c:&Burst) {
     let t=(age/0.55).clamp(0.,1.);let fade=(1.-t).powi(2);
-    let extent=if blue {2.2} else {3.2};
+    let extent=c.extent;
     // Separate soft-edged tongues of fire, not one large explosion sphere.
     // The existing negative-alpha shader mode softens each lobe's silhouette.
     for i in 0..7 {
@@ -522,20 +876,20 @@ fn flame_burst(emit:&mut Vec<EmitDraw>,pos:Vec3,age:f32,blue:bool) {
         let model=Mat4::from_translation(center)*Mat4::from_rotation_z(angle*0.2)
             *Mat4::from_scale(Vec3::new(size,size*(1.5+t),size));
         emit.push(EmitDraw {mesh:MeshId::Sphere,model,
-            color:if blue {[0.04,0.22,1.,-fade*0.65]} else {[1.,0.07,0.005,-fade*0.7]}});
+            color:[c.outer[0],c.outer[1],c.outer[2],-fade*c.outer[3]]});
         emit.push(EmitDraw {mesh:MeshId::Sphere,model:model*Mat4::from_scale(Vec3::splat(0.58)),
-            color:if blue {[0.35,0.85,1.,-fade*0.9]} else {[1.,0.75,0.04,-fade*0.95]}});
+            color:[c.inner[0],c.inner[1],c.inner[2],-fade*c.inner[3]]});
     }
     emit.push(EmitDraw {mesh:MeshId::Sphere,
         model:Mat4::from_translation(pos)*Mat4::from_scale(Vec3::splat(0.65+t)),
-        color:if blue {[0.7,0.95,1.,-fade]} else {[1.,0.95,0.4,-fade]}});
+        color:[c.core[0],c.core[1],c.core[2],-fade]});
     for i in 0..5 {
         let angle=i as f32*2.399;
         let direction=Vec3::new(angle.cos(),0.4+(i%2) as f32*0.5,angle.sin()).normalize();
         let center=pos+direction*(0.3+t*extent*3.)-Vec3::Y*t*t;
         emit.push(EmitDraw {mesh:MeshId::Sphere,
             model:Mat4::from_translation(center)*Mat4::from_scale(Vec3::new(0.045,0.16,0.045)),
-            color:if blue {[0.3,0.75,1.,fade]} else {[1.,0.4,0.02,fade]}});
+            color:[c.spark[0],c.spark[1],c.spark[2],fade]});
     }
 }
 
@@ -561,7 +915,7 @@ fn spinning_disc(pos: Vec3, vel: Vec3, spin: f32, radius: f32, thick: f32) -> Ma
     )
 }
 
-fn disc_launcher(base: Mat4, time: f32, cooldown: f32, shot_age: f32, ready_flash: f32, team: Vec3) -> Vec<LitDraw> {
+fn disc_launcher(base: Mat4, time: f32, cooldown: f32, shot_age: f32, ready_flash: f32, loaded: bool, team: Vec3) -> Vec<LitDraw> {
     // Original T1 silhouette: long silver split rails, recessed black feed bed,
     // cyan insets and yellow hazard marks. All parts are actual lit geometry.
     let silver = Vec3::new(0.66, 0.70, 0.73);
@@ -609,7 +963,7 @@ fn disc_launcher(base: Mat4, time: f32, cooldown: f32, shot_age: f32, ready_flas
             Vec3::new(0.013, 0.033, 0.041), Vec3::new(0.92, 0.66, 0.08), 0.0);
     }
     let charge = (1.0 - cooldown / 0.75).clamp(0.0, 1.0);
-    if charge > 0.0 {
+    if charge > 0.0 && loaded {
         // Expose the round in the widened tray: it should read as a
         // loaded disc launcher, not two bars concealing a tiny light.
         let disc_base = base * Mat4::from_translation(Vec3::new(0.0, 0.075, 0.12 - charge * 0.65))
@@ -628,7 +982,7 @@ fn disc_launcher(base: Mat4, time: f32, cooldown: f32, shot_age: f32, ready_flas
     }
     // Charge bar along the top of the left rail, where the player sees it:
     // it fills rear to front over the reload and flashes once when ready.
-    let fill = if cooldown > 0.0 { 1.0 - cooldown / DISC_RELOAD } else { 1.0 };
+    let fill = if !loaded { 0.0 } else if cooldown > 0.0 { 1.0 - cooldown / DISC_RELOAD } else { 1.0 };
     let pulse = (1.0 - ready_flash / 0.25).max(0.0);
     for k in 0..8 {
         let on = (k as f32 + 0.5) / 8.0 <= fill;
@@ -744,6 +1098,49 @@ pub(crate) fn recoil(weapon: u8, age: f32, time: f32) -> (f32, f32, f32) {
     }
 }
 
+/// The football: a glowing amber ball with a dark seam band, spun by `spin`.
+/// Returns the solid parts and a soft additive halo.
+fn ball_draws(at: Mat4, spin: f32, scale: f32) -> (Vec<LitDraw>, Vec<EmitDraw>) {
+    let r = peakrunner_core::sim::football::BALL_RADIUS * scale;
+    let body = at * Mat4::from_rotation_x(spin) * Mat4::from_rotation_z(0.35);
+    let amber = Vec3::new(1.0, 0.66, 0.22);
+    let seam = Vec3::new(0.08, 0.07, 0.07);
+    let lit = vec![
+        LitDraw { mesh: MeshId::Sphere, model: body * Mat4::from_scale(Vec3::splat(r)), color: amber, emit: 0.55, mode: 0.0 },
+        LitDraw { mesh: MeshId::Disc, model: body * Mat4::from_scale(Vec3::new(r * 1.04, r * 0.22, r * 1.04)), color: seam, emit: 0.0, mode: 0.0 },
+        LitDraw { mesh: MeshId::Disc, model: body * Mat4::from_rotation_z(std::f32::consts::FRAC_PI_2)
+            * Mat4::from_scale(Vec3::new(r * 1.03, r * 0.14, r * 1.03)), color: seam, emit: 0.0, mode: 0.0 },
+    ];
+    let emit = vec![EmitDraw { mesh: MeshId::Sphere, model: at * Mat4::from_scale(Vec3::splat(r * 1.9)), color: [1.0, 0.7, 0.3, -0.22] }];
+    (lit, emit)
+}
+
+/// The ball in the world: loose (rolling, with a faint beacon column so it
+/// can be found) or in a carrier's hands. Your own ball is in the viewmodel.
+fn push_ball(lit: &mut Vec<LitDraw>, emit: &mut Vec<EmitDraw>, world: &World) {
+    let b = &world.ball;
+    if !b.active || !b.in_play { return; }
+    let (at, spin) = match b.carrier.and_then(|c| world.players.get(c).map(|p| (c, p))) {
+        Some((c, _)) if c == world.player_id && world.state != MatchState::Flyby => return,
+        Some((_, p)) => {
+            let (fwd, right) = (Vec3::new(-p.yaw.sin(), 0.0, -p.yaw.cos()), Vec3::new(p.yaw.cos(), 0.0, -p.yaw.sin()));
+            // In both hands, out in front of the chest (player_model::Hold::Ball).
+            let _ = right;
+            (p.pos + fwd * 0.46 + Vec3::Y * 1.2, 0.0)
+        }
+        None => (b.pos, world.time * b.vel.length() * 1.5),
+    };
+    let (l, e) = ball_draws(Mat4::from_translation(at), spin, 1.0);
+    lit.extend(l);
+    emit.extend(e);
+    if b.carrier.is_none() {
+        let pulse = 0.5 + 0.5 * (world.time * 3.0).sin();
+        emit.push(EmitDraw { mesh: MeshId::Sphere,
+            model: Mat4::from_translation(at + Vec3::Y * 6.0) * Mat4::from_scale(Vec3::new(0.09, 6.0, 0.09)),
+            color: [1.0, 0.72, 0.3, 0.10 + 0.08 * pulse] });
+    }
+}
+
 fn viewmodel_draws(world: &World, anim: &ViewAnim) -> Vec<LitDraw> {
     if world.state == MatchState::Flyby {
         return Vec::new();
@@ -751,16 +1148,50 @@ fn viewmodel_draws(world: &World, anim: &ViewAnim) -> Vec<LitDraw> {
     let Some(p) = world.players.get(world.player_id) else {
         return Vec::new();
     };
-    if !p.alive {
+    if !p.alive || p.stun > 0.0 {
         return Vec::new();
     }
+    // Football: no weapons; the ball is held out in front when you have it.
+    if world.ball.active {
+        if !world.ball.carried_by(world.player_id) { return Vec::new(); }
+        let at = Mat4::from_translation(Vec3::new(0.22, -0.30, -0.62) + anim.bob_offset(world.time))
+            * Mat4::from_rotation_y(0.4);
+        return ball_draws(at, world.time * 0.6, 1.0).0;
+    }
+    // Lining up a pack: the deployer replaces the weapon.
+    if world.placing {
+        if let Some(kind) = p.pack {
+            let frame = Mat4::from_translation(Vec3::new(0.24, -0.3, -0.6) + anim.bob_offset(world.time)) * Mat4::from_rotation_y(0.12);
+            let fits = world.deploy_ghost.as_ref().is_some_and(|g| g.1);
+            let mut draws = deployer_draws(frame, kind, p.team, fits, world.time);
+            push_vm_hands(&mut draws, frame, 1, team_accent(p.team), p.team);
+            return draws;
+        }
+    }
+    // Repairing: the repair tool comes up instead of the weapon.
+    if p.repair_beam.is_some() {
+        let team = team_accent(p.team);
+        let frame = Mat4::from_translation(REPAIR_TOOL_VM + anim.bob_offset(world.time)) * Mat4::from_rotation_y(0.01)
+            * Mat4::from_scale(Vec3::splat(REPAIR_TOOL_SCALE));
+        let mut draws = crate::player_model::repair_tool_parts(frame, world.time);
+        // First person, the glow would bloom across the view: keep it low.
+        for d in &mut draws { d.emit = d.emit.min(0.45); }
+        push_vm_hands(&mut draws, frame, 1, team, p.team);
+        return draws;
+    }
+    // Zoomed through a sight, or watching from behind: no weapon in view.
+    if world.zoom_active() || world.third_person { return Vec::new(); }
     let (shown, drop) = anim.shown();
     // A weapon on its way down has no live cooldown of its own.
     let cooldown = if shown == p.weapon { p.cooldown } else { 0.0 };
-    let shot_age = if cooldown > 0.0 { weapon_reload(shown) - cooldown } else { 9.0 };
+    let reload = if shown == crate::sim::rifles::RIFLE_SLOT { crate::sim::rifles::rifle_reload(p) } else { weapon_reload(shown) };
+    let shot_age = if cooldown > 0.0 { (reload - cooldown).max(0.0) } else { 9.0 };
+    let loaded = if shown == crate::sim::rifles::RIFLE_SLOT && !crate::sim::rifles::is_railgun(p) {
+        p.energy >= crate::sim::rifles::LASER_ENERGY
+    } else { p.ammo[shown.min(3) as usize] > 0 };
     let (back, rise, jitter) = recoil(shown, shot_age, world.time);
     let anchor = if shown == 0 { VM_ANCHOR_DISC } else { VM_ANCHOR_BOLT };
-    let (yaw, pitch) = if shown == 0 { (VM_DISC_TURN_Y, VM_DISC_TURN_X) } else { (VM_TURN_Y, VM_TURN_X) };
+    let (yaw, pitch) = crate::sim::vm_turn(shown);
     let offset = anim.bob_offset(world.time) + Vec3::new(0.0, -back * 0.4 - 0.2 * drop, back + 0.05 * drop);
     let base = Mat4::from_translation(anchor + offset)
         * Mat4::from_rotation_y(yaw + jitter)
@@ -773,12 +1204,73 @@ fn viewmodel_draws(world: &World, anim: &ViewAnim) -> Vec<LitDraw> {
             let angled = base * Mat4::from_translation(VM_MUZZLE_DISC)
                 * Mat4::from_rotation_y(0.12)
                 * Mat4::from_translation(-VM_MUZZLE_DISC);
-            (angled, disc_launcher(angled, world.time, cooldown, shot_age, anim.ready_flash, team))
+            (angled, disc_launcher(angled, world.time, cooldown, shot_age, anim.ready_flash, loaded, team))
         }
         1 => (base, chaingun(base, anim, shot_age, team)),
-        _ => (base, grenade_launcher(base, anim, cooldown, shot_age, team)),
+        crate::sim::rifles::RIFLE_SLOT if crate::sim::rifles::is_railgun(p) => (base, railgun(base, cooldown, shot_age, loaded, team)),
+        crate::sim::rifles::RIFLE_SLOT => (base, laser_rifle(base, world.time, cooldown, shot_age, loaded, team)),
+        _ => (base, grenade_launcher(base, anim, cooldown, shot_age, loaded, team)),
     };
     push_vm_hands(&mut draws, frame, shown, team, p.team);
+    // Heavy armor's third weapon is the mortar: the launcher, but a bigger
+    // heavier tube.
+    if shown == 2 && p.armor == crate::sim::ArmorClass::Heavy {
+        let pivot = frame.w_axis.truncate();
+        let grow = Mat4::from_translation(pivot) * Mat4::from_scale(Vec3::new(1.3, 1.3, 1.15)) * Mat4::from_translation(-pivot);
+        for d in &mut draws { d.model = grow * d.model; d.color *= 0.8; }
+    }
+    draws
+}
+
+/// Laser rifle: a long slim receiver and barrel with a glass emitter rod
+/// down its top that charges up over the reload and dims when out of energy.
+fn laser_rifle(base: Mat4, time: f32, cooldown: f32, shot_age: f32, loaded: bool, team: Vec3) -> Vec<LitDraw> {
+    let body = Vec3::new(0.84, 0.87, 0.9);
+    let dark = Vec3::new(0.08, 0.09, 0.1);
+    let cyan = Vec3::new(0.35, 0.95, 1.0);
+    let charge = if loaded { 1.0-(cooldown/crate::sim::rifles::LASER_RELOAD).clamp(0.0, 1.0) } else { 0.0 };
+    let mut draws = Vec::with_capacity(20);
+    let mut put = |mesh, at: Vec3, size: Vec3, color: Vec3, emit: f32| draws.push(LitDraw { mesh,
+        model: base*Mat4::from_translation(at)*Mat4::from_scale(size), color, emit, mode: 0.0 });
+    put(MeshId::Bevel, Vec3::new(0.0, -0.01, 0.12), Vec3::new(0.13, 0.15, 0.36), body, 0.0);
+    put(MeshId::Bevel, Vec3::new(0.0, -0.13, 0.22), Vec3::new(0.07, 0.17, 0.1), dark, 0.0);
+    put(MeshId::Bevel, Vec3::new(0.0, -0.03, 0.36), Vec3::new(0.08, 0.12, 0.16), dark, 0.0);
+    put(MeshId::Bevel, Vec3::new(0.0, 0.0, -0.35), Vec3::new(0.07, 0.07, 0.62), body, 0.0);
+    put(MeshId::Cube, Vec3::new(0.0, 0.052, -0.2), Vec3::new(0.03, 0.02, 0.8), cyan, 0.3+charge*1.2);
+    for k in 0..4 {
+        let z = -0.1-k as f32*0.14;
+        put(MeshId::Disc, Vec3::new(0.0, 0.0, z), Vec3::new(0.055, 0.02, 0.055), dark, 0.0);
+    }
+    put(MeshId::Bevel, Vec3::new(0.0, 0.1, 0.02), Vec3::new(0.05, 0.05, 0.24), dark, 0.0);
+    put(MeshId::Cube, Vec3::new(0.066, -0.01, 0.12), Vec3::new(0.004, 0.035, 0.3), team, 0.35);
+    let flash = (-shot_age*18.0).exp();
+    put(MeshId::Sphere, Vec3::new(0.0, 0.0, -0.68), Vec3::splat(0.04+0.08*flash), cyan, 0.4+2.0*flash+0.2*(time*6.0).sin().abs()*charge);
+    draws
+}
+
+/// Railgun: a heavy boxy stock with twin conductor rails around the bore,
+/// lit blue along their length when charged.
+fn railgun(base: Mat4, cooldown: f32, shot_age: f32, loaded: bool, team: Vec3) -> Vec<LitDraw> {
+    let steel = Vec3::new(0.34, 0.37, 0.41);
+    let dark = Vec3::new(0.07, 0.08, 0.1);
+    let blue = Vec3::new(0.35, 0.65, 1.0);
+    let charge = if loaded { 1.0-(cooldown/crate::sim::rifles::RAIL_RELOAD).clamp(0.0, 1.0) } else { 0.0 };
+    let mut draws = Vec::with_capacity(20);
+    let mut put = |mesh, at: Vec3, size: Vec3, color: Vec3, emit: f32| draws.push(LitDraw { mesh,
+        model: base*Mat4::from_translation(at)*Mat4::from_scale(size), color, emit, mode: 0.0 });
+    put(MeshId::Bevel, Vec3::new(0.0, -0.02, 0.14), Vec3::new(0.2, 0.2, 0.42), steel, 0.0);
+    put(MeshId::Bevel, Vec3::new(0.0, -0.16, 0.22), Vec3::new(0.08, 0.18, 0.12), dark, 0.0);
+    put(MeshId::Bevel, Vec3::new(0.0, -0.1, -0.08), Vec3::new(0.12, 0.08, 0.2), dark, 0.0);
+    for side in [-1.0, 1.0] {
+        put(MeshId::Bevel, Vec3::new(side*0.055, 0.0, -0.36), Vec3::new(0.04, 0.12, 0.66), steel, 0.0);
+        put(MeshId::Cube, Vec3::new(side*0.032, 0.0, -0.36), Vec3::new(0.008, 0.07, 0.62), blue, 0.2+1.4*charge);
+    }
+    for z in [-0.18, -0.42, -0.62] { put(MeshId::Bevel, Vec3::new(0.0, 0.07, z), Vec3::new(0.16, 0.03, 0.05), dark, 0.0); }
+    put(MeshId::Cube, Vec3::new(0.101, -0.02, 0.14), Vec3::new(0.004, 0.05, 0.34), team, 0.35);
+    let flash = (-shot_age*14.0).exp();
+    if flash > 0.02 {
+        put(MeshId::Sphere, Vec3::new(0.0, 0.0, -0.72), Vec3::new(0.06, 0.06, 0.12)*(1.0+2.0*flash), blue, 2.2*flash);
+    }
     draws
 }
 
@@ -889,7 +1381,7 @@ fn chaingun(base: Mat4, anim: &ViewAnim, shot_age: f32, team: Vec3) -> Vec<LitDr
 /// Grenade launcher: a wide bore, a four-chamber revolving cylinder with
 /// round lights, a pump grip and a stock. The existing reload timer drives a
 /// cylinder step and a pump rack; a fresh round rotates up as it completes.
-fn grenade_launcher(base: Mat4, anim: &ViewAnim, cooldown: f32, shot_age: f32, team: Vec3) -> Vec<LitDraw> {
+fn grenade_launcher(base: Mat4, anim: &ViewAnim, cooldown: f32, shot_age: f32, loaded: bool, team: Vec3) -> Vec<LitDraw> {
     let gun = Vec3::new(0.23, 0.25, 0.27);
     let dark = Vec3::new(0.07, 0.075, 0.08);
     let steel = Vec3::new(0.44, 0.47, 0.50);
@@ -915,7 +1407,7 @@ fn grenade_launcher(base: Mat4, anim: &ViewAnim, cooldown: f32, shot_age: f32, t
     put(MeshId::Cube, box_at(Vec3::new(0.087, -0.01, 0.12), Vec3::new(0.004, 0.04, 0.2)), team, 0.35);
     // Ready light on the sight.
     put(MeshId::Cube, box_at(Vec3::new(0.0, 0.092, 0.02), Vec3::new(0.03, 0.018, 0.03)),
-        if cooldown > 0.0 { dark } else { amber }, if cooldown > 0.0 { 0.0 } else { 0.9 });
+        if cooldown > 0.0 || !loaded { dark } else { amber }, if cooldown > 0.0 || !loaded { 0.0 } else { 0.9 });
     // Wide-bore barrel with a muzzle ring.
     put(MeshId::Disc, along_z(Vec3::new(0.0, 0.02, -0.40), 0.075, 0.38), gun, 0.0);
     put(MeshId::Disc, along_z(Vec3::new(0.0, 0.02, -0.575), 0.088, 0.035), steel, 0.0);
@@ -938,6 +1430,8 @@ fn grenade_launcher(base: Mat4, anim: &ViewAnim, cooldown: f32, shot_age: f32, t
         let reloading = cooldown > 0.0;
         let glow = if reloading && k == fired_chamber { 0.0 }
             else if reloading && k == arriving { 0.2 + 0.7 * turn } else { 0.8 };
+        // An empty launcher has no rounds to light.
+        let glow = if loaded { glow } else { 0.0 };
         // The round light sits on the cylinder's outer face over its chamber,
         // so the player sees rounds turn past.
         let out = Vec3::new(a.cos(), a.sin(), 0.0);
@@ -1003,6 +1497,25 @@ fn push_turret_head(lit:&mut Vec<LitDraw>,emit:&mut Vec<EmitDraw>,d:&peakrunner_
 #[cfg(test)]
 mod projectile_visibility {
     use super::*;
+
+    #[test]
+    fn beacons_shift_from_red_to_blue_through_purple() {
+        let mut p = peakrunner_core::control::Point { name: "Beacon".into(), pos: Vec3::ZERO, radius: 12.0, drain_radius: 0.0,
+            drain_rate: 0.0, active: true, owner: Some(0), progress: 0.0, capturing: None, contested: false };
+        let red = beacon_color(&p);
+        assert!(red.x > 0.9 && red.z < 0.2);
+        p.capturing = Some(1);
+        p.progress = 0.5;
+        let mid = beacon_color(&p);
+        assert!(mid.x > 0.5 && mid.z > 0.8 && mid.y < 0.2, "purple halfway: {mid}");
+        p.progress = 1.0;
+        let blue = beacon_color(&p);
+        assert!(blue.z > 0.9 && blue.x < 0.2);
+        // A neutral point goes straight from white toward the capturer.
+        p.owner = None; p.progress = 0.5;
+        let half = beacon_color(&p);
+        assert!(half.z > half.x);
+    }
 
     /// Brightness a lit draw keeps even facing away from the sun: its
     /// self-lit term, which the shader adds unfogged by lighting.

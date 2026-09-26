@@ -13,6 +13,12 @@ published release still runs the old clones. See
 Skybreak Bastions is removed from source (it derived from Broadside
 measurements), so the source rotation is five maps; the published release still
 has it. New maps follow [map-pipeline.md](map-pipeline.md).
+Longfield (`longfield`) and Highgoal (`highgoal`), football maps, are the
+sixth and seventh embedded maps in source; compatibility is `maps8`. Only maps with a manifest `football` field
+accept `"mode":"football"`, and it isn't in the default rotation. See
+[football.md](football.md). Rotations also take playlists that expand to every
+supported map (`{"playlist":"ctf_cnh"}`, `{"playlist":"football"}`); see
+[loadouts.md](loadouts.md).
 Collection-wide admission and signed delivery are verified for those six maps;
 the general installed-pack registry and selected-map-only admission remain open.
 

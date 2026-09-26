@@ -213,10 +213,12 @@ fn uniform_data(pack:&map_pack::MapPack,frame:&DrawFrame)->Vec<f32> {
     let sky=&pack.manifest.sky;
     let far=sky.get("visibleDistance").and_then(|s|s.parse().ok()).unwrap_or(450.0);
     let near=sky.get("fogDistance").and_then(|s|s.parse().ok()).unwrap_or(200.0);
-    let look=qa_look().unwrap_or(&pack.manifest.look).resolved();
+    // Deathmatch conditions recolour the map's look and pull in its fog.
+    let (fog_color,near,far)=frame.conditions.fog(pack.fog_color(),near,far);
+    let look=frame.conditions.apply(qa_look().unwrap_or(&pack.manifest.look).resolved());
     let [sx,sy,sz]=look.sun_direction;
     data.extend([frame.eye.x,frame.eye.y,frame.eye.z,far]);data.extend([sx,sy,sz,frame.time]);
-    let [fr,fg,fb]=pack.fog_color();data.extend([fr,fg,fb,near]);data.extend(pack.manifest.terrain_layers.map(|n|n as f32));
+    let [fr,fg,fb]=fog_color;data.extend([fr,fg,fb,near]);data.extend(pack.manifest.terrain_layers.map(|n|n as f32));
     for i in 0..8 {data.push(*pack.manifest.sky_layers.get(i).unwrap_or(&0) as f32);}
     let procedural=look.sky;
     let sky_mode=if procedural.is_some() {1.0} else {0.0};

@@ -51,8 +51,26 @@ const WORLD_SIZE: u64 = 304;
 const SKY_SIZE: u64 = 96;
 const EMIT_SIZE: u64 = 112;
 
+/// Weather drops: world position, the surface it stops on, whether a roof
+/// hides it (then it isn't drawn), and a seed.
+#[derive(Clone, Copy)]
+struct Drop { pos: Vec3, floor: f32, covered: bool, seed: u32 }
+const MAX_DROPS: usize = 640;
+
+/// How many weather drops to draw, and the fall speed, size and colour
+/// for the conditions (rain streaks, snowflakes); none without weather.
+fn weather_drops(c: &peakrunner_core::conditions::Conditions) -> Option<(usize, f32, Vec3, Vec3)> {
+    use peakrunner_core::conditions::Weather;
+    match c.weather {
+        Weather::Rain => Some((440, 19.0, Vec3::new(0.014, 0.62, 0.014), Vec3::new(0.62, 0.68, 0.76))),
+        Weather::Storm => Some((MAX_DROPS, 24.0, Vec3::new(0.016, 0.8, 0.016), Vec3::new(0.58, 0.63, 0.72))),
+        Weather::Snow => Some((420, 2.1, Vec3::splat(0.05), Vec3::splat(0.93))),
+        _ => None,
+    }
+}
+
 fn precipitation_count(map: MapId, available: usize) -> usize {
-    match map { MapId::Valley => available, MapId::Raindance | MapId::BroadsideClone | MapId::StonehengeClone | MapId::SnowblindClone | MapId::DesertOfDeathClone => 0 }
+    match map { MapId::Valley => available, MapId::Raindance | MapId::BroadsideClone | MapId::StonehengeClone | MapId::SnowblindClone | MapId::DesertOfDeathClone | MapId::Longfield | MapId::Highgoal | MapId::OzarkticBlast | MapId::Reefbreak => 0 }
 }
 
 #[repr(C)]
@@ -132,6 +150,8 @@ pub struct SceneGpu {
     max_samples: u32,
     size: (u32, u32),
     snow: Vec<Vec3>,
+    /// Deathmatch rain and snow, around the camera.
+    drops: Vec<Drop>,
     target_is_srgb: bool,
     terrain_map: MapId,
     grass_ready: bool,
@@ -441,6 +461,7 @@ impl SceneGpu {
             max_samples: 1,
             size: (4, 4),
             snow,
+            drops: Vec::new(),
             target_is_srgb: target_format.is_srgb(),
             terrain_map: MapId::Valley,
             grass_ready: false,
@@ -539,6 +560,45 @@ impl SceneGpu {
             });
         }
 
+        // Weather: drops fall with the wind in a box around the camera and
+        // stop on the first surface below where they started (roofs too).
+        if let Some((count, fall, size, color)) = weather_drops(&frame.conditions) {
+            let wind = Vec3::new(frame.conditions.wind[0], 0.0, frame.conditions.wind[1]);
+            let vel = wind - Vec3::Y * fall;
+            let turn = glam::Quat::from_rotation_arc(Vec3::Y, -vel.normalize_or(Vec3::NEG_Y));
+            let snow = fall < 5.0;
+            let spawn = |seed: &mut u32, eye: Vec3, spread_y: f32| -> Drop {
+                let mut r = || { *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223); (*seed >> 8) as f32 / 16_777_216.0 };
+                let pos = eye + Vec3::new(r() * 44.0 - 22.0, 2.0 + r() * spread_y, r() * 44.0 - 22.0) - wind * 0.4;
+                // Stop on the first surface below (a roof too); a drop with
+                // anything solid above it is indoors and never drawn.
+                let pack = peakrunner_core::map_pack::on(frame.map);
+                let down = pos - Vec3::Y * 60.0;
+                let floor = pack.and_then(|p| p.sweep(pos, down, 0.0)).map_or(terrain::support_on(frame.map, pos).0,
+                    |(t, _)| pos.y - 60.0 * t).max(terrain::height_on(frame.map, pos.x, pos.z));
+                let covered = pack.is_some_and(|p| p.sweep(pos, pos + Vec3::Y * 80.0, 0.0).is_some());
+                Drop { pos, floor, covered, seed: *seed }
+            };
+            if self.drops.len() != MAX_DROPS {
+                let mut seed = 0x5EED_u32;
+                self.drops = (0..MAX_DROPS).map(|_| spawn(&mut seed, eye, 16.0)).collect();
+            }
+            for d in self.drops.iter_mut().take(count) {
+                let sway = if snow { Vec3::new((frame.time * 1.3 + d.seed as f32 * 1e-6).sin(), 0.0, (frame.time * 1.1 + d.seed as f32 * 3e-6).cos()) * 0.6 } else { Vec3::ZERO };
+                d.pos += (vel + sway) * dt;
+                let off = d.pos - eye;
+                if d.pos.y < d.floor || off.x.abs() > 24.0 || off.z.abs() > 24.0 || off.y > 22.0 || off.y < -12.0 {
+                    let mut seed = d.seed;
+                    *d = spawn(&mut seed, eye, 14.0);
+                }
+                // Covered drops, and any right at the lens (a pole-sized smear).
+                if d.covered || (d.pos - eye).length() < 1.5 { continue; }
+                let model = if snow { Mat4::from_translation(d.pos) * Mat4::from_scale(size) }
+                    else { Mat4::from_scale_rotation_translation(size, turn, d.pos) };
+                snow_draws.push(LitDraw { mesh: MeshId::Cube, model, color, emit: if snow { 0.4 } else { 0.3 }, mode: 0.0 });
+            }
+        }
+
         let slots = 2 + frame.lit.len() + snow_draws.len() + frame.emit.len() + frame.smoke.len() + frame.viewmodel.len();
         self.ensure_slots(device, slots as u32 + 4);
 
@@ -574,7 +634,7 @@ impl SceneGpu {
             lit_offs.push(push(
                 &mut staging,
                 &mut cursor,
-                bytemuck::bytes_of(&world_uniform(draw, frame.proj * frame.view, frame.eye, sun, frame.fog, frame.fog_density, frame.time, frame.map)),
+                bytemuck::bytes_of(&world_uniform(draw, frame.proj * frame.view, frame.eye, sun * frame.conditions.entity_light(), frame.fog, frame.fog_density, frame.time, frame.map)),
             ));
         }
         let mut emit_offs = Vec::with_capacity(frame.emit.len());
@@ -2156,6 +2216,34 @@ mod shader_check {
                 w.players[0].weapon = (weapon + 1) % 3;
                 develop(&w, &mut fx, 10);
                 save(&crate::drawlist::build_frame_with(&w, aspect, 0.0, &mut fx), &format!("vm-{label}-switch"));
+            }
+
+            // Rifles: the laser (light) and the railgun (heavy), idle and just fired
+            // with their shot in the air.
+            for heavy in [false, true] {
+                use crate::sim::rifles;
+                let mut w = fresh(MapId::Raindance);
+                w.players[0].rifle = true;
+                w.players[0].weapon = rifles::RIFLE_SLOT;
+                if heavy { w.players[0].armor = crate::sim::ArmorClass::Heavy; w.players[0].ammo[3] = 20; }
+                w.players[0].energy = crate::sim::ENERGY_MAX;
+                let label = if heavy { "railgun" } else { "laser" };
+                let mut fx = crate::effects::Effects::new();
+                develop(&w, &mut fx, 30);
+                save(&crate::drawlist::build_frame_with(&w, aspect, 0.0, &mut fx), &format!("vm-{label}-idle"));
+                let (eye, dir, _) = w.camera();
+                let muzzle = eye+dir*1.0+Vec3::new(0.25, -0.25, 0.0);
+                w.players[0].shots += 1;
+                w.players[0].cooldown = rifles::rifle_reload(&w.players[0])-0.03;
+                w.discs.push(if heavy {
+                    Disc { pos: eye+dir*35.0, vel: dir*rifles::RAIL_SPEED, team: Team::Ember, owner: 0,
+                        life: rifles::RAIL_LIFE-0.06, kind: rifles::RAIL_KIND, spin: 0.0 }
+                } else {
+                    Disc { pos: muzzle, vel: dir*120.0, team: Team::Ember, owner: 0, life: rifles::LASER_FADE*0.8,
+                        kind: rifles::LASER_KIND, spin: 0.0 }
+                });
+                develop(&w, &mut fx, 1);
+                save(&crate::drawlist::build_frame_with(&w, aspect, 0.0, &mut fx), &format!("vm-{label}-firing"));
             }
 
             // Third-person weapons, one of each, posed for the camera.

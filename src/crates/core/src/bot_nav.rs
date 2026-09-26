@@ -3,7 +3,12 @@
 //! (terrain), jet (climbs sized from the real jet energy and thrust numbers)
 //! and drop. Server-side only; nothing here is networked.
 
-use crate::sim::{ENERGY_JET, ENERGY_MAX, GRAVITY, JET_ACCEL, JET_HORIZ_ACCEL, JET_THRUST_CAP, MIN_JET_ENERGY};
+use crate::sim::{ENERGY_MAX, GRAVITY};
+
+/// Stadium maps only host Football, so their bots plan with its armor.
+fn plan_armor(map: MapId) -> crate::sim::Armor {
+    if crate::sim::football::has_field(map) { crate::sim::football::FOOTBALL_ARMOR } else { crate::sim::STANDARD_ARMOR }
+}
 use crate::terrain::{MapId, PLAYER_RADIUS};
 use glam::Vec3;
 use std::collections::{BinaryHeap, HashMap};
@@ -43,9 +48,9 @@ pub(crate) struct NavGraph {
 
 fn cell(v: f32) -> i32 { (v / CELL).floor() as i32 }
 
-static GRAPHS: [OnceLock<Option<NavGraph>>; 5] = [const { OnceLock::new() }; 5];
+static GRAPHS: [OnceLock<Option<NavGraph>>; 9] = [const { OnceLock::new() }; 9];
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-static STARTED: [std::sync::atomic::AtomicBool; 5] = [const { std::sync::atomic::AtomicBool::new(false) }; 5];
+static STARTED: [std::sync::atomic::AtomicBool; 9] = [const { std::sync::atomic::AtomicBool::new(false) }; 9];
 
 fn slot(map: MapId) -> Option<usize> {
     match map {
@@ -55,6 +60,10 @@ fn slot(map: MapId) -> Option<usize> {
         MapId::StonehengeClone => Some(2),
         MapId::SnowblindClone => Some(3),
         MapId::DesertOfDeathClone => Some(4),
+        MapId::Longfield => Some(5),
+        MapId::Highgoal => Some(6),
+        MapId::OzarkticBlast => Some(7),
+        MapId::Reefbreak => Some(8),
     }
 }
 
@@ -82,7 +91,8 @@ pub(crate) fn ready(map: MapId) -> Option<&'static NavGraph> {
 /// Height a full-tank jet reaches from standstill, and whether it can clear
 /// `dy` while also covering `dx`. Mirrors the jet branch of the movement step:
 /// vertical and horizontal thrust act together, each fading near the thrust cap.
-pub(crate) fn jet_can_reach(dx: f32, dy: f32, energy: f32) -> bool { jet_arc(dx, dy, energy, 0.0).is_some() }
+#[cfg(test)]
+pub(crate) fn jet_can_reach(dx: f32, dy: f32, energy: f32) -> bool { jet_arc(dx, dy, energy, 0.0, crate::sim::STANDARD_ARMOR).is_some() }
 
 /// The flight a bot flies for a jet link: arriving at the launch point
 /// already moving at `v0` horizontally toward the target (a skier off a
@@ -90,21 +100,22 @@ pub(crate) fn jet_can_reach(dx: f32, dy: f32, energy: f32) -> bool { jet_arc(dx,
 /// over it with height to spare. Returns the path as (along, up) points, or
 /// `None` if a tank can't get it there. Mirrors the jet branch of the movement
 /// step: vertical and horizontal thrust act together, each fading near the cap.
-pub(crate) fn jet_arc(dx: f32, dy: f32, energy: f32, v0: f32) -> Option<Vec<(f32, f32)>> {
+pub(crate) fn jet_arc(dx: f32, dy: f32, energy: f32, v0: f32, armor: crate::sim::Armor) -> Option<Vec<(f32, f32)>> {
     let dt = 1.0 / 60.0;
     let (mut x, mut y, mut vx, mut vy, mut e) = (0.0f32, 0.0f32, v0, 0.0f32, energy);
     let mut reached_x = dx <= 0.0;
     let mut out = vec![(0.0, 0.0)];
     for step in 0..(15.0 / dt) as u32 {
-        let jet = e >= MIN_JET_ENERGY;
+        let jet = e >= armor.min_jet;
         vy -= crate::sim::gravity_for_speed(vx) * dt;
         if jet {
-            vy += JET_ACCEL * crate::sim::jet_falloff(vy.max(0.0)) * dt;
+            let fade = if armor.fade_up { crate::sim::jet_falloff(vy.max(0.0)) } else { 1.0 };
+            vy += armor.jet * fade * dt;
             // Thrust only adds speed up to the cap; it never trims a faster run-in.
-            if !reached_x && vx < JET_THRUST_CAP {
-                vx = (vx + JET_HORIZ_ACCEL * crate::sim::jet_falloff(vx) * dt).min(JET_THRUST_CAP);
+            if !reached_x && vx < armor.air_cap {
+                vx = (vx + armor.side * crate::sim::jet_falloff_to(vx, armor.air_cap) * dt).min(armor.air_cap);
             }
-            e -= ENERGY_JET * dt;
+            e -= armor.drain * dt;
         }
         x = (x + vx * dt).min(dx.max(x));
         y += vy * dt;
@@ -254,10 +265,11 @@ fn build(map: MapId) -> Option<NavGraph> {
             let flat = Vec3::new(pb.x - pa.x, 0.0, pb.z - pa.z).length();
             let full = ENERGY_MAX * JET_PLAN_ENERGY;
             // Too steep to ski up: jet up it if a tank covers the climb.
+            let reach = |dy: f32| jet_arc(flat, dy, full, 0.0, plan_armor(map)).is_some();
             if rise <= flat * 1.19 { add(&mut g.edges, a, b, Link::Ski, d); }
-            else if jet_can_reach(flat, rise, full) { add(&mut g.edges, a, b, Link::Jet, 4.0 + d * 1.5); }
+            else if reach(rise) { add(&mut g.edges, a, b, Link::Jet, 4.0 + d * 1.5); }
             if -rise <= flat * 1.19 { add(&mut g.edges, b, a, Link::Ski, d); }
-            else if jet_can_reach(flat, -rise, full) { add(&mut g.edges, b, a, Link::Jet, 4.0 + d * 1.5); }
+            else if reach(-rise) { add(&mut g.edges, b, a, Link::Jet, 4.0 + d * 1.5); }
         }
     }
 
@@ -401,7 +413,7 @@ fn build(map: MapId) -> Option<NavGraph> {
             let flat = Vec3::new(pt.x - ps.x, 0.0, pt.z - ps.z).length();
             let dir = Vec3::new(pt.x - ps.x, 0.0, pt.z - ps.z).normalize_or_zero();
             let v0 = if g.terrain[s as usize] { run_in(map, ps, dir) } else { 0.0 };
-            let Some(arc) = jet_arc(flat, pt.y - ps.y, full, v0) else { return false };
+            let Some(arc) = jet_arc(flat, pt.y - ps.y, full, v0, plan_armor(map)) else { return false };
             let at = |(u, h): (f32, f32)| ps + dir * u + Vec3::Y * (h + 0.3);
             let arc_ok = arc.windows(2).all(|w| {
                 let (a, b) = (at(w[0]), at(w[1]));
@@ -436,7 +448,7 @@ fn build(map: MapId) -> Option<NavGraph> {
                 let ps = g.nodes[s as usize];
                 let dir = Vec3::new(pt.x - ps.x, 0.0, pt.z - ps.z).normalize_or_zero();
                 let flat = Vec3::new(pt.x - ps.x, 0.0, pt.z - ps.z).length();
-                if jet_arc(flat, pt.y - ps.y, full, run_in(map, ps, dir)).is_none() { continue; }
+                if jet_arc(flat, pt.y - ps.y, full, run_in(map, ps, dir), plan_armor(map)).is_none() { continue; }
                 if try_link(&mut out, s) { break; }
                 tries += 1;
                 if tries >= 12 { break; }
@@ -705,7 +717,7 @@ mod tests {
         assert!(jet_can_reach(0.0, 20.0, full), "a straight climb of 20 m");
         assert!(jet_can_reach(30.0, 20.0, full), "a 30 m hop onto a 20 m ledge");
         assert!(!jet_can_reach(0.0, 120.0, full), "no 120 m climb on one tank");
-        assert!(!jet_can_reach(0.0, 20.0, MIN_JET_ENERGY), "no climb on an empty tank");
+        assert!(!jet_can_reach(0.0, 20.0, crate::sim::MIN_JET_ENERGY), "no climb on an empty tank");
     }
 
     #[test]

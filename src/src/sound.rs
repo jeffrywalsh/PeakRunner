@@ -48,14 +48,20 @@ pub enum Cue {
     BoomNear, BoomFar, GenBlast, ShieldHit, ShieldDown, HullHit, Footstep, Land,
     Switch, RepairKit, Bounce, Hit, Pain, Death, Flag, Drop, Return,
     CaptureWin, CaptureLoss, Start, End, Splash, Wade,
+    // Football and body checks.
+    Whistle, Horn, Cheer, Groan, Tackle, Bump, Pass, Catch,
+    // Rifles.
+    Laser, Rail,
 }
 
-pub const CUES: [Cue; 29] = [
+pub const CUES: [Cue; 39] = [
     Cue::DiscFire, Cue::DiscReady, Cue::ChainShot, Cue::GrenadeFire, Cue::TurretBullet,
     Cue::TurretPlasma, Cue::BoomNear, Cue::BoomFar, Cue::GenBlast, Cue::ShieldHit,
     Cue::ShieldDown, Cue::HullHit, Cue::Footstep, Cue::Land, Cue::Switch, Cue::RepairKit,
     Cue::Bounce, Cue::Hit, Cue::Pain, Cue::Death, Cue::Flag, Cue::Drop, Cue::Return,
     Cue::CaptureWin, Cue::CaptureLoss, Cue::Start, Cue::End, Cue::Splash, Cue::Wade,
+    Cue::Whistle, Cue::Horn, Cue::Cheer, Cue::Groan, Cue::Tackle, Cue::Bump, Cue::Pass, Cue::Catch,
+    Cue::Laser, Cue::Rail,
 ];
 
 impl Cue {
@@ -67,7 +73,7 @@ impl Cue {
             | Cue::HullHit | Cue::Bounce => 3,
             Cue::ShieldHit | Cue::Wade => 4,
             Cue::Splash => 3,
-            Cue::TurretPlasma | Cue::BoomFar | Cue::Land => 2,
+            Cue::TurretPlasma | Cue::BoomFar | Cue::Land | Cue::Tackle | Cue::Bump | Cue::Catch => 2,
             _ => 1,
         }
     }
@@ -75,11 +81,12 @@ impl Cue {
     pub fn priority(self) -> u8 {
         match self {
             Cue::CaptureWin | Cue::CaptureLoss | Cue::Flag | Cue::Drop | Cue::Return
-            | Cue::Start | Cue::End | Cue::Death => 6,
+            | Cue::Start | Cue::End | Cue::Death | Cue::Cheer | Cue::Groan | Cue::Whistle | Cue::Horn => 6,
             Cue::GenBlast | Cue::Hit | Cue::Pain | Cue::RepairKit | Cue::ShieldDown => 5,
-            Cue::DiscFire | Cue::GrenadeFire | Cue::DiscReady | Cue::Switch => 4,
+            Cue::DiscFire | Cue::GrenadeFire | Cue::DiscReady | Cue::Switch | Cue::Laser | Cue::Rail => 4,
             Cue::BoomNear | Cue::BoomFar | Cue::TurretPlasma => 3,
-            Cue::ChainShot | Cue::TurretBullet | Cue::ShieldHit | Cue::HullHit | Cue::Land | Cue::Splash => 2,
+            Cue::Tackle | Cue::Pass | Cue::Catch => 4,
+            Cue::ChainShot | Cue::TurretBullet | Cue::ShieldHit | Cue::HullHit | Cue::Land | Cue::Splash | Cue::Bump => 2,
             Cue::Footstep | Cue::Bounce | Cue::Wade => 1,
         }
     }
@@ -90,10 +97,13 @@ impl Cue {
             Cue::BoomFar => 520.0,
             Cue::BoomNear => 180.0,
             Cue::DiscFire | Cue::GrenadeFire | Cue::TurretPlasma => 140.0,
+            Cue::Laser => 180.0,
+            Cue::Rail => 220.0,
             Cue::ChainShot | Cue::TurretBullet => 150.0,
             Cue::ShieldHit | Cue::ShieldDown | Cue::HullHit => 110.0,
             Cue::Footstep | Cue::Wade => 38.0,
             Cue::Land | Cue::Bounce | Cue::Splash => 60.0,
+            Cue::Tackle | Cue::Bump | Cue::Pass | Cue::Catch => 80.0,
             _ => 120.0,
         }
     }
@@ -137,6 +147,24 @@ impl Cue {
             // Control points reuse the objective chimes.
             "point" => Cue::Flag,
             "contest" => Cue::Drop,
+            // Football: the referee, the crowd and the hits.
+            "whistle" => Cue::Whistle,
+            "horn" | "halftime" => Cue::Horn,
+            "touchdown_win" => Cue::Cheer,
+            "touchdown_loss" => Cue::Groan,
+            "tackle" => Cue::Tackle,
+            "bump" | "fumble" => Cue::Bump,
+            "pass" => Cue::Pass,
+            "catch" | "intercept" => Cue::Catch,
+            // Loadouts: the mortar's deeper thump, an empty click, placing a
+            // deployable, a purchase.
+            "mortar" => Cue::GrenadeFire,
+            "dry" | "buy" => Cue::Switch,
+            "deploy" => Cue::Bump,
+            // A grenade or mine leaving the hand.
+            "throw" => Cue::Pass,
+            "laser" => Cue::Laser,
+            "rail" => Cue::Rail,
             _ => return None,
         })
     }
@@ -144,10 +172,10 @@ impl Cue {
 
 /// Looping beds whose gain, pitch and pan follow the world every frame.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Loop { Jet, Ski, Wind, Spin, Hum, DiscHum, IdleDisc, IdleChain, IdleGrenade }
-pub const N_LOOPS: usize = 9;
+pub enum Loop { Jet, Ski, Wind, Spin, Hum, DiscHum, IdleDisc, IdleChain, IdleGrenade, Crowd }
+pub const N_LOOPS: usize = 10;
 pub const LOOPS: [Loop; N_LOOPS] = [Loop::Jet, Loop::Ski, Loop::Wind, Loop::Spin, Loop::Hum, Loop::DiscHum,
-    Loop::IdleDisc, Loop::IdleChain, Loop::IdleGrenade];
+    Loop::IdleDisc, Loop::IdleChain, Loop::IdleGrenade, Loop::Crowd];
 
 // ---------------------------------------------------------------- synthesis
 //
@@ -290,6 +318,27 @@ pub fn synth(cue: Cue, variant: usize, sr: f32) -> Vec<f32> {
     let mut o1 = Osc::default();
     let (mut s1, mut s2) = (Saw::default(), Saw::default());
     let mut data = match cue {
+        Cue::Laser => {
+            // A laser shot: a bright falling zap over a thin electric crackle
+            // and a short hum.
+            render(sr, 0.45, |t| {
+                let zap = s1.tick(2400.0*(-t*9.0).exp()+420.0, sr)*env(t, 0.001, 0.08)*0.9;
+                let crackle = f1.bp(n.next(), 5200.0, 1.4, sr)*env(t, 0.0005, 0.05)*1.2;
+                let hum = o1.tick(180.0, sr)*env(t, 0.004, 0.18)*0.35;
+                sat(zap+crackle+hum, 1.3)
+            })
+        }
+        Cue::Rail => {
+            // A railgun: a hard electric crack, a deep punch and a ringing
+            // metallic tail as the rails discharge.
+            render(sr, 1.0, |t| {
+                let crack = f1.bp(n.next(), 3000.0, 0.9, sr)*env(t, 0.0003, 0.02)*2.4;
+                let punch = o1.tick(60.0+80.0*(-t*14.0).exp(), sr)*env(t, 0.002, 0.12)*1.4;
+                let ring = f2.bp(s1.tick(760.0, sr), 1520.0, 6.0, sr)*env(t, 0.004, 0.45)*0.6;
+                let hiss = f3.bp(pink.next(), 1800.0*(-t*2.0).exp()+500.0, 1.0, sr)*env(t, 0.01, 0.3)*0.7;
+                sat(crack+punch+ring+hiss, 1.6)
+            })
+        }
         Cue::DiscFire => {
             // Launch thump with real mid body, a pneumatic whoosh and a
             // spinning electric whir that trails off over most of a second.
@@ -450,13 +499,14 @@ pub fn synth(cue: Cue, variant: usize, sr: f32) -> Vec<f32> {
             })
         }
         Cue::Footstep => {
-            // An armored boot: a mid thud and a gritty scuff, no sub.
-            let mut tick = Reso::new(1350.0 + v * 45.0, 9.0, sr);
-            render(sr, 0.18, |t| {
+            // An armored boot: a deep, soft thud and a low muffled scuff,
+            // with only a faint clink.
+            let mut tick = Reso::new(620.0 + v * 30.0, 7.0, sr);
+            render(sr, 0.22, |t| {
                 let x = n.next();
-                let thump = f1.bp(o1.tick(160.0 + v * 8.0, sr), 240.0, 1.0, sr) * env(t, 0.001, 0.03) * 1.6;
-                let scuff = f2.bp(x, 720.0 + v * 45.0, 1.0, sr) * env(t, 0.001, 0.035) * 1.8;
-                let clink = tick.tick(x * (-t * 420.0).exp()) * 0.8;
+                let thump = f1.bp(o1.tick(78.0 + v * 5.0, sr), 110.0, 0.9, sr) * env(t, 0.002, 0.055) * 2.2;
+                let scuff = f2.bp(x, 340.0 + v * 25.0, 0.9, sr) * env(t, 0.002, 0.04) * 1.2;
+                let clink = tick.tick(x * (-t * 420.0).exp()) * 0.25;
                 thump + scuff + clink
             })
         }
@@ -481,6 +531,81 @@ pub fn synth(cue: Cue, variant: usize, sr: f32) -> Vec<f32> {
                 let body = o1.tick(70.0 + v * 6.0, sr) * env(t, 0.004, 0.05) * 0.7;
                 let drip = f2.bp(n.next(), 1500.0 + v * 120.0, 3.0, sr) * env(t, 0.03, 0.05) * 0.4;
                 slosh + body + drip
+            })
+        }
+        Cue::Whistle => {
+            // Referee's pea whistle: a bright tone with a fast rattling trill
+            // and breath, one firm blast.
+            render(sr, 0.55, |t| {
+                let rattle = 0.6 + 0.4 * (TAU * 27.0 * t).sin().signum() * 0.5 + 0.2 * (TAU * 54.0 * t).sin();
+                let tone = o1.tick(2850.0 + 60.0 * (TAU * 27.0 * t).sin(), sr) * rattle;
+                let breath = f1.bp(n.next(), 3000.0, 1.5, sr) * 0.35;
+                let shape = (t / 0.02).min(1.0) * if t > 0.42 { (-(t - 0.42) / 0.03).exp() } else { 1.0 };
+                (tone + breath) * shape
+            })
+        }
+        Cue::Horn => {
+            // A deep stadium horn: three low detuned reeds, short.
+            render(sr, 1.0, |t| {
+                let vib = 1.0 + 0.004 * (TAU * 5.5 * t).sin();
+                let reeds = s1.tick(98.0 * vib, sr) + s2.tick(123.5 * vib, sr) * 0.8;
+                let body = f1.lp(reeds + o1.tick(146.8 * vib, sr) * 0.6, 900.0, 0.9, sr);
+                let shape = (t / 0.04).min(1.0) * if t > 0.72 { (-(t - 0.72) / 0.07).exp() } else { 1.0 };
+                sat(body * 1.6, 1.8) * shape
+            })
+        }
+        Cue::Cheer | Cue::Groan => {
+            // A crowd: several formant-filtered noise voices with their own
+            // slow swells, plus claps on a cheer. The groan is lower, falling.
+            let cheer = cue == Cue::Cheer;
+            let seconds = if cheer { 2.8 } else { 1.8 };
+            let mut voices: Vec<(Svf, f32, f32)> = (0..6).map(|k| (Svf::default(),
+                if cheer { 520.0 + k as f32 * 290.0 } else { 260.0 + k as f32 * 110.0 }, k as f32 * 1.7)).collect();
+            render(sr, seconds, |t| {
+                let x = pink.next();
+                let fall = if cheer { 1.0 } else { 1.0 - 0.3 * (t / seconds) };
+                let crowd: f32 = voices.iter_mut().map(|(f, c, ph)| {
+                    let swell = 0.6 + 0.4 * (TAU * (1.3 + *ph * 0.3) * t + *ph).sin();
+                    f.bp(x, *c * fall, 1.6, sr) * swell
+                }).sum();
+                let claps = if cheer && n.next() > 0.9965 { 1.0 } else { 0.0 };
+                let clap = f2.bp(claps * 8.0 + n.next() * 0.02, 1900.0, 1.2, sr) * 0.9;
+                let rise = if cheer { 0.12 } else { 0.25 };
+                let shape = (t / rise).min(1.0) * (-(t / (seconds * 0.55)).powi(2)).exp();
+                (crowd * 1.3 + clap) * shape
+            })
+        }
+        Cue::Tackle => {
+            // A body hit: deep falling thump, a padded smack and dirt.
+            render(sr, 0.42, |t| {
+                let sub = o1.tick(38.0 + 30.0 * (-t * 14.0).exp(), sr) * env(t, 0.002, 0.12) * 1.5;
+                let smack = f1.bp(pink.next(), 190.0 + v * 12.0, 1.0, sr) * env(t, 0.001, 0.05) * 3.0;
+                let dirt = f2.lp(n.next(), 900.0, 0.7, sr) * env(t, 0.004, 0.09) * 0.8;
+                sat(sub + smack + dirt, 1.7)
+            })
+        }
+        Cue::Bump => {
+            // A lighter shoulder check.
+            render(sr, 0.22, |t| {
+                let sub = o1.tick(60.0 + 25.0 * (-t * 18.0).exp(), sr) * env(t, 0.002, 0.06) * 1.2;
+                let smack = f1.bp(pink.next(), 240.0 + v * 20.0, 1.0, sr) * env(t, 0.001, 0.035) * 2.4;
+                sat(sub + smack, 1.5)
+            })
+        }
+        Cue::Pass => {
+            // A throw: a rising grunt of effort and a whoosh.
+            render(sr, 0.32, |t| {
+                let whoosh = f1.bp(pink.next(), 500.0 + 2200.0 * (t / 0.3).min(1.0), 1.1, sr) * env(t, 0.03, 0.08) * 2.2;
+                let effort = f2.bp(s1.tick(110.0, sr), 420.0, 2.0, sr) * env(t, 0.005, 0.05) * 0.6;
+                whoosh + effort
+            })
+        }
+        Cue::Catch => {
+            // The ball smacks into hands: a padded slap with a low body.
+            render(sr, 0.16, |t| {
+                let slap = f1.bp(n.next(), 1300.0 + v * 90.0, 1.3, sr) * env(t, 0.0006, 0.018) * 2.2;
+                let body = o1.tick(120.0, sr) * env(t, 0.001, 0.04) * 0.9;
+                sat(slap + body, 1.4)
             })
         }
         Cue::Land => {
@@ -551,7 +676,10 @@ pub fn synth(cue: Cue, variant: usize, sr: f32) -> Vec<f32> {
     let peak = match cue {
         Cue::GenBlast => 0.88, Cue::BoomNear => 0.85, Cue::BoomFar => 0.62,
         Cue::DiscFire | Cue::GrenadeFire => 0.66, Cue::ChainShot | Cue::TurretBullet => 0.5,
-        Cue::Footstep => 0.32, Cue::Hit => 0.3, Cue::ShieldHit => 0.45,
+        Cue::Footstep => 0.08, Cue::Hit => 0.3, Cue::ShieldHit => 0.45,
+        Cue::Whistle => 0.34, Cue::Horn => 0.55, Cue::Cheer => 0.5, Cue::Groan => 0.42,
+        Cue::Tackle => 0.7, Cue::Bump => 0.5, Cue::Pass => 0.35, Cue::Catch => 0.4,
+        Cue::Laser => 0.5, Cue::Rail => 0.7,
         _ => 0.5,
     };
     normalize(&mut data, peak);
@@ -583,7 +711,7 @@ fn capture(sr: f32, victory: bool) -> Vec<f32> {
 /// Seamless mono loops: rendered past the end, then the tail is crossfaded
 /// into the start so filters and noise join without a seam.
 pub fn synth_loop(kind: Loop, sr: f32) -> Vec<f32> {
-    let seconds = match kind { Loop::Wind => 4.0, Loop::Spin | Loop::DiscHum | Loop::IdleChain => 1.0, _ => 2.0 };
+    let seconds = match kind { Loop::Wind | Loop::Crowd => 4.0, Loop::Spin | Loop::DiscHum | Loop::IdleChain => 1.0, _ => 2.0 };
     let len = (sr * seconds) as usize;
     let overlap = (sr * 0.08) as usize;
     let mut n = Rng(0x100F ^ kind as u32 * 131);
@@ -647,13 +775,13 @@ pub fn synth_loop(kind: Loop, sr: f32) -> Vec<f32> {
                 sat(whine * (0.4 + 0.6 * am) + air + o1.tick(110.0, sr) * 0.03, 1.4)
             }
             Loop::IdleDisc => {
-                // Held disc launcher: a throbbing electric hum centred around
-                // 200-300 Hz with a spinning whir inside it, pulsing about 10
-                // times a second.
-                let hum = f1.bp(s1.tick(176.0, sr) + s2.tick(177.1, sr), 330.0, 1.4, sr);
+                // Held disc launcher: a soft, deep electric hum centred around
+                // 90-170 Hz with a faint whir inside it and a gentle pulse
+                // about 10 times a second.
+                let hum = f1.bp(s1.tick(88.0, sr) + s2.tick(88.6, sr), 160.0, 1.4, sr);
                 let throb = 0.5 + 0.5 * (TAU * 10.0 * t).sin();
-                let whir = f2.bp(x, 420.0, 3.0, sr) * (0.3 + 0.7 * (0.5 + 0.5 * (TAU * 5.0 * t).sin()));
-                sat(hum * (0.35 + 0.65 * throb) * 1.4 + whir * 0.6, 1.8)
+                let whir = f2.bp(x, 220.0, 3.0, sr) * (0.3 + 0.7 * (0.5 + 0.5 * (TAU * 5.0 * t).sin()));
+                sat(hum * (0.75 + 0.25 * throb) * 1.4 + whir * 0.4, 1.8)
             }
             Loop::IdleChain => {
                 // Held chaingun: a quiet motor with a slow tick.
@@ -668,6 +796,15 @@ pub fn synth_loop(kind: Loop, sr: f32) -> Vec<f32> {
                 let creak = f2.bp(x, 320.0, 10.0, sr) * (grain * 40.0).clamp(-1.0, 1.0).abs() * 0.4;
                 let hum = o1.tick(45.0, sr) * 0.18;
                 settle + creak + hum
+            }
+            Loop::Crowd => {
+                // A stadium murmur: babbling mid-range voices that swell and
+                // fall on their own, over a low roomy bed.
+                let babble = 0.55 + 0.25 * (TAU * 0.5 * t).sin() + 0.2 * (TAU * 1.75 * t + 0.9).sin();
+                let voices = f1.bp(pink.next(), 650.0 + 180.0 * (TAU * 0.25 * t).sin(), 1.2, sr) * babble * 1.6;
+                let chatter = f2.bp(x, 1400.0, 1.4, sr) * (0.5 + 0.5 * (TAU * 3.0 * t).sin().abs()) * 0.5;
+                let bed = f3.lp(pink.next(), 260.0, 0.7, sr) * 0.9;
+                voices + chatter + bed
             }
         }
     }).collect();
@@ -697,6 +834,9 @@ impl Cue {
             Cue::Return => "flag-returned", Cue::CaptureWin => "capture-win", Cue::CaptureLoss => "capture-loss",
             Cue::Start => "match-start", Cue::End => "match-end",
             Cue::Splash => "splash", Cue::Wade => "wade",
+            Cue::Whistle => "whistle", Cue::Horn => "stadium-horn", Cue::Cheer => "crowd-cheer",
+            Cue::Groan => "crowd-groan", Cue::Tackle => "tackle", Cue::Bump => "body-check",
+            Cue::Pass => "pass", Cue::Catch => "catch", Cue::Laser => "laser", Cue::Rail => "rail",
         }
     }
 }
@@ -708,6 +848,7 @@ impl Loop {
             Loop::Jet => "loop-jet", Loop::Ski => "loop-ski", Loop::Wind => "loop-wind", Loop::Spin => "loop-chaingun-spin",
             Loop::Hum => "loop-generator", Loop::DiscHum => "loop-disc-flight", Loop::IdleDisc => "loop-idle-disc",
             Loop::IdleChain => "loop-idle-chaingun", Loop::IdleGrenade => "loop-idle-grenade",
+            Loop::Crowd => "loop-crowd",
         }
     }
 }
@@ -1180,9 +1321,13 @@ pub fn spatialize(l: &Listener, src: Vec3, range: f32) -> Option<(f32, f32, f32,
 pub const SOUND_SPEED: f32 = 340.0;
 
 /// Idle hum levels for the weapon in hand: present, never in the way.
-const IDLE_DISC: f32 = 0.16;
+/// The disc hum is a background texture, well under the others' motors.
+const IDLE_DISC: f32 = 0.022;
 const IDLE_CHAIN: f32 = 0.1;
 const IDLE_GRENADE: f32 = 0.1;
+/// Football crowd bed, and how much it swells near a touchdown.
+const CROWD: f32 = 0.05;
+const CROWD_SWELL: f32 = 0.12;
 
 // ----------------------------------------------------------------- director
 
@@ -1309,7 +1454,8 @@ impl Director {
                 out.push(p);
             }
             if self.weapon.is_some_and(|w| w != me.weapon) { out.push(self.local(Cue::Switch)); }
-            if me.kit_heal > 0.0 && self.last_heal <= 0.0 && self.alive { out.push(self.local(Cue::RepairKit)); }
+            // The repair tool's hum starts when its beam catches.
+            if me.repair_beam.is_some() && self.last_heal <= 0.0 && self.alive { out.push(self.local(Cue::RepairKit)); }
             if me.jetting {
                 loops[0] = LoopTarget { gain: 0.24, rate: 0.9 + (me.vel.y / 40.0).clamp(-0.1, 0.25) + speed / 220.0, pan: 0.0, cutoff: 9_000.0 };
             }
@@ -1336,9 +1482,17 @@ impl Director {
             let duck = if me.cooldown > 0.0 { 0.3 } else { 1.0 };
             loops[slot] = LoopTarget { gain: level * duck, rate: 1.0, pan: 0.0, cutoff: 6_000.0 };
         }
+        // Football: the crowd murmurs, and swells as a carrier nears an end zone.
+        if world.ball.active {
+            let excite = world.ball.carrier.and_then(|c| world.players.get(c)).map_or(0.0, |p| {
+                let d = p.pos.distance(world.end_zone(p.team.other()));
+                (1.0 - d / 120.0).clamp(0.0, 1.0)
+            });
+            loops[9] = LoopTarget { gain: CROWD + CROWD_SWELL * excite, rate: 1.0 + 0.05 * excite, pan: 0.0, cutoff: 3_000.0 + 3_000.0 * excite };
+        }
         self.was_ground = me.on_ground;
         self.last_vy = me.vel.y;
-        self.last_heal = me.kit_heal;
+        self.last_heal = if me.repair_beam.is_some() { 1.0 } else { 0.0 };
         self.weapon = Some(me.weapon);
         self.alive = me.alive;
 
@@ -1765,7 +1919,7 @@ mod tests {
         d.update(&w, &l, 1.0 / 60.0, true, &mut out);
         assert_eq!(out.iter().filter(|p| p.cue == Cue::Land).count(), 1);
         w.players[me].weapon = (w.players[me].weapon + 1) % 3;
-        w.players[me].kit_heal = 60.0;
+        w.players[me].repair_beam = Some(w.players[me].pos);
         d.update(&w, &l, 1.0 / 60.0, true, &mut out);
         d.update(&w, &l, 1.0 / 60.0, true, &mut out);
         assert_eq!(out.iter().filter(|p| p.cue == Cue::Switch).count(), 1);
@@ -1923,7 +2077,7 @@ mod tests {
         w.players[me].weapon = 0;
         w.players[me].cooldown = 0.0;
         let idle = d.update(&w, &l, 1.0 / 60.0, true, &mut out);
-        assert!(idle[6].gain > 0.1 && idle[7].gain == 0.0 && idle[8].gain == 0.0, "disc hum");
+        assert!(idle[6].gain == IDLE_DISC && idle[7].gain == 0.0 && idle[8].gain == 0.0, "disc hum");
         w.players[me].cooldown = 0.5;
         let firing = d.update(&w, &l, 1.0 / 60.0, true, &mut out);
         assert!(firing[6].gain < idle[6].gain * 0.5, "ducked while firing");

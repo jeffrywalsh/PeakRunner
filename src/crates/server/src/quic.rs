@@ -241,7 +241,7 @@ mod tests {
         let peakrunner_discovery::StatusReply::Status { status } =
             timeout(Duration::from_secs(3), read_control(&mut status_recv)).await.unwrap().unwrap();
         assert_eq!(status.name, "QUIC test");
-        assert_eq!(status.map, "Valley");
+        assert_eq!(status.map, "Valley - CTF");
         assert_eq!(status.players, 0);
         status_conn.close(0u32.into(), b"status test complete");
         let conn = timeout(Duration::from_secs(3), client.connect(address, "localhost").unwrap()).await.unwrap().unwrap();

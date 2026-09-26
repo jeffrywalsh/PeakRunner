@@ -60,6 +60,10 @@ impl GameHost {
     fn run(mut self, stop: Arc<AtomicBool>, count: Arc<AtomicU32>, status: Arc<Mutex<peakrunner_discovery::MatchStatus>>) {
         let mut game = Match::new(self.map);
         game.world.set_mode(self.rotation.current_mode());
+        // Deathmatch rounds roll random conditions: seed them from the clock.
+        let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.subsec_nanos() ^ d.as_secs() as u32);
+        game.world.reseed(seed);
+        game.world.roll_conditions();
         let mut peers: Vec<Peer> = Vec::new();
         let mut id = 0u32;
         let step = Duration::from_secs_f64(STEP as f64);
@@ -177,7 +181,13 @@ impl GameHost {
             count.store(game.world.players.iter().filter(|p| p.net_id != 0).count() as u32, Ordering::Relaxed);
             if game.tick % 3 == 0 {
                 *status.lock().expect("match status") = peakrunner_discovery::MatchStatus {
-                    name: self.name.clone(), map: peakrunner_core::terrain::info(game.world.map).name.into(),
+                    // The label carries the mode too: "Old Holler - CTF".
+                    name: self.name.clone(), map: format!("{} - {}", peakrunner_core::terrain::info(game.world.map).name,
+                        match game.world.mode { peakrunner_core::map_catalog::SupportedMode::Ctf => "CTF",
+                            peakrunner_core::map_catalog::SupportedMode::CaptureAndHold => "CnH",
+                            peakrunner_core::map_catalog::SupportedMode::Football => "Football",
+                            peakrunner_core::map_catalog::SupportedMode::Deathmatch => "DM",
+                            peakrunner_core::map_catalog::SupportedMode::TeamDeathmatch => "TDM" }),
                     players: count.load(Ordering::Relaxed), max_players: self.max_players as u32,
                     tick: game.tick, round: game.round, phase: format!("{:?}", game.phase),
                     score: game.world.score, time_left: game.world.time_left,

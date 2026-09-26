@@ -130,6 +130,7 @@ impl Online {
         let old = world.players.clone();
         let old_score = world.score;
         let old_flags = world.flags.clone();
+        let old_ball = world.ball.clone();
         let was = old.get(world.player_id).cloned();
         let input = world.input.clone();
         if !world.apply_snapshot(state, id) { return; }
@@ -155,14 +156,19 @@ impl Online {
                 for team in 0..2 {
                     // Score decreases on reset are not captures; duplicate/stale
                     // snapshots are already rejected above.
+                    let (win, loss) = if state.ball.active { ("touchdown_win,", "touchdown_loss,") }
+                        else { ("capture_win,", "capture_loss,") };
                     for _ in 0..state.score[team].saturating_sub(old_score[team]).min(3) {
-                        world.events.push_str(if team == current.team.idx() { "capture_win," } else { "capture_loss," });
+                        world.events.push_str(if team == current.team.idx() { win } else { loss });
                     }
                 }
             }
             else if old_flags.iter().zip(&state.flags).any(|(a, b)| a.carrier != b.carrier) {
                 world.events.push_str("flag,");
             }
+            let (events, spatial) = crate::football_hud::network_events(&old_ball, &state.ball, &old, &state.players, me, current.pos);
+            for e in events { world.events.push_str(e); world.events.push(','); }
+            world.spatial_sounds.extend(spatial);
             for (i, p) in state.players.iter().enumerate() {
                 if i != me && p.net_id != 0 && p.pos.distance(current.pos) < 120.0 {
                     if old.get(i).is_some_and(|o| o.net_id == p.net_id && p.shots > o.shots) {
@@ -216,7 +222,7 @@ impl Online {
         world.damage_flash = (world.damage_flash - dt * 2.8).max(0.0);
         world.trauma = (world.trauma - dt * 1.6).max(0.0);
         world.net_camera_offset *= (-dt * 18.0).exp();
-        let input = world.input.clone();
+        let mut input = world.input.clone();
         if active {
             if let Some(p) = world.players.get_mut(world.player_id) {
                 p.yaw -= input.look_stick_x * 1.8 * dt;
@@ -232,8 +238,11 @@ impl Online {
                 move_x: if active { input.move_x } else { 0.0 }, move_z: if active { input.move_z } else { 0.0 },
                 yaw: p.yaw.rem_euclid(std::f32::consts::TAU), pitch: p.pitch,
                 jump: active && input.jump, jet: active && input.jet, fire: active && input.fire,
-                interact:active && input.interact, kit:active && input.kit, weapon: input.weapon };
+                interact:active && input.interact, repair: active && input.repair, buy: if active { input.buy } else { 0 }, deploy: active && input.deploy, deploy_turn: input.deploy_turn, suicide: active && input.suicide,
+                throw: if active { input.throw } else { 0 }, throw_strength: if active { input.throw_strength } else { 0.0 }, weapon: input.weapon };
             if self.pending.len() >= 120 || !session.send_input(command) { return false; }
+            // One-shot intents go in this command only.
+            input.clear_once();
             self.pending.push_back((command, Instant::now()));
             if matches!(self.phase, Phase::Playing | Phase::Waiting) { world.predict_command(command); }
         }

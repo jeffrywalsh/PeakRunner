@@ -97,7 +97,22 @@ fn main()->eframe::Result {
     env_logger::init();
     let _local = if std::env::var_os("QA_LOCAL").is_some() {
         let map = std::env::var("QA_MAP").unwrap_or_else(|_| "Raindance".into());
-        let host = peakrunner_server::GameHost::bind("127.0.0.1:0", "HUD QA", 8, &map).unwrap();
+        let mut host = peakrunner_server::GameHost::bind("127.0.0.1:0", "HUD QA", 8, &map).unwrap();
+        // QA_MODE=football: the local server runs Football on QA_MAP (a map
+        // with a declared field, or a preview pack through PEAKRUNNER_MAP_PACK).
+        if std::env::var("QA_MODE").is_ok_and(|m| m == "football") {
+            host = host.with_rotation(&format!(r#"[{{"map":"{}","mode":"football"}}]"#, map.to_lowercase())).unwrap();
+        }
+        // QA_MODE=cnh_server: the local server runs Capture & Hold on QA_MAP.
+        if std::env::var("QA_MODE").is_ok_and(|m| m == "cnh_server") {
+            host = host.with_rotation(&format!(r#"[{{"map":"{}","mode":"capture_and_hold"}}]"#, map.to_lowercase())).unwrap();
+        }
+        // QA_MODE=team_deathmatch: the local server runs it on QA_MAP.
+        if let Ok(m) = std::env::var("QA_MODE").map(|m| m.to_lowercase()) {
+            if m == "team_deathmatch" {
+                host = host.with_rotation(&format!(r#"[{{"map":"{}","mode":"{m}"}}]"#, map.to_lowercase())).unwrap();
+            }
+        }
         std::env::set_var("PEAKRUNNER_JOIN", host.local_addr().to_string());
         Some(host.spawn())
     } else { None };

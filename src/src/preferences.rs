@@ -24,6 +24,8 @@ pub(crate) struct Preferences {
     /// Glow around lights, flames and the sun. An unknown value reads as the default.
     #[serde(deserialize_with = "lenient_bloom")]
     pub bloom: Bloom,
+    /// Keyboard bindings. Unknown or bad entries read as the defaults.
+    pub keys: crate::keybinds::Keybinds,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +68,7 @@ impl Default for Preferences {
             antialiasing: true,
             bot_difficulty: Difficulty::default(),
             bloom: Bloom::default(),
+            keys: Default::default(),
         }
     }
 }
@@ -93,6 +96,7 @@ impl Preferences {
             antialiasing: self.antialiasing,
             bot_difficulty: self.bot_difficulty,
             bloom: self.bloom,
+            keys: self.keys.clone(),
         }
     }
 }
@@ -193,6 +197,11 @@ impl Store {
         self.commit(next);
     }
 
+    pub fn set_keys(&mut self, keys: crate::keybinds::Keybinds) {
+        let next = Preferences { keys, ..self.saved.clone() };
+        self.commit(next);
+    }
+
     fn commit(&mut self, next: Preferences) {
         if next == self.saved {
             return;
@@ -229,6 +238,7 @@ fn read(path: &Path) -> io::Result<Preferences> {
     prefs.antialiasing = raw.antialiasing;
     prefs.bot_difficulty = raw.bot_difficulty;
     prefs.bloom = raw.bloom;
+    prefs.keys = raw.keys;
     Ok(prefs)
 }
 
@@ -321,8 +331,8 @@ mod tests {
         );
         assert_eq!(Store::load(path.clone()).saved.name, "Pilot 3");
         let value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        // schema, name, directory, direct, antialiasing, bot_difficulty, bloom: nothing else.
-        assert_eq!(value.as_object().unwrap().len(), 7);
+        // schema, name, directory, direct, antialiasing, bot_difficulty, bloom, keys: nothing else.
+        assert_eq!(value.as_object().unwrap().len(), 8);
         assert!(value.get("password").is_none());
         #[cfg(unix)]
         {

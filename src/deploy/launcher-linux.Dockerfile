@@ -13,6 +13,10 @@ COPY assets/maps/tower-complex ./assets/maps/tower-complex
 COPY assets/maps/cairnhold ./assets/maps/cairnhold
 COPY assets/maps/frostline ./assets/maps/frostline
 COPY assets/maps/dustreach ./assets/maps/dustreach
+COPY assets/maps/longfield ./assets/maps/longfield
+COPY assets/maps/highgoal ./assets/maps/highgoal
+COPY assets/maps/ozarktic-blast ./assets/maps/ozarktic-blast
+COPY assets/maps/reefbreak ./assets/maps/reefbreak
 ENV CARGO_BUILD_JOBS=4
 RUN cargo build --locked --release -p peakrunner-launcher --bins --examples && cargo test --locked -p peakrunner-launcher --lib
 RUN cargo build --locked --release -p peakrunner --bin peakrunner --example launch_smoke --features external-map && mkdir -p /artifacts/managed && cp target/release/peakrunner /artifacts/managed/peakrunner && cp target/release/examples/launch_smoke /artifacts/managed/launch_smoke

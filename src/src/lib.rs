@@ -3,10 +3,12 @@ mod audio;
 mod sound;
 mod flag_hud;
 mod control_hud;
+mod football_hud;
 mod flag_announce;
 mod generator_announce;
 mod world_overlay;
 mod effects;
+mod keybinds;
 mod qa_overrides;
 #[cfg(not(target_arch = "wasm32"))]
 mod online;

@@ -25,7 +25,9 @@ mod tests {
         for ok in ["raindance", "broadside-clone", "stonehenge-clone", "snowblind-clone",
             "desert-of-death-clone", "skybreak-bastions", "valley", "Valley", "Raindance",
             "Old Holler", "Tower Complex", "Cairnhold", "Frostline", "Dustreach",
-            "Skybreak Bastions", "Broadside Clone", "Desert of Death Clone"] {
+            "Skybreak Bastions", "Broadside Clone", "Desert of Death Clone",
+            // Current servers add the mode.
+            "Old Holler - CTF", "Tower Complex - CnH", "Longfield - Football"] {
             assert!(valid_map_label(ok), "{ok}");
         }
         for bad in ["", " ", " Raindance", "Raindance ", "Old  Holler", "<b>Valley</b>",

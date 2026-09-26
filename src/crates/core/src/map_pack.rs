@@ -58,6 +58,10 @@ pub struct Manifest {
     /// legacy `water` plane above stays render-only.
     #[serde(default)]
     pub water_volumes: Vec<crate::water::Volume>,
+    /// Optional football field; see `crate::sim::football`. Only maps that
+    /// declare one offer the Football mode.
+    #[serde(default)]
+    pub football: Option<crate::sim::football::Field>,
 }
 
 pub struct MapPack {
@@ -120,6 +124,18 @@ embedded_map!(
     /// Original Dustreach, built by `scripts/build-dustreach.py`. It holds the
     /// `desert-of-death-clone` rotation slot so existing server configs keep working.
     dustreach_asset, "dustreach", "Dustreach");
+embedded_map!(
+    /// Original Longfield, the Football stadium, built by `scripts/build-longfield.py`.
+    longfield_asset, "longfield", "Longfield");
+embedded_map!(
+    /// Original Highgoal, the raised-goal Football arena, built by `scripts/build-highgoal.py`.
+    highgoal_asset, "highgoal", "Highgoal");
+embedded_map!(
+    /// Original Ozarktic Blast, built by `scripts/build-ozarktic-blast.py`.
+    ozarktic_asset, "ozarktic-blast", "Ozarktic Blast");
+embedded_map!(
+    /// Original Reefbreak, the atoll, built by `scripts/build-reefbreak.py`.
+    reefbreak_asset, "reefbreak", "Reefbreak");
 
 type Embedded = fn(&str) -> Result<Vec<u8>, String>;
 
@@ -163,6 +179,22 @@ pub fn on(map: crate::terrain::MapId) -> Option<&'static MapPack> {
         crate::terrain::MapId::DesertOfDeathClone => {
             static DUST: OnceLock<MapPack> = OnceLock::new();
             Some(DUST.get_or_init(|| embedded_pack(dustreach_asset, "Dustreach")))
+        }
+        crate::terrain::MapId::Longfield => {
+            static FIELD: OnceLock<MapPack> = OnceLock::new();
+            Some(FIELD.get_or_init(|| embedded_pack(longfield_asset, "Longfield")))
+        }
+        crate::terrain::MapId::Highgoal => {
+            static ARENA: OnceLock<MapPack> = OnceLock::new();
+            Some(ARENA.get_or_init(|| embedded_pack(highgoal_asset, "Highgoal")))
+        }
+        crate::terrain::MapId::OzarkticBlast => {
+            static OZARK: OnceLock<MapPack> = OnceLock::new();
+            Some(OZARK.get_or_init(|| embedded_pack(ozarktic_asset, "Ozarktic Blast")))
+        }
+        crate::terrain::MapId::Reefbreak => {
+            static REEF: OnceLock<MapPack> = OnceLock::new();
+            Some(REEF.get_or_init(|| embedded_pack(reefbreak_asset, "Reefbreak")))
         }
         crate::terrain::MapId::StonehengeClone => {
             static CAIRN: OnceLock<MapPack> = OnceLock::new();
@@ -399,6 +431,7 @@ impl MapPack {
         crate::equipment::validate(&manifest.entities)?;
         crate::control::validate(&manifest.control_points)?;
         crate::water::validate(&manifest.water_volumes)?;
+        if let Some(field) = &manifest.football { field.validate()?; }
         Ok(Self {embedded:builtin_asset,manifest,root:root.into(),fingerprint:format!("{:x}",Sha256::digest(&json)),triangles,buckets,holes,heights})
     }
 

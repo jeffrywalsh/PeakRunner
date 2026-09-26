@@ -83,8 +83,11 @@ pub fn visible_marker(world: &World, eye: Vec3, dir: Vec3, fov: f32, rect: Rect,
         let at = project(eye, dir, fov, rect, top)?;
         return Some((Marker::Carrier { flag: flag.team, ally: p.team == viewer.team, alpha }, at));
     }
-    let tag = name_tag(viewer, world.player_id, p, i, eye).map_or(0.0, |t| t.1);
-    let marker = if p.team == viewer.team {
+    // In Deathmatch everyone is an enemy, whatever their team.
+    let ffa = world.ffa();
+    let tag = if ffa { if p.name.is_empty() { 0.0 } else { fade(distance, ENEMY_TAG_RANGE) } }
+        else { name_tag(viewer, world.player_id, p, i, eye).map_or(0.0, |t| t.1) };
+    let marker = if p.team == viewer.team && !ffa {
         if tag <= 0.0 { return None; }
         Marker::Teammate { tag }
     } else {

@@ -3,6 +3,21 @@ use serde::{Deserialize, Serialize};
 #[path = "matchplay.rs"]
 mod matchplay;
 pub use matchplay::*;
+#[path = "football.rs"]
+pub mod football;
+#[path = "bump.rs"]
+pub mod bump;
+#[path = "loadout.rs"]
+pub mod loadout;
+#[path = "deploy.rs"]
+pub mod deploy;
+#[path = "throwables.rs"]
+pub mod throwables;
+#[path = "rifles.rs"]
+pub mod rifles;
+#[path = "deathmatch.rs"]
+pub mod deathmatch;
+pub use loadout::ArmorClass;
 
 use crate::terrain::{
     height, pillars, MapId, Pillar, EMBER_HOME, EYE, GLACIER_HOME, PLAYER_RADIUS,
@@ -13,6 +28,8 @@ pub const STEP: f32 = 1.0 / 60.0;
 // Keep the existing jump thresholds, but use smooth held skiing and air control.
 const T2: f32 = 11.2 / 15.0;
 pub(crate) const GRAVITY: f32 = 20.0;
+/// Blast kick multiplier on an airborne victim (not your own disc jump).
+pub(crate) const AIR_HIT_KICK: f32 = 1.5;
 const MASS: f32 = 90.0;
 /// `jumpForce / mass` from the Classic light armor, applied along the ground normal.
 const JUMP_IMPULSE: f32 = 8.34;
@@ -82,6 +99,18 @@ pub const VM_TURN_Y: f32 = 0.18;
 pub const VM_TURN_X: f32 = -0.08;
 pub const VM_DISC_TURN_Y: f32 = 0.005;
 pub const VM_DISC_TURN_X: f32 = 0.004;
+/// The chaingun's barrel converges on the point its rounds fly to (80 m
+/// ahead on the crosshair): its muzzle sits 0.32 m right and 0.26 m below the
+/// eye, so it turns in atan(0.32 / 80) and up atan(0.26 / 80). It used the
+/// grenade launcher's 0.18 / -0.08, which pointed the barrel well left of and
+/// below the stream of rounds.
+pub const VM_CHAIN_TURN_Y: f32 = 0.004;
+pub const VM_CHAIN_TURN_X: f32 = 0.0033;
+
+/// Viewmodel yaw and pitch for each weapon slot.
+pub fn vm_turn(weapon: u8) -> (f32, f32) {
+    match weapon { 0 => (VM_DISC_TURN_Y, VM_DISC_TURN_X), 1 => (VM_CHAIN_TURN_Y, VM_CHAIN_TURN_X), _ => (VM_TURN_Y, VM_TURN_X) }
+}
 pub const VM_ANCHOR_DISC: Vec3 = Vec3::new(0.40, -0.30, -0.70);
 pub const VM_ANCHOR_BOLT: Vec3 = Vec3::new(0.32, -0.28, -0.62);
 pub const VM_MUZZLE_DISC: Vec3 = Vec3::new(0.0, 0.075, -0.79);
@@ -89,12 +118,42 @@ pub const VM_MUZZLE_BOLT: Vec3 = Vec3::new(0.0, 0.02, -0.59);
 pub(crate) const BOLT_SPEED: f32 = 420.0;
 /// Collision radius of player discs, bolts and grenades against map geometry.
 const SHOT_RADIUS: f32 = 0.12;
-/// Repair kits per life, the armor one restores, and how long it takes.
-pub const KITS_PER_LIFE: u8 = 1;
-pub const KIT_HEAL: f32 = 60.0;
-pub const KIT_SECONDS: f32 = 2.0;
+/// Jet and jump capability. CTF and Capture & Hold use the approved
+/// standard armor; Football uses `football::FOOTBALL_ARMOR`, a short strong
+/// burst. The mode travels in snapshots, so prediction uses the same one.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Armor {
+    /// Upward jet acceleration (m/s², before gravity).
+    pub jet: f32,
+    /// Horizontal jet acceleration along WASD.
+    pub side: f32,
+    /// Energy per second while jetting, and regained per second otherwise.
+    pub drain: f32,
+    pub regen: f32,
+    /// Energy needed to start or keep jetting.
+    pub min_jet: f32,
+    /// Jump impulse as a fraction of the standard jump.
+    pub jump: f32,
+    /// Upward thrust fades as climb speed nears the thrust cap.
+    pub fade_up: bool,
+    /// Horizontal speed (m/s) up to which the jet adds speed; faster motion
+    /// (skiing, a blast) is kept but not added to.
+    pub air_cap: f32,
+    /// Skiing slowdown (m/s²) on flat ground, fading on slopes. The approved
+    /// CTF movement has none; Football bleeds speed so runners must boost.
+    pub ski_drag: f32,
+}
+
+pub const STANDARD_ARMOR: Armor = Armor { jet: JET_ACCEL, side: JET_HORIZ_ACCEL, drain: ENERGY_JET,
+    regen: ENERGY_REGEN, min_jet: MIN_JET_ENERGY, jump: 1.0, fade_up: true, air_cap: JET_THRUST_CAP, ski_drag: 0.0 };
+
+/// The armor every player wears under `mode`.
+pub fn armor_for(mode: crate::map_catalog::SupportedMode) -> Armor {
+    if mode == crate::map_catalog::SupportedMode::Football { football::FOOTBALL_ARMOR } else { STANDARD_ARMOR }
+}
+
 pub fn weapon_reload(kind: u8) -> f32 {
-    match kind { 0 => DISC_RELOAD, 1 => 0.075, _ => 0.85 }
+    match kind { 0 => DISC_RELOAD, 1 => 0.075, rifles::RIFLE_SLOT => rifles::LASER_RELOAD, _ => 0.85 }
 }
 const MATCH_TIME: f32 = 8.0 * 60.0;
 const CAPTURES: u32 = 3;
@@ -141,14 +200,39 @@ pub struct Input {
     pub jet: bool,
     pub fire: bool,
     pub interact: bool,
-    /// Use a repair kit (Q). An intent: the server decides whether it applies.
-    pub kit: bool,
+    /// Repair tool held (Q). An intent: the server decides what it repairs.
+    pub repair: bool,
+    /// An inventory purchase (`loadout::BUY_*`), applied at a station.
+    pub buy: u8,
+    /// Deploy the carried pack where you aim, turned this much (radians)
+    /// from your facing.
+    pub deploy: bool,
+    pub deploy_turn: f32,
+    /// Suicide (Ctrl+K), for a quick respawn. An intent, like `kit`.
+    pub suicide: bool,
+    /// Throw a grenade or mine (`throwables::THROW_*`) at this strength (0..1).
+    pub throw: u8,
+    pub throw_strength: f32,
     pub weapon: u8,
     pub look_stick_x: f32,
     pub look_stick_y: f32,
     #[allow(dead_code)]
     pub keys_override: Option<Vec<String>>,
     jump_prev: bool,
+}
+
+impl Input {
+    /// Forget the one-shot intents (buy, deploy, suicide, throw) once a tick
+    /// has used them. The client latches a key press until then, so a press
+    /// on a frame that runs no tick isn't lost, and one press acts once.
+    pub fn clear_once(&mut self) {
+        self.buy = 0;
+        self.deploy = false;
+        self.deploy_turn = 0.0;
+        self.suicide = false;
+        self.throw = 0;
+        self.throw_strength = 0.0;
+    }
 }
 
 impl Default for Input {
@@ -160,7 +244,13 @@ impl Default for Input {
             jet: false,
             fire: false,
             interact: false,
-            kit: false,
+            repair: false,
+            buy: 0,
+            deploy: false,
+            deploy_turn: 0.0,
+            suicide: false,
+            throw: 0,
+            throw_strength: 0.0,
             weapon: 0,
             look_stick_x: 0.0,
             look_stick_y: 0.0,
@@ -196,12 +286,31 @@ pub struct Player {
     pub jetting: bool,
     pub cooldown: f32,
     pub weapon: u8,
-    /// Repair kits carried; refilled on respawn and at inventory stations.
+    /// Armor class, chosen at an inventory station (kept across deaths).
     #[serde(default)]
-    pub kits: u8,
-    /// Armor still to restore from a kit in use.
+    pub armor: ArmorClass,
+    /// Rounds left for each weapon slot; refilled on respawn and at stations.
     #[serde(default)]
-    pub kit_heal: f32,
+    pub ammo: [u16; 4],
+    /// A rifle bought at an inventory station (weapon slot 4; the laser in
+    /// light armor, the railgun in heavy). Lost on death.
+    #[serde(default)]
+    pub rifle: bool,
+    /// A deployable pack carried (bought at a station, lost on death).
+    #[serde(default)]
+    pub pack: Option<deploy::DeployKind>,
+    /// Hand grenades and mines carried (`throwables::max_throwables`).
+    #[serde(default)]
+    pub throwables: [u8; 2],
+    /// Seconds until this player can throw again.
+    #[serde(default)]
+    pub throw_clock: f32,
+    /// Where this player's repair beam lands this tick, while repairing.
+    #[serde(default)]
+    pub repair_beam: Option<Vec3>,
+    /// Football: seconds left knocked down by a tackle (no movement).
+    #[serde(default)]
+    pub stun: f32,
     bot_role: BotRole,
     bot_goal: Vec3,
     bot_think: f32,
@@ -240,13 +349,22 @@ pub struct Player {
     #[serde(skip)]
     bot_aim: Vec2,
     #[serde(skip)]
-    bot_kit: bool,
+    bot_repair: bool,
     /// Links this bot got stuck on recently; its routes avoid them.
     #[serde(skip)]
     bot_avoid: Vec<(u32, u32)>,
     /// Flyers: crossing high on jet arcs instead of following a ground route.
     #[serde(skip)]
     bot_fly: bool,
+    /// Football: pass this tick (offline bots).
+    #[serde(skip)]
+    bot_pass: bool,
+    /// Football: seconds into a leap onto a raised goal (0 = not leaping).
+    #[serde(skip)]
+    bot_leap: f32,
+    /// Football: seconds into a pounce on the enemy carrier (0 = none).
+    #[serde(skip)]
+    bot_pounce: f32,
     coyote: f32,
 }
 
@@ -303,6 +421,15 @@ pub struct World {
     pub message: String,
     pub message_t: f32,
     pub hitmarker: f32,
+    /// Client only: the local player is lining up their pack (the weapon is
+    /// replaced by the deployer), and the hologram of where it would go:
+    /// the unit and whether it fits there (None: nothing in reach).
+    pub placing: bool,
+    pub deploy_ghost: Option<(deploy::Deployable, bool)>,
+    /// Client only: zoomed through a rifle's sight (held zoom key), and the
+    /// third-person view (the camera behind your body; toggled).
+    pub zoomed: bool,
+    pub third_person: bool,
     pub damage_flash: f32,
     pub trauma: f32,
     pub kills: u32,
@@ -318,6 +445,16 @@ pub struct World {
     /// Control points, with state. Sent whole in snapshots.
     pub points: Vec<crate::control::Point>,
     control_defs: Vec<crate::control::Definition>,
+    /// Football: the ball and its play state. Inactive in other modes.
+    pub ball: football::Ball,
+    /// Deployed turrets, walls and force fields. Sent whole in snapshots.
+    pub deployables: Vec<deploy::Deployable>,
+    /// This round's time of day, weather and twist (deathmatch modes only).
+    pub conditions: crate::conditions::Conditions,
+    /// Ammo packs dropped by the dead. Sent whole in snapshots.
+    pub loot: Vec<loadout::Loot>,
+    /// Local only: seconds until an empty weapon may click again.
+    dry_clock: f32,
     /// Extra water volumes beside the map's own: QA staging (`QA_WATER`) and
     /// tests. Empty in normal play.
     pub staged_water: Vec<crate::water::Volume>,
@@ -341,6 +478,10 @@ impl Rng {
     }
 }
 
+/// Third-person camera distance behind and height above the eye.
+pub const THIRD_PERSON_BACK: f32 = 5.2;
+pub const THIRD_PERSON_UP: f32 = 0.9;
+
 pub fn camera_fov(horiz_speed: f32) -> f32 {
     // Walking/short strafe taps never change the lens. Ease into the skiing
     // boost with zero slope at both ends, keeping camera and muzzle in sync.
@@ -352,8 +493,7 @@ pub fn camera_fov(horiz_speed: f32) -> f32 {
 fn muzzle_origin(eye: Vec3, forward: Vec3, weapon: u8, fov_deg: f32) -> Vec3 {
     let anchor = if weapon == 0 { VM_ANCHOR_DISC } else { VM_ANCHOR_BOLT };
     let local = if weapon == 0 { VM_MUZZLE_DISC } else { VM_MUZZLE_BOLT };
-    let (yaw, pitch) = if weapon == 0 { (VM_DISC_TURN_Y, VM_DISC_TURN_X) }
-        else { (VM_TURN_Y, VM_TURN_X) };
+    let (yaw, pitch) = vm_turn(weapon);
     let turned = Mat4::from_rotation_y(yaw) * Mat4::from_rotation_x(pitch);
     let cam = anchor + turned.transform_point3(local);
     let widen = (fov_deg * 0.5).to_radians().tan() / (VM_FOV * 0.5).to_radians().tan();
@@ -420,6 +560,10 @@ impl World {
             message: String::new(),
             message_t: 0.0,
             hitmarker: 0.0,
+            placing: false,
+            deploy_ghost: None,
+            zoomed: false,
+            third_person: false,
             damage_flash: 0.0,
             trauma: 0.0,
             kills: 0,
@@ -433,6 +577,11 @@ impl World {
             mode: crate::map_catalog::SupportedMode::Ctf,
             points: Vec::new(),
             control_defs: Vec::new(),
+            ball: football::Ball::default(),
+            deployables: Vec::new(),
+            conditions: crate::conditions::Conditions::default(),
+            loot: Vec::new(),
+            dry_clock: 0.0,
             staged_water: crate::water::qa_staged(),
             cnh_acc: [0.0; 2],
             network_inputs: Vec::new(),
@@ -467,13 +616,17 @@ impl World {
     /// points marked `ctf_active`; Capture & Hold runs them all.
     pub fn reset_points(&mut self) {
         let cnh = self.mode == crate::map_catalog::SupportedMode::CaptureAndHold;
+        let dm = self.mode.deathmatch();
         self.points = self.control_defs.iter()
-            .map(|d| crate::control::Point::from_def(d, cnh || d.ctf_active)).collect();
+            .map(|d| crate::control::Point::from_def(d, cnh || (d.ctf_active && !dm))).collect();
         self.cnh_acc = [0.0; 2];
+        self.reset_ball();
     }
 
     pub fn set_mode(&mut self, mode: crate::map_catalog::SupportedMode) {
         self.mode = mode;
+        // Each mode has its own clock (Football plays two 15-minute halves).
+        self.time_left = self.match_time();
         self.reset_points();
     }
 
@@ -502,6 +655,7 @@ impl World {
     /// the point this team used last and points with a live enemy nearby when
     /// any other choice exists. `None` keeps the legacy single-spawn path.
     fn pick_spawn(&mut self, team: Team) -> Option<(Vec3, f32)> {
+        if self.ffa() { return self.ffa_spawn(usize::MAX); }
         let points = crate::terrain::spawn_points_on(self.map, team == Team::Ember);
         if points.is_empty() { return None; }
         let last = self.last_spawn[team.idx()];
@@ -532,18 +686,27 @@ impl World {
         let team = if ember { Team::Ember } else { Team::Glacier };
         self.players.clear();
         self.discs.clear();
+        self.deployables.clear();
+        self.loot.clear();
         self.explosions.clear();
         self.smoke.clear();
         self.score = [0, 0];
         self.kills = 0;
         self.deaths = 0;
-        self.time_left = MATCH_TIME;
+        self.time_left = self.match_time();
         self.state = MatchState::Playing;
         self.acc = 0.0;
         self.trauma = 0.0;
-        self.message = if self.mode == crate::map_catalog::SupportedMode::CaptureAndHold {
-            "DEPLOYED — HOLD THE POINTS".into() } else { "DEPLOYED — TAKE THEIR FLAG".into() };
+        self.message = match self.mode {
+            crate::map_catalog::SupportedMode::CaptureAndHold => "DEPLOYED — HOLD THE POINTS".into(),
+            crate::map_catalog::SupportedMode::Football => "FOOTBALL — CARRY IT TO THEIR END ZONE".into(),
+            crate::map_catalog::SupportedMode::Ctf => "DEPLOYED — TAKE THEIR FLAG".into(),
+            crate::map_catalog::SupportedMode::Deathmatch => "DEATHMATCH — EVERYONE IS A TARGET".into(),
+            crate::map_catalog::SupportedMode::TeamDeathmatch => "TEAM DEATHMATCH — FRAG THEIR TEAM".into(),
+        };
         self.reset_points();
+        self.roll_conditions();
+        if self.deathmatch() { self.message = format!("{} · {}", self.message, self.conditions.describe().to_uppercase()); }
         self.message_t = 3.2;
         self.events = "start".into();
 
@@ -563,12 +726,14 @@ impl World {
         let team = if ember { Team::Ember } else { Team::Glacier };
         self.players.clear();
         self.discs.clear();
+        self.deployables.clear();
+        self.loot.clear();
         self.explosions.clear();
         self.smoke.clear();
         self.score = [0, 0];
         self.kills = 0;
         self.deaths = 0;
-        self.time_left = MATCH_TIME;
+        self.time_left = self.match_time();
         self.state = MatchState::Playing;
         self.acc = 0.0;
         self.trauma = 0.0;
@@ -666,8 +831,15 @@ impl World {
         if !p.alive {
             return;
         }
-        p.yaw -= dx * SENS;
-        p.pitch = (p.pitch - dy * SENS).clamp(-1.52, 1.52);
+        // Zoomed, the view turns in proportion to the narrower lens.
+        let sens = if self.zoomed { SENS*rifles::ZOOM_FOV/76.0 } else { SENS };
+        p.yaw -= dx * sens;
+        p.pitch = (p.pitch - dy * sens).clamp(-1.52, 1.52);
+    }
+
+    /// Whether the local player is looking through a rifle's zoom.
+    pub fn zoom_active(&self) -> bool {
+        self.zoomed && self.players.get(self.player_id).is_some_and(|p| p.alive && p.weapon == rifles::RIFLE_SLOT)
     }
 
     #[allow(dead_code)]
@@ -727,8 +899,10 @@ impl World {
         }
 
         if !self.players.is_empty() {
+            let wanted = self.input.weapon;
+            let w = self.allowed_weapon(self.player_id, wanted);
+            self.players[self.player_id].weapon = w;
             let p = &mut self.players[self.player_id];
-            p.weapon = self.input.weapon.min(2);
             p.yaw -= self.input.look_stick_x * 1.8 * dt;
             p.pitch = (p.pitch - self.input.look_stick_y * 1.4 * dt).clamp(-1.52, 1.52);
         }
@@ -737,6 +911,7 @@ impl World {
         let mut n = 0;
         while self.acc >= STEP && n < 5 {
             self.physics_step();
+            self.input.clear_once();
             self.acc -= STEP;
             n += 1;
         }
@@ -747,18 +922,32 @@ impl World {
         self.time_left -= dt;
         if self.time_left <= 0.0 {
             self.time_left = 0.0;
+            if self.deathmatch() { self.end_deathmatch(); return; }
             self.state = MatchState::Ended;
             self.msg("TIME — MATCH OVER", 4.0);
             self.push_event("end");
             return;
         }
 
+        self.check_halftime();
         self.think_bots(dt);
+        let before: Vec<Vec3> = self.players.iter().map(|p| p.pos).collect();
         self.step_players(dt);
+        self.step_bumps(&before);
         self.step_discs(dt);
-        self.step_kits(dt);
-        self.step_equipment(dt);
+        self.step_repair(dt);
+        self.step_purchases();
+        self.step_deploys();
+        self.step_throws(dt);
+        self.step_deployables(dt);
+        self.step_ammo_stations();
+        self.step_loot(dt);
+        self.step_suicides();
+        // Football has no weapons, and in Deathmatch turrets can't take a
+        // side: turrets and sensors stand idle.
+        if !self.football() && !self.ffa() { self.step_equipment(dt); }
         if self.mode == crate::map_catalog::SupportedMode::Ctf { self.step_flags(dt); }
+        self.step_ball(dt);
         self.step_points(dt);
         if self.state == MatchState::Ended { return; }
         self.step_explosions(dt);
@@ -788,26 +977,14 @@ impl World {
         }
     }
 
-    /// Server-side repair kits: a use intent starts a heal when the player is
-    /// alive, has a kit and is not already healing. Taking damage does not
-    /// cancel it; death does.
-    fn step_kits(&mut self, dt:f32) {
-        if self.predicting {return;}
+    /// Ctrl+K: a living player who asks to die does, like any other death
+    /// (a carried flag or ball drops). Never predicted; the server applies it.
+    fn step_suicides(&mut self) {
+        if self.predicting { return; }
         for i in 0..self.players.len() {
-            let wants=if self.players[i].is_bot {self.players[i].bot_kit}
-                else if self.network_inputs.is_empty() {i==self.player_id && self.input.kit}
-                else {self.network_inputs.get(i).is_some_and(|c|c.kit)};
-            let p=&mut self.players[i];
-            if !p.alive {p.kit_heal=0.;continue;}
-            if wants && p.kits>0 && p.kit_heal<=0. && p.health<100. {
-                p.kits-=1;p.kit_heal=KIT_HEAL;
-                if i==self.player_id {self.events.push_str("kit,");}
-            }
-            if p.kit_heal>0. {
-                let step=(KIT_HEAL/KIT_SECONDS*dt).min(p.kit_heal);
-                p.kit_heal-=step;p.health=(p.health+step).min(100.);
-                if p.health>=100. {p.kit_heal=0.;}
-            }
+            let wants = if self.network_inputs.is_empty() { i == self.player_id && !self.players[i].is_bot && self.input.suicide }
+                else { self.network_inputs.get(i).is_some_and(|c| c.suicide) };
+            if wants && self.players[i].alive { self.kill(i, Some(i), "Suicide"); }
         }
     }
 
@@ -825,7 +1002,8 @@ impl World {
                 // proximity rejects are also part of the server trust boundary.
                 if !p.alive || p.team.idx()!=d.team as usize
                     || p.pos.distance_squared(d.pos())>(d.radius+1.5).powi(2) {continue;}
-                let input=if self.network_inputs.is_empty() {
+                // Bots restock just by reaching their inventory station.
+                let input=if p.is_bot {true} else if self.network_inputs.is_empty() {
                     if pid==self.player_id {self.input.interact} else {false}
                 } else {self.network_inputs.get(pid).is_some_and(|c|c.interact)};
                 let end=d.pos();let start=p.pos+Vec3::Y*0.7;
@@ -842,7 +1020,12 @@ impl World {
             let Some(profile)=equipment::profile(d.kind,d.weapon) else {continue};
             let (map,pillars)=(self.map,&self.pillars);
             let clear=|a:Vec3,b:Vec3|obstacle_hit(map,pillars,a,b,0.).is_none();
-            let candidates=self.players.iter().enumerate().filter(|(_,p)|p.alive && d.in_arc(p.pos))
+            // The field of fire keeps a doorway turret from shooting back into
+            // its own rooms; anyone under open sky (a roof, a ramp, the ground
+            // behind it) is fair game all round.
+            let reach=profile.sensed_range.max(profile.range)+d.radius;
+            let candidates=self.players.iter().enumerate().filter(|(_,p)|p.alive && p.pos.distance(d.pos())<=reach
+                    && (d.in_arc(p.pos) || under_open_sky(map,pillars,p.pos)))
                 .map(|(index,p)|equipment::Candidate {index,team:p.team.idx() as u8,pos:p.pos,vel:p.vel});
             let Some(hit)=equipment::acquire_target(d.pos(),d.radius,d.team,&profile,
                 sensed.contains(&d.team),candidates,clear) else {continue};
@@ -862,6 +1045,13 @@ impl World {
     /// Clear sight between two points through terrain, pillars and the map
     /// collision mesh. Client overlays use it cosmetically; positions already
     /// arrive in snapshots, so it reveals nothing new.
+    /// How far a body-width ray from `from` toward `to` gets before the map
+    /// blocks it (m). Client-side cosmetic use: where a fallen body can lie.
+    pub fn clear_distance(&self, from: Vec3, to: Vec3) -> f32 {
+        let len = from.distance(to);
+        obstacle_hit(self.map, &self.pillars, from, to, 0.25).map_or(len, |t| t * len)
+    }
+
     pub fn sight_clear(&self, from:Vec3, to:Vec3)->bool {
         obstacle_hit(self.map,&self.pillars,from,to,0.).is_none()
     }
@@ -916,10 +1106,14 @@ impl World {
             let own_home = self.flags[team.idx()].home;
             let own_carrier = self.flags[team.idx()].carrier;
 
-            // Heal: a kit when hurt, and cautious personalities fall back to
-            // an inventory station when out of kits.
-            self.players[i].bot_kit = profile.uses_kit && health < 55.0 && self.players[i].kits > 0;
-            let retreat = carrying.is_none() && self.players[i].kits == 0 && health < profile.retreat_health;
+            // Heal: the repair tool on themselves when hurt and nobody's about;
+            // cautious personalities fall back to an inventory station when
+            // badly hurt or out of disc and chaingun rounds.
+            let quiet = self.players[i].bot_memory <= 0.0;
+            self.players[i].bot_repair = profile.uses_kit && health < 70.0 && quiet
+                && self.players[i].energy > loadout::REPAIR_MIN_ENERGY + 20.0;
+            let dry = self.players[i].ammo[0] == 0 && self.players[i].ammo[1] == 0;
+            let retreat = carrying.is_none() && (health < profile.retreat_health || dry);
 
             let mut goal = enemy_flag_pos;
             let cnh_goal = if self.mode == crate::map_catalog::SupportedMode::CaptureAndHold {
@@ -931,13 +1125,21 @@ impl World {
                 if role == BotRole::Defense { pick(true).or_else(|| pick(false)) } else { pick(false).or_else(|| pick(true)) }
                     .map(|g| g + Vec3::new(jx * 0.5, 1.2, jz * 0.5))
             } else { None };
+            let football = self.football();
+            if football { self.bot_football_pass(i); }
+            let fb_goal = football.then(|| self.football_goal(i, role == BotRole::Defense, jx, jz));
             let station = retreat.then(|| crate::equipment::definitions(self.map).iter()
                 .filter(|d| d.kind == crate::equipment::Kind::Inventory && d.team as usize == team.idx())
                 .map(|d| d.pos())
                 .min_by(|a, b| a.distance(pos).total_cmp(&b.distance(pos)))).flatten();
+            let dm_goal = self.deathmatch_goal(i);
             if let Some(g) = station {
                 goal = g;
+            } else if let Some(g) = dm_goal {
+                goal = g + Vec3::new(jx * 0.4, 0.0, jz * 0.4);
             } else if let Some(g) = cnh_goal {
+                goal = g;
+            } else if let Some(g) = fb_goal {
                 goal = g;
             } else if carrying.is_some() {
                 goal = own_home;
@@ -960,7 +1162,7 @@ impl World {
             // few enemies so each think casts at most BOT_SIGHT_RAYS rays.
             let eye = pos + Vec3::Y * EYE;
             let mut near: Vec<(f32, usize)> = self.players.iter().enumerate()
-                .filter(|(j, o)| *j != i && o.alive && o.team != team)
+                .filter(|(j, o)| o.alive && self.hostile(i, team, *j))
                 .map(|(j, o)| (pos.distance(o.pos), j))
                 .filter(|(d, _)| *d < BOT_SIGHT_RANGE)
                 .collect();
@@ -975,7 +1177,7 @@ impl World {
             // was last seen for a moment instead of tracking it through walls.
             // Aggressive personalities chase farther.
             let chase = 20.0 + 60.0 * profile.aggression;
-            let hunts = (role == BotRole::Hunter || carrying.is_none()) && role != BotRole::Defense && !retreat;
+            let hunts = !football && (self.deathmatch() || (role == BotRole::Hunter || carrying.is_none()) && role != BotRole::Defense) && !retreat;
             let mut direct = false;
             match seen {
                 Some((d, j)) => {
@@ -988,6 +1190,11 @@ impl World {
                         goal = self.players[j].pos;
                         // In sight and close: fight it out without a route.
                         direct = d < 28.0;
+                    }
+                    // Football: run straight at a carrier in sight to tackle.
+                    if football && self.ball.carried_by(j) && d < 30.0 && !self.ball.carried_by(i) {
+                        goal = self.players[j].pos + self.players[j].vel * 0.2;
+                        direct = true;
                     }
                 }
                 None => {
@@ -1038,7 +1245,7 @@ impl World {
 
             // Aim at the visible target with this personality's lead and
             // error, or face its last-seen spot, or face the way it's going.
-            let aim = match seen {
+            let aim = if football { None } else { match seen {
                 Some((d, j)) => {
                     let o = &self.players[j];
                     let lead = d / DISC_SPEED * profile.lead;
@@ -1046,8 +1253,10 @@ impl World {
                 }
                 None if self.players[i].bot_memory > 0.0 => Some((self.players[i].bot_seen + Vec3::Y * 1.1, None)),
                 None => None,
-            };
-            if let Some((at, dist)) = aim {
+            } };
+            if self.players[i].bot_pass {
+                // Facing the receiver; bot_football_pass set the aim.
+            } else if let Some((at, dist)) = aim {
                 let dir = (at - (pos + Vec3::Y * 1.4)).normalize_or_zero();
                 if dir.length_squared() > 0.1 {
                     self.players[i].yaw = (-dir.x).atan2(-dir.z) + aim_err.x;
@@ -1176,6 +1385,7 @@ impl World {
             }
 
             let is_local = i == self.player_id && !self.players[i].is_bot;
+            if is_local { self.dry_clock = (self.dry_clock - dt).max(0.0); }
             let drain = crate::control::drain_at(&self.points, self.players[i].team.idx() as u8, self.players[i].pos);
             let (wish_x, wish_z, jump_held, jump_edge, fire, jet) = if let Some(input) = self.network_inputs.get(i) {
                 let edge = input.jump && !self.players[i].jump_prev;
@@ -1193,6 +1403,28 @@ impl World {
             } else {
                 self.bot_wish(i)
             };
+            // Football: a bot fires only to pass; nobody fires anything else.
+            let fire = if self.players[i].is_bot && self.football() { self.players[i].bot_pass } else { fire };
+            // A bot leaping onto a raised goal flies its own inputs.
+            let (wish_x, wish_z, jump_held, jump_edge, fire, jet) = match self.bot_leap_inputs(i, dt)
+                .or_else(|| self.bot_pounce_inputs(i, dt)) {
+                Some(flight) => flight,
+                None => (wish_x, wish_z, jump_held, jump_edge, fire, jet),
+            };
+            // A tackled player is down: no movement, jets or throws.
+            let down = self.players[i].stun > 0.0;
+            if down {
+                self.players[i].stun = (self.players[i].stun - dt).max(0.0);
+                // As in the classic mod, a tackled player gets up with an empty tank.
+                if self.players[i].stun == 0.0 { self.players[i].energy = 0.0; }
+            }
+            let (wish_x, wish_z, jump_held, jump_edge, fire, jet) = if down {
+                (0.0, 0.0, false, false, false, false)
+            } else { (wish_x, wish_z, jump_held, jump_edge, fire, jet) };
+            let carrier_walk = if self.ball.carried_by(i) { football::CARRIER_WALK } else { 1.0 };
+            let football_rules = self.football();
+            let armor = self.armor_of(i);
+            let walk_class = if self.football() { 1.0 } else { loadout::walk_scale(self.players[i].armor) };
 
             let map = self.map;
             let edge = self.map_size() - 6.0;
@@ -1250,7 +1482,7 @@ impl World {
                     0.0
                 };
                 if hop > 0.01 {
-                    let impulse = (JUMP_IMPULSE * MASS / mass) * hop;
+                    let impulse = (JUMP_IMPULSE * MASS / mass) * hop * armor.jump;
                     p.vel += nrm * impulse;
                     p.on_ground = false;
                     p.coyote = 0.0;
@@ -1261,27 +1493,28 @@ impl World {
                 let jet_cost = if wet >= crate::water::DEEP {crate::water::JET_ENERGY_FACTOR} else {1.0};
 
                 p.jetting = false;
-                if jet && p.energy >= MIN_JET_ENERGY {
+                if jet && p.energy >= armor.min_jet {
                     p.jetting = true;
                     // Look does not aim the jet. Climb stays up. WASD is the
                     // direction: it can turn a fast line, and it only adds speed
                     // up to 72 km/h.
                     let scale = MASS / mass;
                     let up_speed = p.vel.y.max(0.0);
-                    p.vel.y += JET_ACCEL * scale * jet_falloff(up_speed) * dt;
+                    let fade = if armor.fade_up { jet_falloff(up_speed) } else { 1.0 };
+                    p.vel.y += armor.jet * scale * fade * dt;
                     let before = Vec3::new(p.vel.x, 0.0, p.vel.z);
                     let before_h = before.length();
                     if wish.length_squared() > 0.04 {
                         let wish_dir = wish.normalize_or_zero();
                         let along = before.dot(wish_dir).max(0.0);
-                        let push = JET_HORIZ_ACCEL * scale * jet_falloff(along) * wish.length().min(1.0);
+                        let push = armor.side * scale * jet_falloff_to(along, armor.air_cap) * wish.length().min(1.0);
                         p.vel += wish_dir * push * dt;
                         let after = Vec3::new(p.vel.x, 0.0, p.vel.z);
                         let now = after.length();
-                        let cap = if before_h >= JET_THRUST_CAP {
+                        let cap = if before_h >= armor.air_cap {
                             before_h
                         } else {
-                            JET_THRUST_CAP
+                            armor.air_cap
                         };
                         if now > cap && now > 0.01 {
                             let s = cap / now;
@@ -1292,9 +1525,11 @@ impl World {
                     p.on_ground = false;
                     p.skiing = false;
                     p.coyote = 0.0;
-                    p.energy = (p.energy - ENERGY_JET * jet_cost * dt).max(0.0);
-                } else {
-                    p.energy = (p.energy + ENERGY_REGEN * dt).min(ENERGY_MAX);
+                    p.energy = (p.energy - armor.drain * jet_cost * dt).max(0.0);
+                } else if p.repair_beam.is_none() {
+                    // No recharge while the repair tool runs (it drains
+                    // energy, as base Tribes' repair gun did).
+                    p.energy = (p.energy + armor.regen * dt).min(ENERGY_MAX);
                 }
                 // A held control point's drain field saps its enemies' energy.
                 p.energy = (p.energy - drain * dt).max(0.0);
@@ -1303,14 +1538,14 @@ impl World {
                     // Approach the desired walking speed; releasing ski brakes
                     // progressively instead of instantly deleting route momentum.
                     let horizontal = Vec3::new(p.vel.x, 0.0, p.vel.z);
-                    let walk_max = WALK_MAX * (1.0 - crate::water::WADE_SLOW * wet);
+                    let walk_max = WALK_MAX * (1.0 - crate::water::WADE_SLOW * wet) * carrier_walk * walk_class;
                     let delta = wish * walk_max - horizontal;
                     let accel = if horizontal.length() > walk_max || wish.length_squared() < 0.01 {
                         GROUND_BRAKE
                     } else { WALK_ACCEL };
                     p.vel += delta.clamp_length_max(accel * dt);
                 } else if p.skiing {
-                    ride_ski(map, p, wish, dt);
+                    ride_ski(map, p, wish, armor.ski_drag, dt);
                 } else {
                     // Ascend-style air control: coast without drag, steer with
                     // WASD. Above walking speed, steering cannot add energy.
@@ -1364,7 +1599,7 @@ impl World {
 
                 let mut land_hit = 0.0;
                 if !was_ground && p.on_ground && impact_speed > 18.0 {
-                    if !self.predicting { p.health -= landing_damage(impact_speed); }
+                    if !self.predicting { p.health -= landing_damage(impact_speed) * if football_rules { 1.0 } else { loadout::damage_taken(p.armor) }; }
                     land_hit = 0.25;
                 }
                 land_hit
@@ -1376,9 +1611,27 @@ impl World {
             if disc_ready { self.push_event("disc_ready"); }
 
             self.collide_pillars(i);
+            self.collide_deployables(i);
 
-            if fire && self.players[i].cooldown <= 0.0 && self.players[i].alive {
-                self.shoot(i);
+            // Holding the repair tool keeps your weapon down.
+            let repairing = if self.players[i].is_bot { self.players[i].bot_repair }
+                else if let Some(input) = self.network_inputs.get(i) { input.repair }
+                else { is_local && self.input.repair };
+            if fire && !repairing && self.players[i].cooldown <= 0.0 && self.players[i].alive {
+                if self.football() { self.pass(i); }
+                // Prediction spends rounds too (the next snapshot corrects the
+                // count), so an empty weapon never predicts a shot and cycles.
+                else if self.players[i].weapon == rifles::RIFLE_SLOT {
+                    if self.take_rifle_round(i) { self.fire_rifle(i); }
+                    else if is_local && self.dry_clock <= 0.0 { self.dry_clock = 0.35; self.push_event("dry"); }
+                }
+                else if self.take_round(i, self.players[i].weapon) { self.shoot(i); }
+                else if is_local && self.dry_clock <= 0.0 {
+                    // Empty: a click every so often. It never touches the
+                    // weapon's cooldown, which the viewmodel animates from.
+                    self.dry_clock = 0.35;
+                    self.push_event("dry");
+                }
             }
 
             if !self.predicting && self.players[i].health <= 0.0 && self.players[i].alive {
@@ -1472,7 +1725,7 @@ impl World {
             let d = pos.distance(o.pos);
             let dir = look_dir(yaw, pitch);
             let to_e = ((o.pos + Vec3::Y) - (pos + Vec3::Y * 1.4)).normalize_or_zero();
-            target_in_view = o.alive && o.team != team;
+            target_in_view = o.alive && target.is_some_and(|j| self.hostile(i, team, j));
             if target_in_view && d < 78.0 && dir.dot(to_e) > 0.86 && seen_for >= profile.reaction {
                 let chest = o.pos + Vec3::Y * crate::equipment::CHEST_HEIGHT;
                 fire = obstacle_hit(self.map, &self.pillars, pos + Vec3::Y * EYE, chest, 0.0).is_none();
@@ -1607,8 +1860,9 @@ impl World {
         let aim = eye + dir * 80.0;
         let shot = (aim - origin).normalize_or_zero();
         let shot = if shot.length_squared() > 0.5 { shot } else { dir };
-        let speed = match kind { 0 => DISC_SPEED, 1 => BOLT_SPEED, _ => 48.0 };
-        let inherit = if kind == 0 { DISC_INHERIT } else { 0.75 };
+        let mortar = kind == 2 && loadout::has_mortar(p.armor);
+        let speed = match kind { 0 => DISC_SPEED, 1 => BOLT_SPEED, _ if mortar => loadout::MORTAR_SPEED, _ => 48.0 };
+        let inherit = if kind == 0 { DISC_INHERIT } else if mortar { 0.5 } else { 0.75 };
         let mut vel = shot * speed + p.vel * inherit;
         let is_bot = p.is_bot;
         let team = p.team;
@@ -1627,22 +1881,23 @@ impl World {
             vel,
             team,
             owner: i,
-            life: match kind { 0 => 5.0, 1 => 1.2, _ => 2.0 },
-            kind,
+            // A mortar shell flies until it hits something past its launch safety.
+            life: match kind { 0 => 5.0, 1 => 1.2, _ if mortar => loadout::MORTAR_LIFE, _ => 2.0 },
+            kind: if mortar { loadout::MORTAR_KIND } else { kind },
             spin: 0.0,
         });
         {
             let p = &mut self.players[i];
-            p.cooldown = weapon_reload(kind);
+            p.cooldown = if mortar { loadout::MORTAR_RELOAD } else { weapon_reload(kind) };
             if (i == self.player_id || !self.network_inputs.is_empty()) && kind != 0 {
                 p.pitch = (p.pitch + if kind == 1 { 0.002 } else { 0.012 }).min(1.5);
             }
         }
         if i == self.player_id {
             self.trauma = (self.trauma + if kind == 1 { 0.015 } else { 0.08 }).min(1.0);
-            self.push_event(match kind { 0 => "disc", 1 => "chain", _ => "grenade" });
+            self.push_event(match kind { 0 => "disc", 1 => "chain", _ if mortar => "mortar", _ => "grenade" });
         } else if self.network_inputs.is_empty() {
-            self.spatial_sounds.push((match kind { 0 => "disc", 1 => "chain", _ => "grenade" }, origin));
+            self.spatial_sounds.push((match kind { 0 => "disc", 1 => "chain", _ if mortar => "mortar", _ => "grenade" }, origin));
         }
     }
 
@@ -1658,27 +1913,37 @@ impl World {
         let mut keep = Vec::new();
         let mut bullet_hits = Vec::new();
         let mut equipment_hits = Vec::new();
+        let mut deploy_hits = Vec::new();
+        let (mut rail_hits, mut deploy_hits_rail, mut equipment_hits_rail) = (Vec::new(), Vec::new(), Vec::new());
 
         let map = self.map;
         let far = self.map_size() - 1.0;
-        for mut d in self.discs.drain(..) {
+        for mut d in std::mem::take(&mut self.discs) {
             if d.kind == 2 && self.smoke.len() < 256 {
                 self.smoke.push(SmokePuff { pos: d.pos, age: 0.0 });
             }
             d.life -= dt;
             if d.life <= 0.0 {
-                if d.kind != 1 { explode.push((d.pos, d.owner, d.kind, d.team, None)); }
+                // A mine that never settled, or one that has lain out its
+                // life, fizzles.
+                if !matches!(d.kind, 1 | throwables::MINE_KIND | rifles::LASER_KIND | rifles::RAIL_KIND) {
+                    explode.push((d.pos, d.owner, d.kind, d.team, None));
+                }
                 continue;
             }
+            // A laser beam is only a picture of a shot already resolved.
+            if d.kind == rifles::LASER_KIND { keep.push(d); continue; }
+            // A resting grenade or mine lies still.
+            if throwables::resting(&d) { keep.push(d); continue; }
             let mut dead = false;
             for _ in 0..n_sub {
                 d.spin += sdt * 42.0;
-                let grav = if d.kind == 2 { 1.0 } else { 0.0 };
+                let grav = if d.kind == 2 || d.kind == loadout::MORTAR_KIND || throwables::is_throwable(d.kind) { 1.0 } else { 0.0 };
                 d.vel.y -= GRAVITY * grav * sdt;
                 // Water: bullets and plasma fizzle out; discs and grenades
                 // slow hard but still explode on contact or fuse.
                 if crate::water::at(map, &self.staged_water, d.pos).is_some() {
-                    if d.kind == 1 || d.kind == 3 {
+                    if d.kind == 1 || d.kind == 3 || d.kind == rifles::RAIL_KIND {
                         dead = true;
                         break;
                     }
@@ -1698,14 +1963,19 @@ impl World {
                 }
                 let mut victim = None;
                 let mut equipment_victim=None;
+                // Walls stop everything; force fields stop the other team's shots.
+                let mut deploy_victim = None;
+                if let Some((t, k)) = self.deployable_hit(d.pos, next, SHOT_RADIUS, Some(d.team)) {
+                    if hit.is_none_or(|old| t < old) { hit = Some(t); deploy_victim = Some(k); }
+                }
                 for (idx,(obj,state)) in crate::equipment::definitions(map).iter().zip(&self.equipment).enumerate() {
                     if obj.team as usize==d.team.idx() || state.health<=0. {continue;}
                     if let Some(t)=segment_sphere(d.pos,next,obj.pos(),obj.radius+if d.kind==3 {0.45} else {0.}) {
-                        if hit.is_none_or(|old|t<old) {hit=Some(t);equipment_victim=Some(idx);}
+                        if hit.is_none_or(|old|t<old) {hit=Some(t);equipment_victim=Some(idx);deploy_victim=None;}
                     }
                 }
                 for (idx, pl) in self.players.iter().enumerate() {
-                    if !pl.alive || pl.team == d.team {
+                    if !pl.alive || !self.hostile(d.owner, d.team, idx) {
                         continue;
                     }
                     let c = pl.pos + Vec3::Y * 0.9;
@@ -1714,15 +1984,30 @@ impl World {
                             hit = Some(t);
                             victim = Some(idx);
                             equipment_victim=None;
+                            deploy_victim = None;
                         }
                     }
                 }
                 if let Some(t) = hit {
                     let contact = d.pos.lerp(next, t);
-                    if d.kind == 2 {
+                    if throwables::is_throwable(d.kind) {
+                        // Grenades and mines bounce off everything, players
+                        // included, and never go off on contact.
+                        let normal = if let Some(idx) = victim {
+                            (contact - (self.players[idx].pos + Vec3::Y * 0.9)).normalize_or_zero()
+                        } else if let Some(idx)=equipment_victim {
+                            (contact-crate::equipment::definitions(map)[idx].pos()).normalize_or_zero()
+                        } else { grenade_contact_normal(map, &self.pillars, contact, far, d.vel) };
+                        World::bounce_throwable(&mut d, contact, normal);
+                        if d.vel == Vec3::ZERO { break; }
+                        continue;
+                    }
+                    if d.kind == 2 || d.kind == loadout::MORTAR_KIND {
                         // Brief launch safety lets close surfaces bounce the
-                        // shell. Armed shells detonate on their next contact.
-                        if d.life <= 1.65 {
+                        // shell (grenade or mortar). Armed shells detonate on
+                        // their next contact.
+                        let armed = if d.kind == 2 { d.life <= 1.65 } else { loadout::mortar_armed(&d) };
+                        if armed {
                             explode.push((contact, d.owner, d.kind, d.team, victim));
                             dead = true;
                             break;
@@ -1738,7 +2023,12 @@ impl World {
                         d.pos = contact + normal * 0.03;
                         continue;
                     }
-                    if d.kind == 1 {
+                    if d.kind == rifles::RAIL_KIND {
+                        if let Some(k) = deploy_victim { deploy_hits_rail.push(k); }
+                        if let Some(idx) = equipment_victim { equipment_hits_rail.push(idx); }
+                        if let Some(idx) = victim { rail_hits.push((idx, d.owner)); }
+                    } else if d.kind == 1 {
+                        if let Some(k) = deploy_victim { deploy_hits.push(k); }
                         if let Some(idx)=equipment_victim {equipment_hits.push(idx);}
                         if let Some(idx) = victim { bullet_hits.push((idx, d.owner)); }
                     } else { explode.push((contact, d.owner, d.kind, d.team, victim)); }
@@ -1752,13 +2042,20 @@ impl World {
             }
         }
         self.discs = keep;
+        for k in deploy_hits { self.damage_deployable(k, 8.0); }
+        for k in deploy_hits_rail { self.damage_deployable(k, rifles::RAIL_DAMAGE); }
+        for idx in equipment_hits_rail {
+            let defs = crate::equipment::definitions(self.map);
+            if self.equipment[idx].damage(&defs[idx], rifles::RAIL_DAMAGE, true) { self.equipment_destroyed(&defs[idx]); }
+        }
+        for (idx, owner) in rail_hits { self.rifle_hit(idx, owner, rifles::RAIL_DAMAGE, "Railgun"); }
         let defs=crate::equipment::definitions(self.map);
         for idx in equipment_hits {
             if self.equipment[idx].damage(&defs[idx],8.,true) {self.equipment_destroyed(&defs[idx]);}
         }
         for (idx, owner) in bullet_hits {
             if !self.players[idx].alive { continue; }
-            self.players[idx].health -= 8.0;
+            self.hurt(idx, 8.0);
             if let Some(p) = self.players.get_mut(owner) { p.hits += 1; }
             if owner == self.player_id { self.hitmarker = 1.0; self.push_event("hit"); }
             if idx == self.player_id { self.damage_flash = 0.35; self.push_event("pain"); }
@@ -1766,6 +2063,13 @@ impl World {
                 self.kill(idx, Some(owner), if owner < self.players.len() { "Chaingun" } else { "Bullet turret" });
                 if owner == self.player_id { self.kills += 1; self.msg("FRAG", 1.1); }
             }
+        }
+        // Armed mines with an enemy in reach go off.
+        let mut tripped = self.tripped_mines();
+        tripped.sort_unstable();
+        for k in tripped.into_iter().rev() {
+            let d = self.discs.remove(k);
+            explode.push((d.pos, d.owner, d.kind, d.team, None));
         }
         for (pos, owner, kind, team, direct) in explode {
             self.explode_direct(pos, owner, kind, team, direct);
@@ -1779,7 +2083,14 @@ impl World {
 
     fn explode_direct(&mut self, pos: Vec3, owner: usize, kind: u8, team: Team, direct:Option<usize>) {
         self.blast_serial += 1;
+        // Enemy mines close by go off with it (after this blast).
+        let mut chained = self.sympathetic_mines(pos, team);
+        chained.sort_unstable();
+        let chained: Vec<Disc> = chained.into_iter().rev().map(|k| self.discs.remove(k)).collect();
         let profile=crate::combat::player_weapon_blast(kind);
+        // Equipment and deployables keep the linear T2 splash (the shield
+        // time-to-break balance); players take the concentrated blasts.
+        let structure=crate::combat::structure_blast(kind);
         let max_r = profile.map_or(if kind==3 {6.} else {9.},|p|p.radius);
         self.explosions.push(Explosion {
             pos,
@@ -1796,10 +2107,18 @@ impl World {
             if distance>max_r {continue;}
             let end=d.pos()-delta.normalize_or_zero()*d.radius.min(delta.length());
             if !splash_reaches(self.map,&self.pillars,pos,end,d) {continue;}
-            let damage=profile.map_or((dmg_core+12.)*(1.-distance/max_r),|p|p.damage(distance));
+            let damage=structure.map_or((dmg_core+12.)*(1.-distance/max_r),|p|p.damage(distance));
             if s.damage(d,damage,false) {wrecked.push(d.clone());}
         }
         for d in wrecked {self.equipment_destroyed(&d);}
+        for k in 0..self.deployables.len() {
+            let e = &self.deployables[k];
+            if e.team == team { continue; }
+            let distance = (e.center().distance(pos) - 1.0).max(0.0);
+            if distance > max_r { continue; }
+            let damage = structure.map_or((dmg_core + 12.0) * (1.0 - distance / max_r), |p| p.damage(distance));
+            self.damage_deployable(k, damage);
+        }
         let mut killed_by_player = false;
         let pid = self.player_id;
         for i in 0..self.players.len() {
@@ -1819,7 +2138,7 @@ impl World {
             // Impulse falls to zero at the blast edge, independently of T2's
             // nonzero edge damage. Use body contact distance, not the feet.
             let fall = (1.0 - d / max_r).clamp(0.0, 1.0);
-            let same = self.players[i].team == team;
+            let same = !self.hostile(owner, team, i);
             if same && i != owner {
                 continue;
             }
@@ -1831,11 +2150,14 @@ impl World {
             let dmg = if let Some(profile)=profile {profile.damage(d)*mul}
                 else if kind==3 && direct==Some(i) {55.}
                 else {(12.0 * fall + dmg_core * fall * fall) * mul};
-            self.players[i].health -= dmg;
+            self.hurt(i, dmg);
             // Kick from the blast, not from the chest, so a disc at your feet throws you up.
             let away = (body - pos).try_normalize().unwrap_or(Vec3::Y);
-            let kick = profile.map_or(if kind==3 {3.5} else {6.},|p|p.impulse/player_mass(&self.players[i]));
-            let push = away * kick * fall;
+            let heavy = if self.football() { 1.0 } else { loadout::mass_scale(self.players[i].armor) };
+            let kick = profile.map_or(if kind==3 {3.5} else {6.},|p|p.impulse/player_mass(&self.players[i])) / heavy;
+            // A mid-air hit on someone else throws them hard.
+            let airborne = if i != owner && !self.players[i].on_ground { AIR_HIT_KICK } else { 1.0 };
+            let push = away * kick * fall * airborne;
             self.players[i].vel += push;
             if push.y > 4.0 {
                 self.players[i].on_ground = false;
@@ -1858,7 +2180,9 @@ impl World {
                 if owner == pid && i != pid {
                     killed_by_player = true;
                 }
-                self.kill(i, Some(owner), match kind { 0 => "Disc launcher", 2 => "Grenade launcher", 3 => "Plasma turret", _ => "Explosion" });
+                self.kill(i, Some(owner), match kind { 0 => "Disc launcher", 2 => "Grenade launcher", 3 => "Plasma turret",
+                    loadout::MORTAR_KIND => "Mortar", throwables::GRENADE_KIND => "Grenade",
+                    throwables::MINE_KIND => "Mine", _ => "Explosion" });
             }
         }
         if killed_by_player {
@@ -1867,7 +2191,7 @@ impl World {
         }
         if owner == pid {
             self.trauma = (self.trauma + 0.12).min(1.0);
-        }
+        }        for d in chained { self.explode_direct(d.pos, d.owner, d.kind, d.team, None); }
     }
 
     fn kill(&mut self, i: usize, killer: Option<usize>, weapon: &str) {
@@ -1883,17 +2207,24 @@ impl World {
         crate::feed::push(&mut self.feed, entry);
         self.players[i].losses += 1;
         if let Some(k) = killer.filter(|&k| k != i && k < self.players.len()
-            && self.players[k].team != self.players[i].team) {
+            && self.hostile(k, self.players[k].team, i)) {
             self.players[k].frags += 1;
         }
+        self.deathmatch_frag(killer, i);
         self.players[i].health = 0.0;
-        self.players[i].kit_heal = 0.0;
-        self.players[i].respawn = 3.4;
+        self.players[i].repair_beam = None;
+        self.players[i].pack = None;
+        self.players[i].rifle = false;
+        if self.players[i].weapon == rifles::RIFLE_SLOT { self.players[i].weapon = 0; }
+        self.players[i].respawn = if self.football() { football::RESPAWN_SECONDS } else { 3.4 };
         self.players[i].jetting = false;
         self.players[i].skiing = false;
         if let Some(team) = self.players[i].carrying.take() {
             self.drop_flag(team, self.players[i].pos);
         }
+        self.ball_lost(i);
+        self.drop_loot(i);
+        self.players[i].stun = 0.0;
         if i == self.player_id {
             self.deaths += 1;
             self.msg("YOU WERE FRAGGED", 2.2);
@@ -1916,8 +2247,10 @@ impl World {
     }
 
     fn respawn(&mut self, i: usize) {
+        self.ball_lost(i);
         let ember = self.players[i].team == Team::Ember;
-        let (pos, yaw) = match self.pick_spawn(self.players[i].team) {
+        let spawn = if self.ffa() { self.ffa_spawn(i) } else { self.pick_spawn(self.players[i].team) };
+        let (pos, yaw) = match spawn {
             Some(spawn) => spawn,
             None => {
                 let mut pos = self.stand(ember);
@@ -1933,8 +2266,11 @@ impl World {
         p.health = 100.0;
         p.energy = ENERGY_MAX;
         p.alive = true;
-        p.kits = KITS_PER_LIFE;
-        p.kit_heal = 0.0;
+        p.ammo = loadout::max_ammo(p.armor);
+        p.pack = None;
+        World::restock_throwables(p);
+        p.throw_clock = 0.0;
+        p.repair_beam = None;
         p.carrying = None;
         p.yaw = yaw;
         p.pitch = 0.0;
@@ -1944,6 +2280,7 @@ impl World {
         p.on_ground = true;
         p.coyote = 0.0;
         p.jump_prev = false;
+        self.apply_twist(i);
         if i == self.player_id {
             self.msg("REDEPLOYED", 1.4);
         }
@@ -2115,6 +2452,18 @@ impl World {
             return (eye, dir, 62.0);
         }
         let p = &self.players[self.player_id];
+        // Tackled: the view leaves your eyes and orbits your body on the
+        // ground until you get up, as in the classic football mod.
+        if p.alive && p.stun > 0.0 {
+            let a = p.yaw + (football::TACKLE_STUN - p.stun) * 0.9;
+            let body = p.pos + Vec3::Y * 0.3;
+            // The classic mod orbits 8 m out.
+            let want = body + Vec3::new(a.sin() * 7.0, 3.9, a.cos() * 7.0);
+            let eye = crate::map_pack::on(self.map)
+                .and_then(|pack| pack.sweep(body, want, 0.35))
+                .map_or(want, |(t, _)| body.lerp(want, (t - 0.001).max(0.0)));
+            return (eye, (body - eye).normalize_or(Vec3::NEG_Z), 72.0);
+        }
         let shake = self.trauma * self.trauma;
         let t = self.time;
         let off = Vec3::new(
@@ -2136,7 +2485,20 @@ impl World {
             .and_then(|pack|pack.sweep(anchor,desired,0.35))
             .map_or(desired,|(t,_)|anchor.lerp(desired,(t-0.001).max(0.)));
         let dir = look_dir(p.yaw, p.pitch);
+        if self.zoom_active() { return (eye, dir, rifles::ZOOM_FOV); }
         let fov = camera_fov(spd);
+        if self.third_person && p.alive {
+            // Behind and a little above the body, pulled in off any wall.
+            let pivot = anchor + Vec3::Y*0.6;
+            let want = pivot - dir*THIRD_PERSON_BACK + Vec3::Y*THIRD_PERSON_UP;
+            let back = crate::map_pack::on(self.map).and_then(|pack| pack.sweep(pivot, want, 0.35))
+                .map_or(want, |(t, _)| pivot.lerp(want, (t-0.02).max(0.0)));
+            let back = match obstacle_hit(self.map, &self.pillars, pivot, back, 0.3) {
+                Some(t) => pivot.lerp(back, (t-0.02).max(0.0)),
+                None => back,
+            };
+            return (back, dir, fov);
+        }
         (eye, dir, fov)
     }
 
@@ -2156,17 +2518,23 @@ impl World {
         let jet = p.map(|x| if x.jetting { 1 } else { 0 }).unwrap_or(0);
         let alive = p.map(|x| if x.alive { 1 } else { 0 }).unwrap_or(0);
         let cd = p.map(|x| x.cooldown).unwrap_or(0.0);
-        let kits = p.map(|x| x.kits).unwrap_or(0);
-        let kit_heal = p.map(|x| x.kit_heal).unwrap_or(0.0);
-        let own_flag_home = self.flags.get(team).map(|f| {
-            if f.carrier.is_none() && f.pos.distance(f.home) < 3.0 {
-                1
-            } else if f.carrier.is_some() {
-                2
-            } else {
-                3
-            }
-        }).unwrap_or(1);
+        let armor = p.map(|x| if x.armor == ArmorClass::Heavy { 1 } else { 0 }).unwrap_or(0);
+        // The laser shows shots of energy left rather than rounds.
+        let laser = p.is_some_and(|x| x.weapon == rifles::RIFLE_SLOT && !rifles::is_railgun(x));
+        let ammo = p.map(|x| if laser { (x.energy/rifles::LASER_ENERGY) as u16 } else { x.ammo[x.weapon.min(3) as usize] }).unwrap_or(0);
+        let ammo_max = p.map(|x| if laser { (ENERGY_MAX/rifles::LASER_ENERGY) as u16 } else { loadout::max_ammo(x.armor)[x.weapon.min(3) as usize] }).unwrap_or(0);
+        let rifle = p.map_or(0, |x| if !x.rifle { 0 } else if rifles::is_railgun(x) { 2 } else { 1 });
+        let (grenades, mines) = p.map_or((0, 0), |x| (x.throwables[0], x.throwables[1]));
+        let throw_max = p.map_or([0, 0], |x| throwables::max_throwables(x.armor));
+        let pack = p.and_then(|x| x.pack).map_or(-1, |k| k as i32);
+        let repairing = p.is_some_and(|x| x.repair_beam.is_some()) as u8;
+        let station = if self.players.is_empty() { 0 } else if self.at_inventory(self.player_id) { 1 }
+            else if self.at_ammo_station(self.player_id) { 2 } else { 0 };
+        // 1 home, 2 carried, 3 dropped somewhere on the map.
+        let flag_state = |f: &Flag| if f.carrier.is_none() && f.pos.distance(f.home) < 3.0 { 1 }
+            else if f.carrier.is_some() { 2 } else { 3 };
+        let own_flag_home = self.flags.get(team).map(flag_state).unwrap_or(1);
+        let enemy_flag = self.flags.get(1 - team.min(1)).map(flag_state).unwrap_or(1);
         let winner = if self.state == MatchState::Ended {
             if self.score[0] > self.score[1] {
                 0
@@ -2194,7 +2562,7 @@ impl World {
                 if i == self.player_id { 1 } else { 0 }
             ));
         }
-        for f in &self.flags {
+        for f in self.flags.iter().filter(|_| self.mode == crate::map_catalog::SupportedMode::Ctf) {
             blips.push_str(&format!(
                 ";{:.0},{:.0},{},2",
                 f.pos.x,
@@ -2204,7 +2572,7 @@ impl World {
         }
         let msg = self.equipment_prompt().unwrap_or_else(||self.message.clone()).replace('"', "");
         format!(
-            "{{\"health\":{:.1},\"energy\":{:.1},\"speed\":{:.1},\"yaw\":{:.4},\"pitch\":{:.4},\"px\":{:.2},\"py\":{:.2},\"pz\":{:.2},\"ember\":{},\"glacier\":{},\"time\":{:.1},\"state\":{},\"weapon\":{},\"flag\":{},\"ownFlag\":{},\"hit\":{:.2},\"flash\":{:.2},\"msg\":\"{}\",\"kills\":{},\"deaths\":{},\"winner\":{},\"team\":{},\"onGround\":{},\"ski\":{},\"jet\":{},\"alive\":{},\"cd\":{:.2},\"events\":\"{}\",\"blips\":\"{}\",\"mapSize\":{:.0},\"kits\":{},\"kitHeal\":{:.1}}}",
+            "{{\"health\":{:.1},\"energy\":{:.1},\"speed\":{:.1},\"yaw\":{:.4},\"pitch\":{:.4},\"px\":{:.2},\"py\":{:.2},\"pz\":{:.2},\"ember\":{},\"glacier\":{},\"time\":{:.1},\"state\":{},\"weapon\":{},\"flag\":{},\"ownFlag\":{},\"hit\":{:.2},\"flash\":{:.2},\"msg\":\"{}\",\"kills\":{},\"deaths\":{},\"winner\":{},\"team\":{},\"onGround\":{},\"ski\":{},\"jet\":{},\"alive\":{},\"cd\":{:.2},\"events\":\"{}\",\"blips\":\"{}\",\"mapSize\":{:.0},\"armor\":{},\"ammo\":{},\"ammoMax\":{},\"pack\":{},\"repairing\":{},\"station\":{},\"grenades\":{},\"mines\":{},\"grenadesMax\":{},\"minesMax\":{},\"enemyFlag\":{},\"rifle\":{}}}",
             health,
             energy,
             speed,
@@ -2235,8 +2603,18 @@ impl World {
             self.events,
             blips,
             self.map_size(),
-            kits,
-            kit_heal
+            armor,
+            ammo,
+            ammo_max,
+            pack,
+            repairing,
+            station,
+            grenades,
+            mines,
+            throw_max[0],
+            throw_max[1],
+            enemy_flag,
+            rifle
         )
     }
 }
@@ -2858,6 +3236,8 @@ mod controls {
         let mut looked = World::new();
         for world in [&mut idle, &mut held, &mut looked] {
             world.start_match(true);
+            // Alone: teammates block, and a bump would skew the comparison.
+            world.players.truncate(1);
             for _ in 0..30 {
                 world.tick(STEP);
             }
@@ -3150,6 +3530,11 @@ fn segment_box(start: Vec3, end: Vec3, low: Vec3, high: Vec3) -> Option<f32> {
     Some(entry)
 }
 
+/// Whether a player at `pos` stands outdoors: nothing overhead for 40 m.
+fn under_open_sky(map: MapId, pillars: &[Pillar], pos: Vec3) -> bool {
+    obstacle_hit(map, pillars, pos + Vec3::Y * 1.5, pos + Vec3::Y * 40.0, 0.0).is_none()
+}
+
 fn obstacle_hit(map: MapId, pillars: &[Pillar], start: Vec3, end: Vec3, radius: f32) -> Option<f32> {
     let mut hit = crate::terrain::segment_hit(map, start, end, radius);
     if let Some((t,_))=crate::map_pack::on(map).and_then(|p|p.sweep(start,end,radius)) {
@@ -3364,19 +3749,52 @@ mod equipment_tests {
         }
     }
     #[test]
-    fn grenade_has_wider_splash_and_cover_blocks_both_weapons() {
+    fn grenade_shock_reaches_wider_than_its_damage_and_cover_blocks_both_weapons() {
         for kind in [0,2] {
             let mut w=world();w.players.truncate(1);w.players[0].team=Team::Glacier;
             w.players[0].pos=Vec3::new(1012.,300.,1000.);
+            w.players[0].vel=Vec3::ZERO;
             w.explode(Vec3::new(1000.,300.7,1000.),MAX_PLAYERS,kind,Team::Ember);
-            if kind==0 {assert_eq!(w.players[0].health,100.);}
-            else {assert!(w.players[0].health<80. && w.players[0].health>70.);}
+            if kind==0 {assert_eq!(w.players[0].health,100.);assert_eq!(w.players[0].vel,Vec3::ZERO);}
+            else {
+                // The concentrated shell barely scratches at 12 m, but its shock still shoves.
+                assert!(w.players[0].health<100. && w.players[0].health>99.,"{}",w.players[0].health);
+                assert!(w.players[0].vel.length()>0.5,"kicked: {}",w.players[0].vel);
+            }
             w.players[0].health=100.;w.players[0].pos=Vec3::new(829.,110.,1400.);
             w.explode(Vec3::new(832.5,110.7,1400.),MAX_PLAYERS,kind,Team::Ember);
             assert_eq!(w.players[0].health,100.,"base wall must shield kind {kind}");
         }
     }
     #[test]
+    fn roof_turrets_engage_someone_on_the_roof_behind_them() {
+        let mut w=World::new();w.set_map(MapId::Raindance);w.set_mode(crate::map_catalog::SupportedMode::Ctf);
+        w.start_match(true);w.players.truncate(1);
+        let defs=crate::equipment::definitions(MapId::Raindance);
+        let k=defs.iter().position(|d|d.id=="turret-5").unwrap();
+        let d=&defs[k];
+        // On the hall roof, 22 m behind the turret: outside its 200° field.
+        let behind=Vec3::new(1173.,121.12,479.);
+        assert!(!d.in_arc(behind),"the spot is behind the turret's field of fire");
+        w.players[0].team=Team::Glacier;w.players[0].pos=behind;w.players[0].vel=Vec3::ZERO;
+        w.step_equipment(STEP);
+        assert_eq!(w.equipment[k].contacts,1,"a player on the open roof is engaged");
+        assert!(w.equipment[k].aim.dot((behind-d.pos()).normalize())>0.9);
+    }
+
+        #[test]
+    fn a_mid_air_hit_throws_harder_than_one_on_the_ground() {
+        let kick = |airborne: bool| {
+            let mut w=world();w.players.truncate(1);w.players[0].team=Team::Glacier;
+            w.players[0].pos=Vec3::new(1003.,300.,1000.);w.players[0].vel=Vec3::ZERO;
+            w.players[0].on_ground=!airborne;
+            w.explode(Vec3::new(1000.,300.7,1000.),MAX_PLAYERS,0,Team::Ember);
+            w.players[0].vel.length()
+        };
+        let (ground, air) = (kick(false), kick(true));
+        assert!((air / ground - AIR_HIT_KICK).abs() < 0.01, "{air} vs {ground}");
+    }
+        #[test]
     fn explosive_self_damage_stays_reduced_and_team_damage_stays_off() {
         for kind in [0,2] {
             let mut w=world();w.players.truncate(1);w.players[0].pos=Vec3::new(1000.,300.,1000.);
@@ -3396,7 +3814,7 @@ mod equipment_tests {
             let mut w=world();let defs=equipment::definitions(w.map);
             let i=defs.iter().position(|d|d.kind==Kind::Sensor && d.team==0).unwrap();
             let d=&defs[i];let blast=d.pos()+Vec3::Y*(d.radius+2.);
-            let profile=crate::combat::player_weapon_blast(kind).unwrap();
+            let profile=crate::combat::structure_blast(kind).unwrap();
             w.explode(blast,MAX_PLAYERS,kind,Team::Glacier);
             // The sensor's generator shield soaks the blast before the hull.
             assert!((w.equipment[i].shield-(d.max_shield()-profile.damage(2.))).abs()<0.001);
@@ -3487,6 +3905,28 @@ mod equipment_tests {
         for (d,s) in defs.iter().zip(&mut w.equipment) {if d.kind==Kind::Generator && d.team==0 {s.health=0.;}}
         w.step_equipment(STEP);assert_eq!(w.players[0].health,before);assert!(!w.equipment[i].powered);
     }
+    /// Stand player 0 near equipment `k` where their repair tool connects,
+    /// aimed at it; true when found (the hull is left as it was).
+    pub(crate) fn aim_repair_at(w:&mut World,k:usize)->bool {
+        let d=equipment::definitions(w.map)[k].clone();
+        let at=d.pos();
+        w.input.repair=true;
+        for ring in [3.5f32,5.0,7.0] { for step in 0..16 { for lift in [0.0f32,1.5,-1.0] {
+            let a=step as f32/16.*std::f32::consts::TAU;
+            let spot=at+Vec3::new(a.sin()*ring,lift,a.cos()*ring);
+            let eye=spot+Vec3::Y*EYE;let to=at-eye;
+            let p=&mut w.players[0];p.pos=spot;p.alive=true;p.energy=ENERGY_MAX;
+            p.yaw=(-to.x).atan2(-to.z);p.pitch=(to.y/to.length()).asin().clamp(-1.5,1.5);
+            let before=w.equipment[k].health;
+            w.equipment[k].health=before.min(d.max_health()-50.);
+            let tested=w.equipment[k].health;
+            w.step_repair(STEP);
+            let worked=w.equipment[k].health>tested;
+            w.equipment[k].health=before;
+            if worked {return true;}
+        }}}
+        false
+    }
     #[test]
     fn generators_take_bullet_damage_and_can_be_repaired() {
         let mut w=world();let defs=equipment::definitions(w.map);
@@ -3494,12 +3934,16 @@ mod equipment_tests {
         let pos=defs[i].pos();w.players[0].pos=pos+Vec3::X*12.;w.players[0].team=Team::Glacier;
         w.discs.push(Disc {pos:pos+Vec3::X*9.,vel:-Vec3::X*BOLT_SPEED,owner:0,team:Team::Glacier,kind:1,life:1.,spin:0.});
         w.step_discs(STEP);assert!(w.equipment[i].health<defs[i].max_health());
-        w.equipment[i].health=0.;w.players[0].team=Team::Ember;
-        w.players[0].pos=pos+Vec3::X*3.5;w.input.interact=true;
+        // Repairs are the repair tool's: aimed at the wreck, it spends energy
+        // and brings it back online past half its hull.
+        w.equipment[i].health=0.;w.players[0].team=Team::Ember;w.step_equipment(STEP);
+        assert!(w.equipment[i].offline,"a wreck is offline");
+        assert!(aim_repair_at(&mut w,i),"somewhere to repair it from");
         let energy=w.players[0].energy;
-        w.step_equipment(STEP);assert!(w.equipment[i].health>0.);assert!(!w.equipment[i].powered,"offline until half repaired");
+        w.step_repair(STEP);w.step_equipment(STEP);
+        assert!(w.equipment[i].health>0.);assert!(!w.equipment[i].powered,"offline until half repaired");
         assert!(w.players[0].energy<energy);
-        for _ in 0..600 {w.players[0].energy=ENERGY_MAX;w.step_equipment(STEP);if w.equipment[i].powered {break;}}
+        for _ in 0..3000 {w.players[0].energy=ENERGY_MAX;w.step_repair(STEP);w.step_equipment(STEP);if w.equipment[i].powered {break;}}
         assert!(w.equipment[i].powered && w.equipment[i].health>=defs[i].max_health()*equipment::ONLINE_FRACTION);
     }
     #[test]
@@ -3617,17 +4061,22 @@ fn grenade_contact_normal(map: MapId, pillars: &[Pillar], p: Vec3, far: f32, inc
 }
 
 pub(crate) fn jet_falloff(speed: f32) -> f32 {
-    let knee = JET_THRUST_CAP * 0.8;
+    jet_falloff_to(speed, JET_THRUST_CAP)
+}
+
+/// Thrust share at `speed` for a jet that adds speed only up to `cap`.
+pub(crate) fn jet_falloff_to(speed: f32, cap: f32) -> f32 {
+    let knee = cap * 0.8;
     if speed <= knee {
         1.0
-    } else if speed >= JET_THRUST_CAP {
+    } else if speed >= cap {
         0.0
     } else {
-        1.0 - (speed - knee) / (JET_THRUST_CAP - knee)
+        1.0 - (speed - knee) / (cap - knee)
     }
 }
 
-fn ride_ski(map: MapId, p: &mut Player, wish: Vec3, dt: f32) {
+fn ride_ski(map: MapId, p: &mut Player, wish: Vec3, drag: f32, dt: f32) {
     // Gravity was already applied straight down. On frictionless snow that
     // into-ground part becomes slide. Descending multiplies that slide.
     let n = contact_normal(map,p.pos);
@@ -3641,6 +4090,12 @@ fn ride_ski(map: MapId, p: &mut Player, wish: Vec3, dt: f32) {
     let moving_down = Vec3::new(p.vel.x, 0.0, p.vel.z).dot(down) > 0.0;
     if moving_down {
         p.vel += tangent * (SKI_SLOPE_GRAVITY - 1.0) * dt;
+    }
+    if drag > 0.0 {
+        // Friction on the flat, gone on a steep face (n.y: 1 flat, 0 a wall).
+        let flatness = ((n.y - 0.8) / 0.2).clamp(0.0, 1.0);
+        let speed = p.vel.length();
+        if speed > 0.0 { p.vel *= (speed - drag * flatness * dt).max(0.0) / speed; }
     }
     let speed = p.vel.length();
     if speed > 1.2 && wish.length_squared() > 0.04 {
@@ -3698,8 +4153,13 @@ fn make_player(team: Team, bot: bool, pos: Vec3, yaw: f32, role: BotRole) -> Pla
 
         cooldown: 0.0,
         weapon: 0,
-        kits: KITS_PER_LIFE,
-        kit_heal: 0.0,
+        armor: ArmorClass::Light,
+        ammo: loadout::max_ammo(ArmorClass::Light),
+        rifle: false,
+        pack: None,
+        throwables: throwables::max_throwables(ArmorClass::Light),
+        throw_clock: 0.0,
+        repair_beam: None,
         bot_role: role,
         bot_goal: pos,
         bot_think: 0.0,
@@ -3717,9 +4177,13 @@ fn make_player(team: Team, bot: bool, pos: Vec3, yaw: f32, role: BotRole) -> Pla
         bot_saving: false,
         bot_seen_for: 0.0,
         bot_aim: Vec2::ZERO,
-        bot_kit: false,
+        bot_repair: false,
         bot_avoid: Vec::new(),
         bot_fly: false,
+        bot_pass: false,
+        bot_leap: 0.0,
+        bot_pounce: 0.0,
+        stun: 0.0,
         coyote: 0.0,
     }
 }
@@ -4854,7 +5318,7 @@ mod shield_and_kit_tests {
     /// hull, or None if the shield holds for `secs`.
     fn sustained(map:MapId,kind:Kind,weapon:u8,attackers:usize,secs:f32)->Option<f32> {
         let mut w=world(map);let i=first(map,kind);let d=equipment::definitions(map)[i].clone();
-        let blast=crate::combat::player_weapon_blast(weapon).map(|b|b.max_damage);
+        let blast=crate::combat::structure_blast(weapon).map(|b|b.max_damage);
         let reload=weapon_reload(weapon);
         let mut next:Vec<f32>=(0..attackers).map(|k|k as f32*reload/attackers as f32).collect();
         let mut t=0.;
@@ -4948,49 +5412,51 @@ mod shield_and_kit_tests {
     }
 
     #[test]
-    fn repair_kits_heal_once_per_life_and_refill_at_inventory() {
+    fn the_repair_tool_heals_slowly_on_energy_and_fixes_what_you_aim_at() {
         let mut w=world(MapId::Raindance);
         w.players[0].team=Team::Ember;w.players[0].pos=Vec3::new(1000.,300.,1000.);
-        assert_eq!(w.players[0].kits,KITS_PER_LIFE);
-        w.players[0].health=100.;w.input.kit=true;w.step_kits(STEP);
-        assert_eq!(w.players[0].kits,1,"a full-armor player keeps the kit");
-        w.players[0].health=30.;w.step_kits(STEP);
-        assert_eq!(w.players[0].kits,0);assert!(w.players[0].kit_heal>0.);
-        let mut t=STEP;
-        while t<1.0 {w.step_kits(STEP);t+=STEP;}
-        w.players[0].health-=10.;// taking damage does not cancel the heal
-        while t<KIT_SECONDS+0.2 {w.step_kits(STEP);t+=STEP;}
-        assert!((w.players[0].health-80.).abs()<0.6,"60 armor over two seconds, minus the hit: {}",w.players[0].health);
-        assert_eq!(w.players[0].kit_heal,0.);
-        let before=w.players[0].health;w.step_kits(STEP);
-        assert_eq!(w.players[0].health,before,"no kit, no heal");
-        // Refill at a powered inventory station.
-        let defs=equipment::definitions(w.map);let s=first(MapId::Raindance,Kind::Inventory);
-        let mut p=w.players[0].clone();p.team=Team::Ember;p.health=100.;p.pos=defs[s].pos();
-        equipment::service(&defs[s],&mut w.equipment[s],&mut p,true,STEP);
-        assert_eq!(p.kits,KITS_PER_LIFE);
-        // Death cancels an active heal; respawn restores the kit.
-        w.players[0].kits=1;w.players[0].health=50.;w.step_kits(STEP);
-        w.kill(0,None,"Fall");assert_eq!(w.players[0].kit_heal,0.);
-        w.players[0].kits=0;w.respawn(0);assert_eq!(w.players[0].kits,KITS_PER_LIFE);
+        w.players[0].health=30.;w.players[0].energy=ENERGY_MAX;w.input.repair=true;
+        for _ in 0..(3.0/STEP) as usize {w.step_repair(STEP);}
+        let p=&w.players[0];
+        assert!((p.health-(30.+3.*loadout::REPAIR_PLAYER)).abs()<0.5,"slow self repair: {}",p.health);
+        assert!((p.energy-(ENERGY_MAX-3.*loadout::REPAIR_ENERGY)).abs()<0.5,"it costs energy: {}",p.energy);
+        assert!(p.repair_beam.is_some());
+        // Through the whole tick the tank falls: no recharge while repairing.
+        let mut v=world(MapId::Raindance);
+        v.players[0].team=Team::Ember;v.players[0].health=40.;v.players[0].energy=ENERGY_MAX;v.input.repair=true;
+        v.state=MatchState::Playing;
+        for _ in 0..(2.0/STEP) as usize {v.physics_step();}
+        assert!(v.players[0].energy<ENERGY_MAX-2.0*loadout::REPAIR_ENERGY+1.0,"repairing drains the tank: {}",v.players[0].energy);
+        // Out of energy, it stops.
+        w.players[0].energy=1.;let before=w.players[0].health;w.step_repair(STEP);
+        assert_eq!(w.players[0].health,before);
+        // Aimed at a damaged generator of your own, it repairs the hull.
+        let defs=equipment::definitions(w.map);let g=first(MapId::Raindance,Kind::Generator);
+        w.players[0].team=if defs[g].team==0 {Team::Ember} else {Team::Glacier};
+        assert!(equipment_tests::aim_repair_at(&mut w,g),"somewhere to repair the generator from");
+        w.equipment[g].health=100.;w.players[0].energy=ENERGY_MAX;
+        for _ in 0..60 {w.step_repair(STEP);}
+        assert!((w.equipment[g].health-(100.+loadout::REPAIR_HULL)).abs()<1.0,"hull {}",w.equipment[g].health);
+        // Inventory stations restock ammunition.
+        let s=first(MapId::Raindance,Kind::Inventory);
+        let mut q=w.players[0].clone();q.team=if defs[s].team==0 {Team::Ember} else {Team::Glacier};
+        q.ammo=[0,0,0,0];q.pos=defs[s].pos();
+        equipment::service(&defs[s],&mut w.equipment[s],&mut q,true,STEP);
+        assert_eq!(q.ammo,loadout::max_ammo(q.armor));
     }
 
     #[test]
-    fn prediction_never_spends_kits_and_network_intent_is_validated() {
+    fn repairs_are_a_server_intent_never_predicted() {
         let mut m=Match::new(MapId::Raindance);let Some(a)=m.join(3,"medic") else {panic!()};
-        m.world.players[a].health=40.;
+        m.world.players[a].health=40.;m.world.players[a].energy=ENERGY_MAX;
         let mut commands=vec![None;m.world.players.len()];
-        for seq in 1..=((KIT_SECONDS/STEP) as u64+6) {
-            commands[a]=Some(Command{seq,kit:true,..Default::default()});m.step(&commands);
-        }
-        let p=&m.world.players[a];
-        assert!(p.kits==0 && p.health>95.,"the server spends one kit and heals: {} hp, {} kits",p.health,p.kits);
-        // A client predicting the same intent never touches its kit count or armor.
+        for seq in 1..=60 {commands[a]=Some(Command{seq,repair:true,..Default::default()});m.step(&commands);}
+        assert!(m.world.players[a].health>44.,"the server repairs: {}",m.world.players[a].health);
         let mut client=World::new();client.set_map(MapId::Raindance);
         assert!(client.apply_snapshot(&m.snapshot(),3));
-        let me=client.player_id;client.players[me].kits=1;client.players[me].health=40.;
-        client.predict_command(Command{seq:999,kit:true,..Default::default()});
-        assert_eq!((client.players[me].kits,client.players[me].health),(1,40.));
+        let me=client.player_id;let before=client.players[me].health;
+        client.predict_command(Command{seq:999,repair:true,..Default::default()});
+        assert_eq!(client.players[me].health,before);
     }
 }
 
@@ -5119,6 +5585,36 @@ mod bot_line_of_sight {
         assert!(w.players[0].bot_memory > 0.0, "the last-seen spot is remembered briefly");
         assert!(w.players[0].bot_seen.distance(open) < 0.5);
         assert_eq!(w.players[0].shots, shots, "no shots at the wall after sight breaks");
+    }
+
+    #[test]
+    #[ignore = "bot flag play per map (headless); run with --release -- --ignored --nocapture"]
+    fn bot_flag_play_report() {
+      for map in [MapId::Reefbreak, MapId::OzarkticBlast, MapId::StonehengeClone] {
+        let mut w = World::new();
+        w.set_map(map);
+        w.set_mode(crate::map_catalog::SupportedMode::Ctf);
+        w.start_match(true);
+        w.players[0].is_bot = true;
+        w.assign_personality(0);
+        let (mut grabs, mut carried) = (0, [false; 2]);
+        let mut left_hold = 0usize;
+        let mut kills = 0u32;
+        for t in 0..(300.0 / STEP) as usize {
+            if w.state != MatchState::Playing { break; }
+            w.physics_step();
+            for f in 0..2 {
+                let c = w.flags[f].carrier.is_some();
+                if c && !carried[f] { grabs += 1; }
+                carried[f] = c;
+            }
+            if t % 60 == 0 {
+                left_hold += w.players.iter().filter(|p| p.alive && p.pos.y < 70.0).count();
+            }
+        }
+        for p in &w.players { kills += p.frags; }
+        println!("{map:?}: {grabs} flag grabs, score {:?}, {kills} frags, {left_hold} low samples", w.score);
+      }
     }
 
     #[test]
@@ -5796,6 +6292,31 @@ mod water_tests {
                 }
                 println!("{map:?} volume {i}: deepest immersion {wettest:.2}, speed {speed:.1} m/s after 2.5 s, jet out {t:.2} s");
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod viewmodel_aim_tests {
+    use super::*;
+
+    /// The angle between a weapon's barrel and the line from its muzzle to
+    /// the point its rounds fly to (80 m ahead on the crosshair), in camera space.
+    fn barrel_error(weapon: u8) -> f32 {
+        let anchor = if weapon == 0 { VM_ANCHOR_DISC } else { VM_ANCHOR_BOLT };
+        let local = if weapon == 0 { VM_MUZZLE_DISC } else { VM_MUZZLE_BOLT };
+        let (yaw, pitch) = vm_turn(weapon);
+        let turned = Mat4::from_rotation_y(yaw) * Mat4::from_rotation_x(pitch);
+        let muzzle = anchor + turned.transform_point3(local);
+        let barrel = turned.transform_vector3(Vec3::NEG_Z);
+        barrel.angle_between(Vec3::new(0.0, 0.0, -80.0) - muzzle)
+    }
+
+    #[test]
+    fn disc_and_chaingun_barrels_point_where_their_rounds_go() {
+        for weapon in [0, 1] {
+            let err = barrel_error(weapon).to_degrees();
+            assert!(err < 0.5, "weapon {weapon} barrel is {err:.2} degrees off its rounds");
         }
     }
 }

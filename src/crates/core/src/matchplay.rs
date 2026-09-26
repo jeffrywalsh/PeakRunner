@@ -17,8 +17,22 @@ pub struct Command {
     pub fire: bool,
     #[serde(default)]
     pub interact: bool,
+    /// Repair tool held (Q). Older clients sent it as `kit`.
+    #[serde(default, alias = "kit")]
+    pub repair: bool,
     #[serde(default)]
-    pub kit: bool,
+    pub buy: u8,
+    #[serde(default)]
+    pub deploy: bool,
+    #[serde(default)]
+    pub deploy_turn: f32,
+    #[serde(default)]
+    pub suicide: bool,
+    /// Throw a grenade or mine (`throwables::THROW_*`) at this strength (0..1).
+    #[serde(default)]
+    pub throw: u8,
+    #[serde(default)]
+    pub throw_strength: f32,
     pub weapon: u8,
 }
 
@@ -27,11 +41,15 @@ impl Command {
         self.seq > 0 && self.seq < u64::MAX && self.move_x.is_finite()
             && self.move_z.is_finite() && self.yaw.is_finite() && self.pitch.is_finite()
             && self.move_x.abs() <= 1.0 && self.move_z.abs() <= 1.0
-            && self.yaw.abs() <= 100_000.0 && self.pitch.abs() <= 1.52 && self.weapon < 3
+            && self.yaw.abs() <= 100_000.0 && self.pitch.abs() <= 1.52 && self.weapon <= crate::sim::rifles::RIFLE_SLOT
+            && self.buy <= crate::sim::loadout::BUY_RIFLE
+            && self.throw <= crate::sim::throwables::THROW_MINE
+            && self.deploy_turn.is_finite() && self.deploy_turn.abs() <= std::f32::consts::TAU
+            && self.throw_strength.is_finite() && (0.0..=1.0).contains(&self.throw_strength)
     }
     fn input(self) -> Input {
         Input { move_x: self.move_x, move_z: self.move_z, jump: self.jump,
-            jet: self.jet, fire: self.fire, interact:self.interact, kit:self.kit, weapon: self.weapon, ..Input::default() }
+            jet: self.jet, fire: self.fire, interact:self.interact, repair: self.repair, buy: self.buy, deploy: self.deploy, deploy_turn: self.deploy_turn, suicide: self.suicide, throw: self.throw, throw_strength: self.throw_strength, weapon: self.weapon, ..Input::default() }
     }
 }
 
@@ -62,6 +80,15 @@ pub struct Snapshot {
     pub mode: crate::map_catalog::SupportedMode,
     #[serde(default)]
     pub points: Vec<crate::control::Point>,
+    #[serde(default)]
+    pub ball: crate::sim::football::Ball,
+    #[serde(default)]
+    pub deployables: Vec<crate::sim::deploy::Deployable>,
+    #[serde(default)]
+    pub loot: Vec<crate::sim::loadout::Loot>,
+    /// Deathmatch time of day, weather and twist; the default elsewhere.
+    #[serde(default)]
+    pub conditions: crate::conditions::Conditions,
 }
 
 pub struct Match {
@@ -87,6 +114,9 @@ impl Match {
     pub fn rotate_to_mode(&mut self, map: MapId, mode: crate::map_catalog::SupportedMode) {
         let mut next = Self::new(map);
         next.world.set_mode(mode);
+        // Carry the random stream over, so rotations don't replay a round.
+        next.world.reseed(self.world.rng_state() ^ self.tick as u32);
+        next.world.roll_conditions();
         next.tick = self.tick;
         next.round = self.round;
         next.phase = self.phase;
@@ -211,13 +241,17 @@ impl Match {
 
     fn restart(&mut self) {
         self.world.equipment=crate::equipment::fresh(self.world.map);
+        self.world.deployables.clear();
+        self.world.loot.clear();
         self.world.discs.clear();
         self.world.explosions.clear();
         self.world.smoke.clear();
         self.world.place_flags();
         self.world.reset_points();
+        self.world.reseed(self.tick as u32);
+        self.world.roll_conditions();
         self.world.score = [0, 0];
-        self.world.time_left = MATCH_TIME;
+        self.world.time_left = self.world.match_time();
         self.world.state = MatchState::Playing;
         for i in 0..MAX_PLAYERS {
             if self.world.players[i].net_id != 0 {
@@ -244,7 +278,11 @@ impl Match {
                 // An abandoned team cannot concede a string of uncontested rounds.
                 self.restart(); self.phase = Phase::Waiting; self.phase_left = 0.0;
             }
-            Phase::Waiting if both => { self.phase = Phase::Countdown; self.phase_left = 3.0; }
+            Phase::Waiting if both => {
+                self.phase = Phase::Countdown;
+                // Football keeps the classic 20 s warmup; other modes count down 3 s.
+                self.phase_left = if self.world.football() { crate::sim::football::WARMUP_SECONDS } else { 3.0 };
+            }
             Phase::Countdown if !both => { self.phase = Phase::Waiting; self.phase_left = 0.0; }
             Phase::Countdown | Phase::Intermission => {
                 self.phase_left -= STEP;
@@ -263,7 +301,9 @@ impl Match {
                 self.acks[i] = self.acks[i].max(input.seq);
                 p.yaw = input.yaw;
                 p.pitch = input.pitch;
-                p.weapon = input.weapon;
+                // The rifle slot only once a rifle has been bought (sim::rifles).
+                p.weapon = if input.weapon == crate::sim::rifles::RIFLE_SLOT && !p.rifle { p.weapon.min(2) }
+                    else { input.weapon.min(crate::sim::rifles::RIFLE_SLOT) };
             }
             self.world.network_inputs[i] = input.input();
             if self.phase == Phase::Countdown || self.phase == Phase::Intermission {
@@ -278,7 +318,7 @@ impl Match {
                     self.world.reset_points();
                 }
                 self.world.score = [0, 0];
-                self.world.time_left = MATCH_TIME;
+                self.world.time_left = self.world.match_time();
                 self.world.state = MatchState::Playing;
             } else if self.world.state == MatchState::Ended {
                 self.phase = Phase::Intermission;
@@ -293,7 +333,8 @@ impl Match {
             acks: self.acks.clone(), discs: self.world.discs.clone(),
             explosions: self.world.explosions.clone(), smoke: self.world.smoke.clone(),
             flags: self.world.flags.clone(), score: self.world.score, time_left: self.world.time_left,
-            mode: self.world.mode, points: self.world.points.clone() }
+            mode: self.world.mode, points: self.world.points.clone(), ball: self.world.ball.clone(), deployables: self.world.deployables.clone(), loot: self.world.loot.clone(),
+            conditions: self.world.conditions }
     }
 
     pub fn snapshot_for(&self, slot: usize) -> Snapshot {
@@ -367,6 +408,10 @@ impl World {
         self.flags = snapshot.flags.clone();
         self.mode = snapshot.mode;
         self.points = snapshot.points.clone();
+        self.ball = snapshot.ball.clone();
+        self.deployables = snapshot.deployables.clone();
+        self.loot = snapshot.loot.clone();
+        self.conditions = snapshot.conditions;
         self.score = snapshot.score;
         self.time_left = snapshot.time_left;
         self.state = if snapshot.phase == Phase::Intermission { MatchState::Ended } else { MatchState::Playing };
@@ -390,7 +435,7 @@ impl World {
         self.input.jump_prev = self.players[slot].jump_prev;
         self.players[slot].yaw = command.yaw;
         self.players[slot].pitch = command.pitch;
-        self.players[slot].weapon = command.weapon;
+        self.players[slot].weapon = self.allowed_weapon(slot, command.weapon);
         let discs = self.discs.len();
         self.predicting = true;
         self.step_players(STEP);
@@ -618,7 +663,7 @@ mod tests {
         assert!(game.world.players[0].energy < ENERGY_MAX);
         let invalid = [Command { seq: 1, move_x: 2.0, ..Command::default() },
             Command { seq: 1, yaw: f32::NAN, ..Command::default() },
-            Command { seq: 1, weapon: 3, ..Command::default() }];
+            Command { seq: 1, weapon: 4, ..Command::default() }];
         for c in invalid { assert!(!c.valid()); }
         assert!(serde_json::from_str::<Command>(r#"{"seq":1,"position":[999,999,999]}"#).is_err());
     }

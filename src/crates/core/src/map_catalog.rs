@@ -16,10 +16,50 @@ pub struct MapDescriptor {
     pub resolution: u16,
 }
 
-/// Only implemented rules can be advertised. DM/TDM belong to later branches.
+/// Only implemented rules can be advertised. Deathmatch is every player for
+/// themselves; Team Deathmatch scores each enemy frag for the team.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SupportedMode { #[default] Ctf, CaptureAndHold }
+pub enum SupportedMode { #[default] Ctf, CaptureAndHold, Football, Deathmatch, TeamDeathmatch }
+
+impl SupportedMode {
+    pub const ALL: [SupportedMode; 5] = [SupportedMode::Ctf, SupportedMode::CaptureAndHold, SupportedMode::Football,
+        SupportedMode::Deathmatch, SupportedMode::TeamDeathmatch];
+    pub fn label(self) -> &'static str {
+        match self { SupportedMode::Ctf => "Capture the Flag", SupportedMode::CaptureAndHold => "Capture & Hold", SupportedMode::Football => "Football",
+            SupportedMode::Deathmatch => "Deathmatch", SupportedMode::TeamDeathmatch => "Team Deathmatch" }
+    }
+    pub fn key(self) -> &'static str {
+        match self { SupportedMode::Ctf => "ctf", SupportedMode::CaptureAndHold => "capture_and_hold", SupportedMode::Football => "football",
+            SupportedMode::Deathmatch => "deathmatch", SupportedMode::TeamDeathmatch => "team_deathmatch" }
+    }
+    /// Modes the menus and server rotations offer. Free-for-all Deathmatch
+    /// is held back for now.
+    pub fn offered(self) -> bool { self != SupportedMode::Deathmatch }
+    /// Either deathmatch mode: frags score, no flags, random conditions.
+    pub fn deathmatch(self) -> bool { matches!(self, SupportedMode::Deathmatch | SupportedMode::TeamDeathmatch) }
+}
+
+/// Whether `map` can host `mode`: stadiums (a manifest football field) host
+/// Football; other maps host CTF, and Capture & Hold when they place at
+/// least two capture points. Team Deathmatch runs on every other map (the
+/// stadiums only by an explicit rotation entry). Free-for-all Deathmatch is
+/// implemented but not offered yet (`OFFERED`).
+pub fn supports(map: crate::terrain::MapId, mode: SupportedMode) -> bool {
+    let pack = crate::map_pack::on(map);
+    let stadium = pack.is_some_and(|p| p.manifest.football.is_some());
+    match mode {
+        SupportedMode::Football => stadium,
+        SupportedMode::Ctf => !stadium,
+        SupportedMode::CaptureAndHold => !stadium && pack.is_some_and(|p| p.manifest.control_points.len() >= 2),
+        SupportedMode::Deathmatch | SupportedMode::TeamDeathmatch => !stadium,
+    }
+}
+
+/// Every listed map that hosts `mode`, in menu order.
+pub fn maps_for(mode: SupportedMode) -> Vec<crate::terrain::MapId> {
+    crate::terrain::maps().into_iter().map(|m| m.id).filter(|&id| supports(id, mode)).collect()
+}
 
 pub fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 48
@@ -73,7 +113,7 @@ mod tests {
         let listed=terrain::maps();
         let slots=[(MapId::Raindance,"raindance"),(MapId::BroadsideClone,"broadside-clone"),
             (MapId::StonehengeClone,"stonehenge-clone"),(MapId::SnowblindClone,"snowblind-clone"),
-            (MapId::DesertOfDeathClone,"desert-of-death-clone")];
+            (MapId::DesertOfDeathClone,"desert-of-death-clone"),(MapId::Longfield,"longfield"),(MapId::Highgoal,"highgoal"),(MapId::OzarkticBlast,"ozarktic-blast"),(MapId::Reefbreak,"reefbreak")];
         assert_eq!(listed.len(),slots.len());
         for (id,key) in slots {
             assert_eq!(MapId::parse(key),Some(id));
@@ -90,7 +130,7 @@ mod tests {
     fn identities_are_safe_and_unambiguous() {
         for id in [crate::terrain::MapId::Valley, crate::terrain::MapId::Raindance,
             crate::terrain::MapId::BroadsideClone, crate::terrain::MapId::StonehengeClone,
-            crate::terrain::MapId::SnowblindClone, crate::terrain::MapId::DesertOfDeathClone] {
+            crate::terrain::MapId::SnowblindClone, crate::terrain::MapId::DesertOfDeathClone, crate::terrain::MapId::Longfield, crate::terrain::MapId::Highgoal, crate::terrain::MapId::OzarkticBlast, crate::terrain::MapId::Reefbreak] {
             assert_eq!(crate::terrain::MapId::parse(id.key()), Some(id));
             assert!(valid_id(id.key()));
         }
@@ -117,10 +157,20 @@ mod tests {
         let mut d = descriptor(); d.schema = 2; assert!(d.validate().is_err());
         let mut d = descriptor(); d.revision = 0; assert!(d.validate().is_err());
         let mut value = serde_json::to_value(descriptor()).unwrap();
-        value["modes"] = serde_json::json!(["deathmatch"]);
+        value["modes"] = serde_json::json!(["gungame"]);
         assert!(serde_json::from_value::<MapDescriptor>(value).is_err());
         let mut value = serde_json::to_value(descriptor()).unwrap();
         value["script"] = serde_json::json!("execute-me");
         assert!(serde_json::from_value::<MapDescriptor>(value).is_err());
+    }
+
+    #[test]
+    fn each_mode_lists_only_maps_that_host_it() {
+        use crate::terrain::MapId;
+        let ctf = maps_for(SupportedMode::Ctf);
+        assert_eq!(ctf, vec![MapId::Raindance, MapId::BroadsideClone, MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone, MapId::OzarkticBlast, MapId::Reefbreak]);
+        assert_eq!(maps_for(SupportedMode::Football), vec![MapId::Longfield, MapId::Highgoal]);
+        let cnh = maps_for(SupportedMode::CaptureAndHold);
+        assert!(!cnh.is_empty() && cnh.iter().all(|m| ctf.contains(m)));
     }
 }

@@ -91,6 +91,11 @@ Keys kept for rotation compatibility:
 | `snowblind-clone` (SnowblindClone) | Frostline | Polar stations on steep snow, basement generator, two-level void before the flag, ski cavern under the beacon ridge, CTF-active Beacon capture point with drain field, meltwater pools | `docs/frostline.md` |
 | `desert-of-death-clone` (DesertOfDeathClone) | Dustreach | Sandstone citadels, cistern generator, storehouse hall with mezzanine, cross-map sewer with flank and midfield shafts, Sun Gate, oases | `docs/dustreach.md` |
 
+Two football maps, **Longfield** (`longfield`, stadium) and **Highgoal**
+(`highgoal`, arena with goals on 7 m platforms), offer only the Football
+mode and aren't in the default rotation (`docs/football.md`). Football uses
+its own half-second-burst armor; CTF movement is unchanged.
+
 Valley remains an internal test fixture. Skybreak Bastions is removed from
 source; a `skybreak-bastions` rotation entry fails at startup with a clear
 message. Reference studies (Broadside, Stonehenge, Snowblind, Desert of Death)
@@ -132,6 +137,33 @@ design intent — never copied (§8).
   Ace, Hawk (flyer); difficulty Easy/Normal/Hard/Mixed (preference
   `bot_difficulty`). Bots are offline-only; no protocol impact.
 
+### Football and body checks (`docs/football.md`)
+- **Body checks, all modes** (`bump.rs`, `bump1`): enemies collide and trade
+  momentum along the hit, so a blocker stops a flag carrier. Light damage
+  (≤ 20), none for walking bumps. Teammates block too, without harm.
+- **Football** (`football.rs`, `ball1`): no weapons; fire passes (auto-power);
+  hits follow the classic mod exactly (velocity swap; the slower player,
+  rounded to whole m/s, loses, both on a tie; 2–14 m/s fumbles, 15+ tackles:
+  30 damage, 2 s down with an 8 m orbit camera, empty tank after); touchdowns
+  into end-zone spheres; half time; first to 5. Half-second jet armor. Needs a manifest `football`
+  field; Longfield is the stadium. Stadium sounds (whistle, horn, crowd
+  cheer/groan/murmur, tackle, pass, catch), gold PLAY feed lines, ball HUD.
+- Studied privately: the classic football stadiums and the Tribes 1 football
+  mod scripts (rules only; nothing copied).
+
+### Loadouts (`docs/loadouts.md`, `loadout1:throw1`)
+- Light and heavy armor (heavy: half damage, 0.55x walk, weaker longer jet,
+  2x mass, bigger model; its jet barely climbs and adds speed only to 36 km/h,
+  so skiing is its speed), limited ammo refilled at inventories, the mortar
+  (heavy's third weapon: green, 65 m/s, explodes on impact after a 0.35 s
+  bounce-only launch safety, 20 m blast), the repair tool (hold
+  Q, 10 energy/s, slow), an inventory screen (E at a station; Armor, Weapons,
+  Packs, Miscellany) and deployables (B: turret 4, wall 6, force field 4, ammo
+  station 5 per team). Hand grenades (G) and mines (M), wound up by holding,
+  after base Tribes; mines trip on enemies only. Empty weapons don't cycle or
+  show rounds. Rebindable keys (Controls screen) saved in preferences. Menu: mode then map. Server
+  rotation playlists `ctf_cnh` / `football`; status labels carry the mode.
+
 ### HUD and client
 - World-space hit bars (shield strip + hull) above generators/turrets/sensors;
   OFFLINE/DESTROYED states.
@@ -139,6 +171,17 @@ design intent — never copied (§8).
 - Red enemy arrows ≤250 m, line of sight only; flag-carrier marker visible to
   1,500 m through terrain; centred flag announcements (derived client-side,
   now also reach online players); generator announcements.
+- Tribes-like armor (`player_model.rs`): raised shoulder pads, angular helmet
+  with faceplate and crest, broad chest over a narrow waist, twin-tube jetpack.
+  Three-joint legs (hip, knee, ankle with foot frames) and arms (shoulder,
+  elbow, wrist frames). On the ground the legs run, skiing included (stride
+  rate follows speed); in the air, jetting or not, they dangle. Hands grip the
+  weapon or the ball (`Hold`) or swing free; `arm_chain` poses an arm from joint
+  angles for future actions (pointing, dancing, emotes). A downed body falls
+  the way it was knocked, only as far as the map leaves room (never through
+  a wall or pillar).
+- Chaingun viewmodel converges on its rounds' aim point (`vm_turn`; it used
+  the grenade launcher's 10 degree turn-in). Ctrl+K suicide (`kill1`).
 - Articulated player models (`player_model.rs`), held weapons, LOD beyond 80 m,
   landing squash and weapon-switch animation derived client-side.
 - Weapons: rebuilt chaingun/grenade launcher, polished disc launcher,
@@ -170,7 +213,19 @@ Tuned against a **private** Tribes 2 reference extracted to
 (desktop only).
 
 ### Compatibility marker
-`{PROTOCOL}:equipment5:blast3:chat2:names1:ping1:fov1:muzzle1:kit1:cnh1:arc1:water1:maps6:<raindance>:<tower-complex>:<cairnhold>:<frostline>:<dustreach>`
+`{PROTOCOL}:equipment5:blast3:chat2:names1:ping1:fov1:muzzle1:kit1:cnh1:arc2:water1:bump1:ball1:kill1:loadout1:throw1:rifle1:dm1:maps9:<8 map fingerprints>`
+(updated 2026-09-26; see `crates/protocol/src/lib.rs` for the order and a
+note per segment).
+
+### Deathmatch, conditions and football fixes (2026-09-26, uncommitted)
+- **Deathmatch and Team Deathmatch** on every map, with random per-round
+  conditions: see `docs/deathmatch.md`.
+- **Football** (see `docs/football.md`):
+  - Fumbles now stick: the fumbler can't re-catch for 0.75 s.
+  - A throw aimed straight up leans 25° forward.
+- **Footsteps** are 75% quieter (peak 0.32 → 0.08) and deeper (a 78 Hz
+  thump, a 340 Hz scuff, a faint clink).
+- **The repair tool** drains energy with no recharge while it runs.
 Each map fingerprint changes whenever its `map.json` changes. Bump a named
 segment in the existing style whenever wire layout or authoritative sim
 behaviour changes; client-only visuals and offline-only bot changes don't.
@@ -364,6 +419,9 @@ agents (they inherit the conversation context). Patterns that worked:
 - Old Holler blue-side bots slow on interior stairs; bots don't use every
   shaft/tunnel optimally.
 - C&H mode tuning (scores, point placement) after play.
+- Football playtest: tackle speeds, carrier slowdown, pass feel, score target;
+  more stadiums; player out-of-bounds damage. The user also has a CrossOver
+  WinXP bottle with Tribes 1 mods (incl. an RPG mod) to study next.
 - Selected-map-only admission and independent pack updates (older roadmap).
 - Scorch decals (fixed 2026-09-24): the flattened disc lost its faces to the
   smoke pass's facing fade, leaving a ~1 cm rim. Scorch now uses the flat

@@ -130,9 +130,12 @@ map pack has a `facing` (horizontal direction, toward the enemy flag) and an
 `acquire_target`, `step_equipment` drops candidates the turret may not engage
 (`Definition::in_arc`): anything inside `ALL_ROUND_RANGE` (15 m horizontally)
 is fair game in every direction, so a turret still guards its own bridge or
-ramp; beyond that only targets inside the arc count. Packs without `facing`
-keep 360-degree coverage. This is a simulation change, so the compatibility
-marker gains `arc1`.
+ramp; beyond that only targets inside the arc count, unless they stand under
+open sky (nothing overhead for 40 m): the arc protects the turret's own rooms,
+not the roof, ramps and ground around it. Before `arc2`, a player on the hall
+roof more than 15 m behind an Old Holler roof turret was never engaged.
+Packs without `facing` keep 360-degree coverage. These are simulation
+changes, so the compatibility marker carries `arc2` (was `arc1`).
 
 ## Equipment shields and hit bars
 

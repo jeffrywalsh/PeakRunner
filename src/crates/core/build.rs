@@ -3,7 +3,7 @@
 //! every payload against the manifest's SHA-256 of the uncompressed bytes.
 use std::path::Path;
 
-const MAPS: [&str; 5] = ["raindance", "tower-complex", "cairnhold", "frostline", "dustreach"];
+const MAPS: [&str; 9] = ["raindance", "tower-complex", "cairnhold", "frostline", "dustreach", "longfield", "highgoal", "ozarktic-blast", "reefbreak"];
 const PAYLOADS: [&str; 8] = ["vertices.bin", "collision.bin", "height.bin", "weights.rgba", "textures.rgba", "ambient.f32", "shade.rg", "props.bin"];
 /// Payloads a pack may omit; the manifest decides whether they are read.
 const OPTIONAL: [&str; 1] = ["props.bin"];

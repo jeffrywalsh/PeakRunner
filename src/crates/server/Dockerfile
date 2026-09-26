@@ -7,6 +7,10 @@ COPY assets/maps/tower-complex ./assets/maps/tower-complex
 COPY assets/maps/cairnhold ./assets/maps/cairnhold
 COPY assets/maps/frostline ./assets/maps/frostline
 COPY assets/maps/dustreach ./assets/maps/dustreach
+COPY assets/maps/longfield ./assets/maps/longfield
+COPY assets/maps/highgoal ./assets/maps/highgoal
+COPY assets/maps/ozarktic-blast ./assets/maps/ozarktic-blast
+COPY assets/maps/reefbreak ./assets/maps/reefbreak
 COPY crates ./crates
 RUN cargo build --locked --release -p peakrunner-server --bin peakrunner-server
 

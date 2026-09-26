@@ -7,7 +7,10 @@ services:
     environment:
       PEAKRUNNER_MATCH_NAME: Springdale Central
       PEAKRUNNER_MATCH_MAP: Raindance
-      PEAKRUNNER_MATCH_ROTATION: '[{"map":"raindance","mode":"ctf"},{"map":"broadside-clone","mode":"ctf"},{"map":"stonehenge-clone","mode":"ctf"},{"map":"snowblind-clone","mode":"ctf"},{"map":"desert-of-death-clone","mode":"ctf"}]'
+      # Every CTF map in CTF, then every Capture & Hold map in Capture & Hold.
+      # A football server uses '[{"playlist":"football"}]'. Explicit
+      # {"map":...,"mode":...} entries still work and mix with playlists.
+      PEAKRUNNER_MATCH_ROTATION: '[{"playlist":"ctf_cnh"}]'
       PEAKRUNNER_MATCH_PASSWORD: ${PEAKRUNNER_MATCH_PASSWORD:-}
     ports:
       - "7777:7777/udp"

@@ -34,7 +34,7 @@ function renderHosts() {
   for(const host of hosts) {
     const card=el('button',undefined,'host-card'); card.setAttribute('aria-label',`View ${host.name} server details`);
     const img=el('img'); img.src='/assets/raindance.png'; img.alt=''; img.width=180;img.height=136;
-    const info=el('span'), status=detailsCache.get(host.id);info.append(el('span',host.name,'host-name'),el('span',`${host.map} · Capture the flag · ${status?.phase || 'Live host'}`,'host-meta'),el('span',`Build ${status?.game_version || 'not reported'}`,'host-meta'));
+    const info=el('span'), status=detailsCache.get(host.id);info.append(el('span',host.name,'host-name'),el('span',`${status?.map || host.map} · ${status?.phase || 'Live host'}`,'host-meta'),el('span',`Build ${status?.game_version || 'not reported'}`,'host-meta'));
     const count=el('span',undefined,'host-occupancy');count.append(el('strong',`${host.players}/${host.max_players}`),el('small','View match ↗'));
     card.append(img,info,count);card.addEventListener('click',()=>{selected=host.id;selectedPlayer=null;showHost();dialog.showModal();});root.append(card);
   }

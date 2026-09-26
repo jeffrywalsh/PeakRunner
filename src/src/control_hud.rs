@@ -1,7 +1,7 @@
-//! Capture & Hold HUD: world rings at control points (coloured by owner, with a
-//! capture-progress arc), a capture bar while you stand in a ring, a drain-field
-//! warning, edge markers for off-screen points in Capture & Hold, and point
-//! announcements. Everything comes from snapshot state; announcements diff
+//! Capture & Hold HUD: point labels (the beacon light on each point shows its
+//! owner and progress; there are no ground rings), a capture bar while you stand
+//! in a point, a drain-field warning, edge markers for off-screen points in
+//! Capture & Hold, and point announcements. Everything comes from snapshot state; announcements diff
 //! owners between frames, so replayed snapshots announce nothing.
 use egui::{Align2, Color32, FontId, Pos2, Stroke, Vec2};
 use glam::Vec3;
@@ -23,7 +23,7 @@ pub fn team_color(team: Option<u8>) -> Color32 {
 
 fn team_name(team: u8) -> &'static str { if team == 0 { "Ember" } else { "Glacier" } }
 
-fn fade(c: Color32, a: f32) -> Color32 {
+pub(crate) fn fade(c: Color32, a: f32) -> Color32 {
     Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (a.clamp(0.0, 1.0) * 255.0) as u8)
 }
 
@@ -69,7 +69,7 @@ impl PointWatch {
     }
 }
 
-fn ring(painter: &egui::Painter, eye: Vec3, dir: Vec3, fov: f32, rect: egui::Rect, center: Vec3, radius: f32,
+pub(crate) fn ring(painter: &egui::Painter, eye: Vec3, dir: Vec3, fov: f32, rect: egui::Rect, center: Vec3, radius: f32,
         from: f32, to: f32, stroke: Stroke) {
     let steps = ((to - from) * SEGMENTS as f32).ceil().max(1.0) as usize;
     let mut line: Vec<Pos2> = Vec::with_capacity(steps + 1);
@@ -96,17 +96,9 @@ pub fn draw(ui: &egui::Ui, world: &World) {
         let center = p.pos + Vec3::Y * 0.15;
         let alpha = crate::world_overlay::fade(eye.distance(center), RING_RANGE);
         if alpha <= 0.0 { continue; }
+        // No rings on the ground: the point's beacon light shows its owner and
+        // capture progress (drawlist::push_beacons).
         let owner = team_color(p.owner);
-        ring(painter, eye, dir, fov, rect, center, p.radius, 0.0, 1.0, Stroke::new(2.5, fade(owner, alpha * 0.9)));
-        if let Some(c) = p.capturing.filter(|_| p.progress > 0.0) {
-            ring(painter, eye, dir, fov, rect, center + Vec3::Y * 0.1, p.radius * 0.92, 0.0, p.progress,
-                Stroke::new(5.0, fade(team_color(Some(c)), alpha)));
-        }
-        // The drain field shows only to those it hurts.
-        if p.drain_rate > 0.0 && p.owner.is_some_and(|o| o != team) {
-            ring(painter, eye, dir, fov, rect, p.pos + Vec3::Y * 0.3, p.drain_radius, 0.0, 1.0,
-                Stroke::new(1.5, fade(DRAIN, alpha * 0.55)));
-        }
         if let Some(label) = crate::world_overlay::project(eye, dir, fov, rect, p.pos + Vec3::Y * 6.0) {
             let state = if p.contested { "CONTESTED".to_string() } else {
                 p.owner.map_or("NEUTRAL".into(), |o| team_name(o).to_uppercase()) };

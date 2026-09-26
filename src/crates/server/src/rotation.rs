@@ -2,9 +2,36 @@
 use peakrunner_core::{map_catalog::SupportedMode, terrain::MapId};
 use serde::Deserialize;
 
+/// One rotation entry: a map in a mode, or a playlist that expands to every
+/// supported map: `{"playlist":"ctf_cnh"}` (every CTF map in CTF, then every
+/// Capture & Hold map in Capture & Hold), `{"playlist":"football"}`, or a single
+/// mode (`"ctf"`, `"capture_and_hold"`).
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Entry {
+    Map(MapEntry),
+    Playlist(PlaylistEntry),
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Entry { map: String, mode: SupportedMode }
+struct MapEntry { map: String, mode: SupportedMode }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlaylistEntry { playlist: String }
+
+/// A playlist's (map, mode) pairs, from the maps that support each mode.
+fn playlist(name: &str) -> Result<Vec<(MapId, SupportedMode)>, String> {
+    use peakrunner_core::map_catalog::maps_for;
+    let modes: &[SupportedMode] = match name {
+        "ctf_cnh" => &[SupportedMode::Ctf, SupportedMode::CaptureAndHold],
+        "ctf" => &[SupportedMode::Ctf],
+        "capture_and_hold" => &[SupportedMode::CaptureAndHold],
+        "football" => &[SupportedMode::Football],
+        "team_deathmatch" => &[SupportedMode::TeamDeathmatch],
+        _ => return Err(format!("unknown playlist {name}; use ctf_cnh, ctf, capture_and_hold, football or team_deathmatch")),
+    };
+    Ok(modes.iter().flat_map(|&mode| maps_for(mode).into_iter().map(move |map| (map, mode))).collect())
+}
 
 #[derive(Clone)]
 pub struct Rotation { maps: Vec<(MapId, SupportedMode)>, cursor: usize }
@@ -15,11 +42,36 @@ impl Rotation {
         if json.len() > 8192 { return Err("rotation exceeds 8 KiB".into()); }
         let entries: Vec<Entry> = serde_json::from_str(json).map_err(|e| format!("invalid rotation: {e}"))?;
         if entries.is_empty() || entries.len() > 32 { return Err("rotation requires 1–32 entries".into()); }
-        let maps = entries.into_iter().map(|e| {
+        let mut maps = Vec::new();
+        for entry in entries {
+            match entry {
+                Entry::Playlist(p) => maps.extend(playlist(&p.playlist)?),
+                Entry::Map(e) => maps.push(Self::entry(e)?),
+            }
+        }
+        if maps.is_empty() || maps.len() > 64 { return Err("rotation must expand to 1–64 matches".into()); }
+        Ok(Self { maps, cursor: 0 })
+    }
+    fn entry(e: MapEntry) -> Result<(MapId, SupportedMode), String> {
+        {
             let id = MapId::parse(&e.map).ok_or_else(|| unknown_map(&e.map))?;
             if !cfg!(test) && id == MapId::Valley { return Err(format!("Valley is retired; {AVAILABLE}")); }
             match e.mode {
-                SupportedMode::Ctf => {}
+                SupportedMode::Ctf => {
+                    if !cfg!(test) && !peakrunner_core::map_catalog::supports(id, SupportedMode::Ctf) {
+                        return Err(format!("{} is a football stadium; use \"mode\":\"football\"", e.map));
+                    }
+                }
+                SupportedMode::Football => {
+                    if !peakrunner_core::sim::football::has_field(id) {
+                        return Err(format!("{} has no football field; football needs a stadium map", e.map));
+                    }
+                }
+                // Free-for-all is implemented but not offered yet.
+                SupportedMode::Deathmatch => return Err("deathmatch (free-for-all) is not offered yet; use team_deathmatch".into()),
+                // Team Deathmatch runs on any map named explicitly, stadiums too;
+                // its playlist leaves the stadiums out.
+                SupportedMode::TeamDeathmatch => {}
                 SupportedMode::CaptureAndHold => {
                     let points = peakrunner_core::map_pack::on(id).map_or(0, |p| p.manifest.control_points.len());
                     if points < 2 {
@@ -28,8 +80,7 @@ impl Rotation {
                 }
             }
             Ok((id, e.mode))
-        }).collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { maps, cursor: 0 })
+        }
     }
     pub fn current(&self) -> MapId { self.maps[self.cursor].0 }
     pub fn current_mode(&self) -> SupportedMode { self.maps[self.cursor].1 }
@@ -38,7 +89,7 @@ impl Rotation {
 }
 
 pub(crate) const AVAILABLE: &str =
-    "use raindance, broadside-clone (Tower Complex), stonehenge-clone (Cairnhold), snowblind-clone (Frostline) or desert-of-death-clone (Dustreach)";
+    "use raindance, broadside-clone (Tower Complex), stonehenge-clone (Cairnhold), snowblind-clone (Frostline), desert-of-death-clone (Dustreach), ozarktic-blast, reefbreak, longfield or highgoal (football)";
 
 /// Removed maps get a specific startup error, so an old config fails loudly.
 pub(crate) fn unknown_map(key: &str) -> String {
@@ -63,7 +114,7 @@ mod tests {
     #[test]
     fn invalid_policy_is_rejected_not_replaced() {
         for json in ["[]", "{}", r#"[{"map":"missing","mode":"ctf"}]"#,
-            r#"[{"map":"valley","mode":"deathmatch"}]"#,
+            r#"[{"map":"valley","mode":"gungame"}]"#,
             r#"[{"map":"valley","mode":"ctf","script":"x"}]"#] {
             assert!(Rotation::parse(json).is_err(), "{json}");
         }
@@ -78,11 +129,42 @@ mod tests {
         assert!(Rotation::parse(r#"[{"map":"raindance","mode":"capture_and_hold"}]"#).is_ok());
         // Tower Complex (key broadside-clone) has three Capture & Hold towers.
         assert!(Rotation::parse(r#"[{"map":"broadside-clone","mode":"capture_and_hold"}]"#).is_ok());
+        // Football needs a stadium map with a declared field.
+        let e = Rotation::parse(r#"[{"map":"snowblind-clone","mode":"football"}]"#).err().unwrap();
+        assert!(e.contains("no football field"), "{e}");
+        assert!(Rotation::parse(r#"[{"map":"longfield","mode":"football"}]"#).is_ok());
+        assert!(Rotation::parse(r#"[{"map":"highgoal","mode":"football"}]"#).is_ok());
         // Cairnhold (key stonehenge-clone): the Ring and two flank cairns.
         assert!(Rotation::parse(r#"[{"map":"stonehenge-clone","mode":"capture_and_hold"}]"#).is_ok());
         let cnh = Rotation::parse(r#"[{"map":"valley","mode":"capture_and_hold"}]"#).err().unwrap();
         assert!(cnh.contains("capture_and_hold needs at least 2"), "{cnh}");
         assert!(Rotation::parse(&" ".repeat(8193)).is_err());
         assert!(Rotation::parse(&format!("[{}]", vec![r#"{"map":"valley","mode":"ctf"}"#;33].join(","))).is_err());
+    }
+
+    #[test]
+    fn playlists_expand_to_every_supported_map() {
+        let r = Rotation::parse(r#"[{"playlist":"ctf_cnh"}]"#).unwrap();
+        let ctf = peakrunner_core::map_catalog::maps_for(SupportedMode::Ctf);
+        let cnh = peakrunner_core::map_catalog::maps_for(SupportedMode::CaptureAndHold);
+        assert_eq!(r.maps.len(), ctf.len() + cnh.len());
+        assert!(r.maps.iter().take(ctf.len()).all(|(m, mode)| *mode == SupportedMode::Ctf && ctf.contains(m)));
+        assert!(r.maps.iter().skip(ctf.len()).all(|(_, mode)| *mode == SupportedMode::CaptureAndHold));
+        let f = Rotation::parse(r#"[{"playlist":"football"}]"#).unwrap();
+        assert_eq!(f.maps, vec![(MapId::Longfield, SupportedMode::Football), (MapId::Highgoal, SupportedMode::Football)]);
+        // Playlists and single entries mix.
+        let mixed = Rotation::parse(r#"[{"map":"raindance","mode":"ctf"},{"playlist":"football"}]"#).unwrap();
+        assert_eq!(mixed.maps.len(), 3);
+        // Team Deathmatch: every map but the stadiums by default; a stadium
+        // only when named. Free-for-all isn't offered yet.
+        let dm = Rotation::parse(r#"[{"playlist":"team_deathmatch"}]"#).unwrap();
+        assert_eq!(dm.maps.len(), peakrunner_core::terrain::maps().len() - 2);
+        assert!(dm.maps.iter().all(|(m, mode)| *mode == SupportedMode::TeamDeathmatch
+            && ![MapId::Valley, MapId::Longfield, MapId::Highgoal].contains(m)));
+        assert!(Rotation::parse(r#"[{"map":"longfield","mode":"team_deathmatch"}]"#).is_ok());
+        assert!(Rotation::parse(r#"[{"map":"ozarktic-blast","mode":"deathmatch"}]"#).is_err());
+        assert!(Rotation::parse(r#"[{"playlist":"deathmatch"}]"#).is_err());
+        assert!(Rotation::parse(r#"[{"playlist":"gungame"}]"#).is_err());
+        assert!(Rotation::parse(r#"[{"playlist":"football","extra":1}]"#).is_err());
     }
 }

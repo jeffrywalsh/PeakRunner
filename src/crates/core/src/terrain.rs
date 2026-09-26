@@ -139,15 +139,23 @@ pub enum MapId {
     StonehengeClone,
     SnowblindClone,
     DesertOfDeathClone,
+    /// Longfield, the Football stadium.
+    Longfield,
+    /// Highgoal, the Football arena with raised goals.
+    Highgoal,
+    /// Ozarktic Blast: a ridge across the flag line, high west, the dock valley east.
+    OzarkticBlast,
+    /// Reefbreak: an atoll; floating freighter bases outside the reef ring.
+    Reefbreak,
 }
 
 impl MapId {
     /// Stable identity, independent of display labels and filesystem locations.
     pub fn key(self) -> &'static str {
-        match self { Self::Valley => "valley", Self::Raindance => "raindance", Self::BroadsideClone => "broadside-clone", Self::StonehengeClone => "stonehenge-clone", Self::SnowblindClone => "snowblind-clone", Self::DesertOfDeathClone => "desert-of-death-clone" }
+        match self { Self::Valley => "valley", Self::Raindance => "raindance", Self::BroadsideClone => "broadside-clone", Self::StonehengeClone => "stonehenge-clone", Self::SnowblindClone => "snowblind-clone", Self::DesertOfDeathClone => "desert-of-death-clone", Self::Longfield => "longfield", Self::Highgoal => "highgoal", Self::OzarkticBlast => "ozarktic-blast", Self::Reefbreak => "reefbreak" }
     }
     pub fn parse(key: &str) -> Option<Self> {
-        [Self::Valley, Self::Raindance, Self::BroadsideClone, Self::StonehengeClone, Self::SnowblindClone, Self::DesertOfDeathClone].into_iter().find(|id| id.key().eq_ignore_ascii_case(key))
+        [Self::Valley, Self::Raindance, Self::BroadsideClone, Self::StonehengeClone, Self::SnowblindClone, Self::DesertOfDeathClone, Self::Longfield, Self::Highgoal, Self::OzarkticBlast, Self::Reefbreak].into_iter().find(|id| id.key().eq_ignore_ascii_case(key))
     }
 }
 
@@ -167,7 +175,8 @@ const RAIN_N: usize = 256;
 /// New landscapes can supply palettes/scales here without adding grass geometry.
 pub fn surface_style(map: MapId) -> crate::grass::SurfaceStyle {
     match map {
-        MapId::Raindance | MapId::BroadsideClone | MapId::StonehengeClone | MapId::SnowblindClone | MapId::DesertOfDeathClone => crate::grass::HIGHLAND,
+        MapId::Raindance | MapId::BroadsideClone | MapId::StonehengeClone | MapId::SnowblindClone | MapId::DesertOfDeathClone
+            | MapId::Longfield | MapId::Highgoal | MapId::OzarkticBlast | MapId::Reefbreak => crate::grass::HIGHLAND,
         MapId::Valley => crate::grass::SurfaceStyle {
             cover: [0.66, 0.73, 0.79, 5.0],
             soil: [0.42, 0.55, 0.64, 35.0],
@@ -183,7 +192,7 @@ const RAIN_SIZE: f32 = 2040.0;
 // Authored procedural heightfield; no extracted source-game data in the build.
 static RAIN: &[u8] = include_bytes!("../../../assets/maps/raindance/height.bin");
 
-fn all_maps() -> [MapInfo; 6] {
+fn all_maps() -> [MapInfo; 10] {
     [
         MapInfo {
             id: MapId::Valley,
@@ -221,12 +230,24 @@ fn all_maps() -> [MapInfo; 6] {
         MapInfo { id: MapId::DesertOfDeathClone, name: "Dustreach",
             note: "Sandstone citadels across rolling dunes, joined by the Sun Gate on the central saddle.",
             size: RAIN_SIZE, ember: Vec3::new(1024.,130.,679.), glacier: Vec3::new(1024.,130.,1369.), res: RAIN_N },
+        MapInfo { id: MapId::Longfield, name: "Longfield",
+            note: "Football. A floodlit turf field in a skiable bowl, end zones 250 m apart.",
+            size: RAIN_SIZE, ember: Vec3::new(1024.,100.,899.), glacier: Vec3::new(1024.,100.,1149.), res: RAIN_N },
+        MapInfo { id: MapId::Highgoal, name: "Highgoal",
+            note: "Football. A walled sand arena whose goals stand on platforms 7 m up: jet up to score.",
+            size: RAIN_SIZE, ember: Vec3::new(1024.,107.,939.), glacier: Vec3::new(1024.,107.,1109.), res: RAIN_N },
+        MapInfo { id: MapId::OzarkticBlast, name: "Ozarktic Blast",
+            note: "A ridge across the middle, high ground west, and a dock valley east where two strange ships hover.",
+            size: RAIN_SIZE, ember: Vec3::new(1024.,185.,680.), glacier: Vec3::new(1024.,185.,1368.), res: RAIN_N },
+        MapInfo { id: MapId::Reefbreak, name: "Reefbreak",
+            note: "An atoll: flags on the reef ring, freighter bases hovering over the lagoon, a lighthouse island and wading shallows.",
+            size: RAIN_SIZE, ember: Vec3::new(1024.,68.,724.), glacier: Vec3::new(1024.,68.,1324.), res: RAIN_N },
     ]
 }
 
 pub fn maps() -> Vec<MapInfo> {
-    [MapId::Raindance, MapId::BroadsideClone, MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone]
-        .into_iter().map(info).collect()
+    [MapId::Raindance, MapId::BroadsideClone, MapId::StonehengeClone, MapId::SnowblindClone, MapId::DesertOfDeathClone,
+        MapId::Longfield, MapId::Highgoal, MapId::OzarkticBlast, MapId::Reefbreak].into_iter().map(info).collect()
 }
 
 pub fn info(id: MapId) -> MapInfo {
@@ -243,7 +264,8 @@ pub fn info(id: MapId) -> MapInfo {
 fn source_height(id: MapId, x: f32, z: f32) -> f32 {
     match id {
         MapId::Valley => height(x, z),
-        MapId::Raindance | MapId::BroadsideClone | MapId::StonehengeClone | MapId::SnowblindClone | MapId::DesertOfDeathClone => height_pack(id, x, z),
+        MapId::Raindance | MapId::BroadsideClone | MapId::StonehengeClone | MapId::SnowblindClone | MapId::DesertOfDeathClone
+            | MapId::Longfield | MapId::Highgoal | MapId::OzarkticBlast | MapId::Reefbreak => height_pack(id, x, z),
     }
 }
 
@@ -410,7 +432,11 @@ pub fn overview_height(id:MapId)->f32 {
     static STONE:std::sync::OnceLock<f32>=std::sync::OnceLock::new();
     static SNOW: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
     static DESERT: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
-    let cache=match id {MapId::Valley=>&VALLEY,MapId::Raindance=>&RAIN,MapId::BroadsideClone=>&CLONE,MapId::StonehengeClone=>&STONE,MapId::SnowblindClone=>&SNOW,MapId::DesertOfDeathClone=>&DESERT};
+    static FIELD: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    static ARENA: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    static OZARK: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    static REEF: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    let cache=match id {MapId::Valley=>&VALLEY,MapId::Raindance=>&RAIN,MapId::BroadsideClone=>&CLONE,MapId::StonehengeClone=>&STONE,MapId::SnowblindClone=>&SNOW,MapId::DesertOfDeathClone=>&DESERT,MapId::Longfield=>&FIELD,MapId::Highgoal=>&ARENA,MapId::OzarkticBlast=>&OZARK,MapId::Reefbreak=>&REEF};
     *cache.get_or_init(|| {
         let map=info(id);let step=map.size/(map.res-1) as f32;
         let mut top=f32::NEG_INFINITY;

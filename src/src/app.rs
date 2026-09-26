@@ -42,6 +42,9 @@ struct Hud {
     weapon: u8,
     flag: i32,
     own_flag: i32,
+    /// The enemy flag: 1 home, 2 carried, 3 dropped.
+    #[serde(default)]
+    enemy_flag: i32,
     hit: f32,
     flash: f32,
     msg: String,
@@ -57,12 +60,81 @@ struct Hud {
     #[serde(default)]
     map_size: f32,
     #[serde(default)]
-    kits: u8,
+    armor: u8,
+    #[serde(default)]
+    ammo: u16,
+    #[serde(default)]
+    ammo_max: u16,
+    #[serde(default)]
+    pack: i32,
+    #[serde(default)]
+    repairing: u8,
+    #[serde(default)]
+    station: u8,
+    #[serde(default)]
+    grenades: u8,
+    #[serde(default)]
+    mines: u8,
+    #[serde(default)]
+    grenades_max: u8,
+    #[serde(default)]
+    mines_max: u8,
     /// Objective caption under the score, from the world's mode.
     #[serde(skip)]
     goal: &'static str,
+    /// Football: no weapons; the bottom line shows the ball instead.
+    #[serde(skip)]
+    football: bool,
+    /// Current key bindings, for hints.
+    #[serde(skip)]
+    keys: crate::keybinds::Keybinds,
+    /// A grenade or mine being wound up (what, seconds held).
+    #[serde(skip)]
+    winding: Option<(u8, f32)>,
+    /// Placing a pack: why it can't go where you aim ("" when it can).
+    #[serde(skip)]
+    placing: Option<&'static str>,
+    /// The rifle carried: 0 none, 1 laser, 2 railgun.
     #[serde(default)]
-    kit_heal: f32,
+    rifle: u8,
+    /// Looking through a rifle's zoom.
+    #[serde(skip)]
+    zoomed: bool,
+    /// Deathmatch: the score line ("You 4 · Leader Ace 7"), replacing the
+    /// team scores.
+    #[serde(skip)]
+    ffa_line: Option<String>,
+    /// Deathmatch modes: this round's time, weather and twist.
+    #[serde(skip)]
+    conditions: String,
+}
+
+/// Keyboard bindings and the screens that use them.
+#[derive(Default)]
+struct Controls {
+    keys: crate::keybinds::Keybinds,
+    /// The inventory screen is open (at your team's inventory station).
+    shop_open: bool,
+    /// A grenade or mine being wound up: what, and seconds held.
+    winding: Option<(u8, f32)>,
+    /// Lining up the carried pack (the deployer replaces the weapon), its
+    /// turn from your facing, the wheel travel not yet turned, and whether
+    /// fire was down last frame (a click places).
+    placing: bool,
+    turn: f32,
+    wheel: f32,
+    fire_was: bool,
+    /// The controls screen is open, and the action waiting for a key.
+    keys_open: bool,
+    rebinding: Option<crate::keybinds::Action>,
+    /// While placing: why the hologram can't go down ("" when it can).
+    ghost_problem: Option<&'static str>,
+    /// Stood at the inventory station last frame (it opens on arrival), and
+    /// the third-person view.
+    was_at_inventory: bool,
+    third_person: bool,
+    /// Seconds alive since the last spawn.
+    alive_for: f32,
 }
 
 struct Pad {
@@ -81,6 +153,7 @@ pub struct PeakRunnerApp {
     announcer: crate::flag_announce::Announcer,
     generator_watch: crate::generator_announce::GeneratorWatch,
     point_watch: crate::control_hud::PointWatch,
+    football_watch: crate::football_hud::FootballWatch,
     game_mode: peakrunner_core::map_catalog::SupportedMode,
     chat_team: bool,
     chat_open: bool,
@@ -105,6 +178,8 @@ pub struct PeakRunnerApp {
     look_pending: egui::Vec2,
     /// The click that started the match is still down. Don't treat it as fire.
     wait_fire_release: bool,
+    /// Key bindings, the inventory screen and the grenade/mine wind-up.
+    ctl: Controls,
     #[cfg(not(target_arch = "wasm32"))]
     pads: Option<gilrs::Gilrs>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -121,10 +196,10 @@ impl PeakRunnerApp {
             peakrunner_core::feed::Entry::Frag { killer: "Nova".into(), victim: "Ridge".into(), weapon: "Grenade launcher".into() },
             peakrunner_core::feed::Entry::Chat { sender: "Echo".into(), text: "On my way. Cover the flag!".into() },
         ];
-        Self { overlay: Default::default(), effects: Default::default(), announcer: Default::default(), generator_watch: Default::default(), point_watch: Default::default(), game_mode: Default::default(), chat_team:false, world, audio: Audio::silent(), mode: Mode::Play, ember: true, map: MapId::Valley,
+        Self { overlay: Default::default(), effects: Default::default(), announcer: Default::default(), generator_watch: Default::default(), point_watch: Default::default(), football_watch: Default::default(), game_mode: Default::default(), chat_team:false, world, audio: Audio::silent(), mode: Mode::Play, ember: true, map: MapId::Valley,
             hud: None, frame_aspect: 1.6, stick: [0.;2], touch: false, grabbed: false,
             touch_jump: false, touch_jet: false, touch_fire: false, touch_interact: false,
-            touch_swap: false, look_pending: Vec2::ZERO, wait_fire_release: false,
+            touch_swap: false, look_pending: Vec2::ZERO, wait_fire_release: false, ctl: Controls::default(),
             pads: None, net: NetUi::new(), chat_open: true, chat_text: "Nice shot!".into(), chat_error: String::new(), chat_next: 0.0 }
     }
 
@@ -141,6 +216,7 @@ impl PeakRunnerApp {
             announcer: Default::default(),
             generator_watch: Default::default(),
             point_watch: Default::default(),
+            football_watch: Default::default(),
             game_mode: Default::default(),
             chat_team: false,
             chat_open: false, chat_text: String::new(), chat_error: String::new(), chat_next: 0.0,
@@ -165,6 +241,7 @@ impl PeakRunnerApp {
             touch_swap: false,
             look_pending: egui::Vec2::ZERO,
             wait_fire_release: false,
+            ctl: Controls::default(),
             #[cfg(not(target_arch = "wasm32"))]
             pads: gilrs::Gilrs::new().ok(),
             #[cfg(not(target_arch = "wasm32"))]
@@ -172,6 +249,8 @@ impl PeakRunnerApp {
         };
         #[cfg(not(target_arch = "wasm32"))]
         app.world.set_bot_difficulty(app.net.preferences.saved.bot_difficulty);
+        #[cfg(not(target_arch = "wasm32"))]
+        { app.ctl.keys = app.net.preferences.saved.keys.clone(); }
         #[cfg(not(target_arch = "wasm32"))]
         if let Ok(address) = std::env::var("PEAKRUNNER_JOIN") {
             if let Ok(name) = std::env::var("PEAKRUNNER_NAME") { app.net.name = name; }
@@ -201,10 +280,12 @@ impl PeakRunnerApp {
         self.poll_net(ctx);
 
         let was_chat = self.chat_open;
+        let keys = self.ctl.keys.clone();
+        use crate::keybinds::Action;
         if self.mode != Mode::Play { self.chat_open = false; }
-        if self.mode == Mode::Play && !self.chat_open {
-            let public = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::T));
-            let team = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Y));
+        if self.mode == Mode::Play && !self.chat_open && !self.ctl.shop_open {
+            let public = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, keys.get(Action::ChatPublic)));
+            let team = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, keys.get(Action::ChatTeam)));
             if public || team {
                 self.chat_open = true;
                 self.chat_team = team;
@@ -217,8 +298,19 @@ impl PeakRunnerApp {
             self.chat_open = false;
             self.wait_fire_release = true;
         }
-        let gameplay_input = self.mode == Mode::Play && !self.chat_open && !was_chat && ctx.input(|i| i.focused);
-        let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        // The inventory screen closes on Escape or the use key, when you step
+        // off the station, or die.
+        let at_inventory = self.hud.as_ref().is_some_and(|h| h.station == 1 && h.alive == 1)
+            || std::env::var_os("QA_SHOP").is_some();
+        if self.ctl.shop_open {
+            let close = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                || i.consume_key(egui::Modifiers::NONE, keys.get(Action::Use)));
+            if close || self.mode != Mode::Play || !at_inventory { self.close_shop(); }
+        }
+        let gameplay_input = self.mode == Mode::Play && !self.chat_open && !was_chat && !self.ctl.shop_open
+            && ctx.input(|i| i.focused);
+        // While a key is being rebound, Escape cancels that instead.
+        let escape = self.ctl.rebinding.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Escape));
         if escape && self.mode == Mode::Play {
             self.pause(ctx);
         } else if escape && self.mode == Mode::Pause {
@@ -237,7 +329,9 @@ impl PeakRunnerApp {
             self.grab(ctx, false);
         }
         if self.touch_swap && gameplay_input {
-            self.world.input.weapon = (self.world.input.weapon + 1) % 3;
+            // Cycle the weapons, including the rifle once one is bought.
+            let slots = if self.world.players.get(self.world.player_id).is_some_and(|p| p.rifle) { 4 } else { 3 };
+            self.world.input.weapon = (self.world.input.weapon + 1) % slots;
             self.touch_swap = false;
         }
 
@@ -246,27 +340,15 @@ impl PeakRunnerApp {
         let mut mz = self.stick[1] + pad.z;
         ctx.input(|i| {
             if !gameplay_input { return; }
-            if i.key_down(egui::Key::A) || i.key_down(egui::Key::ArrowLeft) {
-                mx -= 1.0;
+            if keys.down(i, Action::Left) || i.key_down(egui::Key::ArrowLeft) { mx -= 1.0; }
+            if keys.down(i, Action::Right) || i.key_down(egui::Key::ArrowRight) { mx += 1.0; }
+            if keys.down(i, Action::Forward) || i.key_down(egui::Key::ArrowUp) { mz += 1.0; }
+            if keys.down(i, Action::Back) || i.key_down(egui::Key::ArrowDown) { mz -= 1.0; }
+            for (action, weapon) in [(Action::Disc, 0), (Action::Chaingun, 1), (Action::Launcher, 2), (Action::Rifle, 3)] {
+                if keys.pressed(i, action) { self.world.input.weapon = weapon; }
             }
-            if i.key_down(egui::Key::D) || i.key_down(egui::Key::ArrowRight) {
-                mx += 1.0;
-            }
-            if i.key_down(egui::Key::W) || i.key_down(egui::Key::ArrowUp) {
-                mz += 1.0;
-            }
-            if i.key_down(egui::Key::S) || i.key_down(egui::Key::ArrowDown) {
-                mz -= 1.0;
-            }
-            if i.key_pressed(egui::Key::Num1) {
-                self.world.input.weapon = 0;
-            }
-            if i.key_pressed(egui::Key::Num2) {
-                self.world.input.weapon = 1;
-            }
-            if i.key_pressed(egui::Key::Num3) { self.world.input.weapon = 2; }
         });
-        let jump = ctx.input(|i| i.key_down(egui::Key::Space)) || pad.jump || self.touch_jump;
+        let jump = (gameplay_input && ctx.input(|i| keys.down(i, Action::Jump))) || pad.jump || self.touch_jump;
         let jet = mouse.jet || pad.jet || self.touch_jet;
         let mut mouse_fire = self.mode == Mode::Play && mouse.fire;
         if self.wait_fire_release {
@@ -276,20 +358,103 @@ impl PeakRunnerApp {
                 self.wait_fire_release = false;
             }
         }
-        let fire = mouse_fire || pad.fire || self.touch_fire;
+        let fire = mouse_fire || pad.fire || self.touch_fire || (gameplay_input && std::env::var_os("QA_FIRE").is_some());
+        let play = self.mode == Mode::Play;
         self.world.input.move_x = mx.clamp(-1.0, 1.0);
         self.world.input.move_z = mz.clamp(-1.0, 1.0);
         self.world.input.jump = jump;
-        self.world.input.jet = jet && self.mode == Mode::Play;
+        self.world.input.jet = jet && play;
         self.world.input.fire = fire;
-        self.world.input.interact = self.mode==Mode::Play && (ctx.input(|i|i.key_down(egui::Key::E)) || self.touch_interact);
-        self.world.input.kit = self.mode==Mode::Play && ctx.input(|i|i.key_down(egui::Key::Q));
+        let use_pressed = gameplay_input && ctx.input(|i| keys.pressed(i, Action::Use));
+        // Stepping onto your inventory station opens its screen, as in
+        // Tribes; after closing it, the use key opens it again.
+        // Not on a respawn beside one: only after a second alive.
+        let alive = self.hud.as_ref().is_some_and(|h| h.alive == 1);
+        self.ctl.alive_for = if alive { self.ctl.alive_for+dt } else { 0.0 };
+        if at_inventory && !self.ctl.was_at_inventory && self.ctl.alive_for > 1.0 && gameplay_input && !self.world.ball.active {
+            self.ctl.shop_open = true;
+        }
+        self.ctl.was_at_inventory = at_inventory || self.ctl.alive_for <= 1.0;
+        // Away from a station, holding the use key zooms a rifle (Tribes' E).
+        let at_station = self.hud.as_ref().is_some_and(|h| h.station != 0);
+        self.world.zoomed = gameplay_input && !at_station && !self.ctl.placing && ctx.input(|i| keys.down(i, Action::Use));
+        // The view key: third person, unless it's turning a pack being placed.
+        if gameplay_input && !self.ctl.placing && ctx.input(|i| keys.pressed(i, Action::View)) {
+            self.ctl.third_person = !self.ctl.third_person;
+        }
+        self.world.third_person = self.ctl.third_person;
+        self.world.input.interact = play && (ctx.input(|i| keys.down(i, Action::Use)) || self.touch_interact);
+        // Use at your inventory station opens the inventory screen.
+        if use_pressed && at_inventory && !self.world.ball.active { self.ctl.shop_open = true; }
+        self.world.input.repair = play && ctx.input(|i| keys.down(i, Action::Repair));
+        // One-shot intents latch until a tick sends them (World::tick and the
+        // online predictor clear them), so a press is never lost.
+        // Deploying: the deploy key brings up the deployer and a hologram of
+        // the pack where you aim (see `World::aim_placement`); click places
+        // it, the wheel or the rotate key turns it, and the deploy key, a
+        // weapon key or the repair tool puts the deployer away.
+        let pack = self.world.players.get(self.world.player_id).filter(|p| p.alive).and_then(|p| p.pack);
+        if gameplay_input && ctx.input(|i| keys.pressed(i, Action::Deploy)) && pack.is_some() && !self.world.ball.active {
+            self.ctl.placing = !self.ctl.placing;
+            self.ctl.turn = 0.0;
+        }
+        if self.ctl.placing {
+            let leave = pack.is_none() || !play || self.world.input.repair
+                || ctx.input(|i| [Action::Disc, Action::Chaingun, Action::Launcher, Action::Rifle].iter().any(|&a| keys.pressed(i, a)));
+            if leave {
+                self.ctl.placing = false;
+                // A click still held from placing isn't a shot.
+                self.wait_fire_release = true;
+            } else if gameplay_input {
+                let step = std::f32::consts::PI / 12.0;
+                if ctx.input(|i| keys.pressed(i, Action::View)) { self.ctl.turn += step; }
+                self.ctl.wheel += ctx.input(|i| i.smooth_scroll_delta.y);
+                while self.ctl.wheel.abs() >= 30.0 {
+                    let dir = self.ctl.wheel.signum();
+                    self.ctl.turn += step * dir;
+                    self.ctl.wheel -= 30.0 * dir;
+                }
+                self.ctl.turn = (self.ctl.turn + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+                if fire && !self.ctl.fire_was {
+                    self.world.input.deploy = true;
+                    self.world.input.deploy_turn = self.ctl.turn;
+                }
+            }
+            // The deployer doesn't shoot.
+            self.world.input.fire = false;
+        }
+        self.ctl.fire_was = fire;
+        // Ctrl+K: suicide, as in Tribes. One press, one death: holding the
+        // keys doesn't kill you again when you respawn.
+        self.world.input.suicide |= play && ctx.input(|i| i.modifiers.ctrl && keys.pressed(i, Action::Suicide));
+        // Grenades and mines: hold to wind up, release to throw (base Tribes'
+        // throw strength). The wind-up shows on the HUD.
+        use peakrunner_core::sim::throwables::{THROW_GRENADE, THROW_MINE, WIND_UP};
+        let held = if !gameplay_input { None } else if ctx.input(|i| keys.down(i, Action::Grenade)) { Some(THROW_GRENADE) }
+            else if ctx.input(|i| keys.down(i, Action::Mine)) { Some(THROW_MINE) } else { None };
+        match (self.ctl.winding, held) {
+            (Some((what, t)), Some(now)) if what == now => self.ctl.winding = Some((what, t + dt)),
+            (Some((what, t)), _) => {
+                // Released (or switched): throw what was wound up.
+                if gameplay_input {
+                    self.world.input.throw = what;
+                    self.world.input.throw_strength = (t / WIND_UP).clamp(0.0, 1.0);
+                }
+                self.ctl.winding = held.map(|now| (now, 0.0));
+            }
+            (None, now) => self.ctl.winding = now.map(|now| (now, 0.0)),
+        }
         self.world.input.look_stick_x = pad.lx;
         self.world.input.look_stick_y = pad.ly;
         if !gameplay_input {
-            let weapon = self.world.input.weapon;
-            self.world.input = crate::sim::Input::default();
-            self.world.input.weapon = weapon;
+            // Keep the weapon, and a purchase made on the inventory screen;
+            // standing at the station keeps it servicing you while you shop.
+            let old = std::mem::take(&mut self.world.input);
+            self.world.input.weapon = old.weapon;
+            self.world.input.buy = old.buy;
+            self.world.input.deploy = old.deploy;
+            self.world.input.deploy_turn = old.deploy_turn;
+            self.world.input.interact = self.ctl.shop_open;
             self.touch_swap = false;
             self.stick = [0.0; 2];
         }
@@ -310,6 +475,22 @@ impl PeakRunnerApp {
         } else {
             self.world.tick(dt.min(0.1).max(0.0));
         }
+        // The deploy hologram follows your aim every frame.
+        self.world.placing = self.ctl.placing && self.mode == Mode::Play;
+        self.world.deploy_ghost = None;
+        self.ctl.ghost_problem = None;
+        if self.world.placing {
+            let me = self.world.player_id;
+            if let Some(kind) = self.world.players.get(me).and_then(|p| p.pack) {
+                match self.world.aim_placement(me, kind, self.ctl.turn) {
+                    Some(g) => {
+                        self.ctl.ghost_problem = Some(g.problem.unwrap_or(""));
+                        self.world.deploy_ghost = Some((g.unit, g.problem.is_none()));
+                    }
+                    None => self.ctl.ghost_problem = Some("TOO FAR AWAY"),
+                }
+            }
+        }
         let raw = self.world.hud_json();
         self.audio.frame(&self.world, dt, self.mode == Mode::Play);
         let mut sounds = std::mem::take(&mut self.world.spatial_sounds);
@@ -318,8 +499,26 @@ impl PeakRunnerApp {
         }
         self.world.spatial_sounds = sounds;
         if let Ok(mut hud) = serde_json::from_str::<Hud>(&raw) {
-            hud.goal = if self.world.mode == peakrunner_core::map_catalog::SupportedMode::CaptureAndHold {
-                "Hold the points · first to 300" } else { "First to 3 captures" };
+            hud.goal = match self.world.mode {
+                peakrunner_core::map_catalog::SupportedMode::CaptureAndHold => "Hold the points · first to 300",
+                peakrunner_core::map_catalog::SupportedMode::Football => crate::football_hud::GOAL_LINE,
+                peakrunner_core::map_catalog::SupportedMode::Ctf => "First to 3 captures",
+                peakrunner_core::map_catalog::SupportedMode::Deathmatch => "Everyone's a target · first to 20 frags",
+                peakrunner_core::map_catalog::SupportedMode::TeamDeathmatch => "Frag their team · first to 40",
+            };
+            hud.football = self.world.ball.active;
+            hud.keys = self.ctl.keys.clone();
+            hud.winding = self.ctl.winding;
+            hud.placing = self.ctl.ghost_problem;
+            hud.zoomed = self.world.zoom_active();
+            if self.world.deathmatch() { hud.conditions = self.world.conditions.describe(); }
+            if self.world.ffa() {
+                let mine = self.world.players.get(self.world.player_id).map_or(0, |p| p.frags);
+                hud.ffa_line = Some(match self.world.ffa_leader() {
+                    Some(i) if i != self.world.player_id => format!("You {mine} · {} {}", self.world.display_name(i), self.world.players[i].frags),
+                    _ => format!("You {mine} · leading"),
+                });
+            }
             if !hud.events.is_empty() {
                 for event in hud.events.split(',') {
                     self.audio.play(event);
@@ -338,8 +537,21 @@ impl PeakRunnerApp {
         self.audio.unlock();
         self.world.set_map(self.map);
         crate::qa_overrides::stage_points(&mut self.world);
-        let mode = if self.world.control_point_count() >= 2 { self.game_mode } else { Default::default() };
+        use peakrunner_core::map_catalog::SupportedMode;
+        let mode = match self.game_mode {
+            _ if crate::qa_overrides::football_staged() => SupportedMode::Football,
+            SupportedMode::CaptureAndHold if self.world.control_point_count() >= 2 => SupportedMode::CaptureAndHold,
+            SupportedMode::Football if peakrunner_core::sim::football::has_field(self.map) => SupportedMode::Football,
+            // Both deathmatch modes run anywhere.
+            m if m.deathmatch() => m,
+            // A stadium otherwise hosts only Football.
+            _ if peakrunner_core::sim::football::has_field(self.map) => SupportedMode::Football,
+            _ => SupportedMode::Ctf,
+        };
         self.world.set_mode(mode);
+        // Fresh randomness per match (deathmatch conditions, spawns).
+        let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.subsec_nanos());
+        self.world.reseed(seed);
         self.world.start_match(self.ember);
         self.audio.play("start");
         self.mode = Mode::Play;
@@ -484,6 +696,16 @@ impl eframe::App for PeakRunnerApp {
         self.step(ctx, if dt > 0.0 { dt } else { 1.0 / 60.0 });
         crate::qa_overrides::apply(&mut self.world);
         crate::qa_overrides::apply_points(&mut self.world);
+        crate::qa_overrides::apply_loadout(&mut self.world);
+        if std::env::var_os("QA_SHOP").is_some() && self.mode == Mode::Play { self.ctl.shop_open = true; }
+        if std::env::var_os("QA_CONTROLS").is_some() && self.mode == Mode::Menu { self.ctl.keys_open = true; }
+        if let Some((kind, turn)) = crate::qa_overrides::placing(&mut self.world) {
+            if self.mode == Mode::Play {
+                if let Some(p) = self.world.players.get_mut(self.world.player_id) { p.pack = Some(kind); }
+                self.ctl.placing = true;
+                self.ctl.turn = turn;
+            }
+        }
         ctx.request_repaint();
     }
 
@@ -528,8 +750,10 @@ impl eframe::App for PeakRunnerApp {
                 crate::world_overlay::draw(ui, &self.world, &mut self.overlay, dt);
                 crate::flag_hud::draw(ui, &self.world);
                 crate::control_hud::draw(ui, &self.world);
+                crate::football_hud::draw(ui, &self.world);
                 for text in self.generator_watch.update(&self.world) { self.announcer.push(text); }
                 for text in self.point_watch.update(&self.world) { self.announcer.push(text); }
+                for text in self.football_watch.update(&self.world) { self.announcer.push(text); }
                 self.announcer.update(&self.world, dt);
                 self.announcer.draw(ui);
                 reference_measurements(ui,&self.world);
@@ -555,12 +779,14 @@ impl eframe::App for PeakRunnerApp {
                         egui::Button::new("Use / repair").sense(egui::Sense::click_and_drag())).is_pointer_button_down_on();
                 }
                 self.chat_ui(ui.ctx());
+                if self.ctl.shop_open { self.shop_ui(ui.ctx()); }
             }
             Mode::Pause => self.pause_ui(ui),
             Mode::End => self.end_ui(ui),
             Mode::Browser => self.browser_ui(ui),
             Mode::Lobby => self.lobby_ui(ui),
         }
+        if self.ctl.keys_open && self.mode != Mode::Play { self.controls_ui(ui.ctx()); }
         #[cfg(not(target_arch = "wasm32"))]
         if self.online() && !self.chat_open && (ui.input(|i| i.key_down(egui::Key::Tab)) || self.mode == Mode::End) {
             self.scoreboard_ui(ui);
@@ -586,7 +812,8 @@ impl PeakRunnerApp {
                     ui.set_width(width - 20.0);
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("MATCH COMMS").size(11.0).color(MUTED));
-                        if !self.chat_open { ui.label(RichText::new("Public · T   Team · Y").size(11.0).color(MUTED)); }
+                        if !self.chat_open { ui.label(RichText::new(format!("Public · {}   Team · {}", self.ctl.keys.name(crate::keybinds::Action::ChatPublic),
+                            self.ctl.keys.name(crate::keybinds::Action::ChatTeam))).size(11.0).color(MUTED)); }
                         if !self.chat_open && self.touch && ui.add_sized([80.0,44.0],egui::Button::new("Chat")).clicked() {
                             self.chat_open = true;
                             self.chat_team = false;
@@ -597,10 +824,14 @@ impl PeakRunnerApp {
                         .stick_to_bottom(true).show(ui, |ui| {
                             let skip = if self.chat_open { 0 } else { self.world.feed.len().saturating_sub(4) };
                             for entry in self.world.feed.iter().skip(skip) {
-                                let frag = matches!(entry, peakrunner_core::feed::Entry::Frag {..});
-                                let prefix = if frag { "FRAG  " } else { "CHAT  " };
+                                use peakrunner_core::feed::Entry;
+                                let (prefix, color) = match entry {
+                                    Entry::Frag {..} => ("FRAG  ", FG),
+                                    Entry::Play {..} => ("PLAY  ", Color32::from_rgb(255, 214, 120)),
+                                    _ => ("CHAT  ", GLACIER),
+                                };
                                 ui.add(egui::Label::new(RichText::new(format!("{prefix}{}", entry.line()))
-                                    .color(if frag { FG } else { GLACIER }).size(12.0)).wrap());
+                                    .color(color).size(12.0)).wrap());
                             }
                         });
                     if self.chat_open {
@@ -664,10 +895,17 @@ impl PeakRunnerApp {
                                 }
                             });
                         }
+                        if w.deathmatch() {
+                            let text = if w.ffa() { format!("DEATHMATCH · first to {} frags", peakrunner_core::sim::deathmatch::FFA_FRAG_LIMIT) }
+                                else { format!("TEAM DEATHMATCH · Ember {} – Glacier {} · first to {}", w.score[0], w.score[1], peakrunner_core::sim::deathmatch::TDM_FRAG_LIMIT) };
+                            ui.label(RichText::new(text).color(FG));
+                            ui.label(RichText::new(w.conditions.describe()).color(MUTED));
+                        }
                         ui.label(RichText::new(format!("{} · input ack {:.0} ms", self.net.lobby.map,
                             self.net.predictor.latency_ms)).color(MUTED));
                         egui::Grid::new("match-scores").striped(true).show(ui, |ui| {
-                            ui.label("Player"); ui.label("Team"); ui.label("K / D"); ui.label("Ping"); ui.end_row();
+                            ui.label("Player"); ui.label("Team");
+                            ui.label(if w.ball.active { "Points / D" } else { "K / D" }); ui.label("Ping"); ui.end_row();
                             for p in snapshot.players.iter().filter(|p| p.net_id != 0) {
                                 let team = if p.team == crate::sim::Team::Ember { "Ember" } else { "Glacier" };
                                 let color = if p.team == crate::sim::Team::Ember { EMBER } else { GLACIER };
@@ -686,68 +924,86 @@ impl PeakRunnerApp {
     }
 
     fn menu_ui(&mut self, ui: &mut egui::Ui) {
+        use peakrunner_core::map_catalog::{self, SupportedMode};
+        // Maps the chosen mode can use (QA staging can widen Football and
+        // Capture & Hold to any map).
+        let maps_for = |mode: SupportedMode| -> Vec<terrain::MapInfo> {
+            terrain::maps().into_iter().filter(|m| match mode {
+                SupportedMode::Football if crate::qa_overrides::football_staged() => true,
+                SupportedMode::CaptureAndHold if crate::qa_overrides::staged_point_count().is_some_and(|n| n >= 2) => true,
+                _ => map_catalog::supports(m.id, mode),
+            }).collect()
+        };
+        let card = |ui: &mut egui::Ui, on: bool, title: &str, detail: &str, width: f32| -> bool {
+            let fill = if on { Color32::from_rgb(34, 58, 78) } else { Color32::from_rgb(20, 26, 36) };
+            let stroke = if on { egui::Stroke::new(2.0, GLACIER) } else { egui::Stroke::new(1.0, Color32::from_rgb(44, 54, 68)) };
+            let response = egui::Frame::new().fill(fill).stroke(stroke).corner_radius(8.0).inner_margin(egui::Margin::symmetric(12, 9))
+                .show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(width);
+                        ui.set_min_height(58.0);
+                        ui.label(RichText::new(title).color(if on { FG } else { Color32::from_rgb(210, 216, 226) }).size(15.0).strong());
+                        ui.add(egui::Label::new(RichText::new(detail).color(MUTED).size(11.5)).wrap());
+                    });
+                }).response.interact(egui::Sense::click());
+            response.clicked()
+        };
         egui::Area::new(egui::Id::new("menu"))
-            .anchor(Align2::LEFT_BOTTOM, Vec2::new(36.0, -28.0))
+            .anchor(Align2::LEFT_CENTER, Vec2::new(36.0, 0.0))
             .show(ui.ctx(), |ui| {
-                ui.set_width(560.0);
-                ui.label(RichText::new("SKI THE RIDGELINE").color(GLACIER).size(13.0));
-                ui.add_space(4.0);
-                ui.label(RichText::new("PEAKRUNNER").color(FG).size(64.0).strong());
-                ui.add_space(6.0);
-                ui.label(RichText::new("Hold Space to ski, carry speed downhill, then jet over the next ridge. WASD steers on slopes and in the air. Right click gives lift; release it to recharge.").color(MUTED));
+                egui::Frame::new().fill(Color32::from_rgba_unmultiplied(10, 14, 22, 226)).corner_radius(14.0)
+                    .inner_margin(24.0).stroke(egui::Stroke::new(1.0, Color32::from_rgb(40, 52, 68))).show(ui, |ui| {
+                ui.set_width(600.0);
+                ui.label(RichText::new("PEAKRUNNER").color(FG).size(52.0).strong());
+                ui.label(RichText::new("Ski the ridgelines, jet the gaps, take their flag.").color(MUTED));
                 ui.add_space(14.0);
-                ui.horizontal(|ui| {
-                    team_button(ui, "Ember", self.ember, EMBER, || self.ember = true);
-                    team_button(ui, "Glacier", !self.ember, GLACIER, || self.ember = false);
-                });
-                ui.add_space(12.0);
-                ui.label(RichText::new("MAP").color(GLACIER).size(13.0));
+
+                ui.label(RichText::new("1 · GAME MODE").color(GLACIER).size(13.0));
                 ui.add_space(4.0);
                 ui.horizontal_wrapped(|ui| {
-                    for spec in terrain::maps() {
-                        let on = self.map == spec.id;
-                        let label = format!("{} · {}", spec.name, if spec.size >= 1000.0 { format!("{:.1} km", spec.size / 1000.0) } else { format!("{:.0} m", spec.size) });
-                        let fill = if on { FG } else { Color32::from_rgb(22, 28, 38) };
-                        let text = if on { BG } else { FG };
-                        if ui.add(egui::Button::new(RichText::new(label).color(text)).fill(fill).min_size(Vec2::new(168.0, 36.0))).clicked() {
+                    for (mode, detail) in [(SupportedMode::Ctf, "Grab their flag, bring it home. Stations, turrets, deployables."),
+                        (SupportedMode::CaptureAndHold, "Hold capture towers to score. First to 300."),
+                        (SupportedMode::Football, "No weapons. Pass, tackle, carry it into their end zone."),
+                        (SupportedMode::TeamDeathmatch, "Team frags score. Random time of day, weather and a twist.")] {
+                        let usable = !maps_for(mode).is_empty();
+                        if card(ui, self.game_mode == mode, mode.label(), if usable { detail } else { "No maps for this yet." }, 170.0) && usable {
+                            self.game_mode = mode;
+                        }
+                    }
+                });
+                // Keep the map valid for the mode.
+                let maps = maps_for(self.game_mode);
+                if !maps.iter().any(|m| m.id == self.map) {
+                    if let Some(first) = maps.first() { self.map = first.id; self.world.set_map(first.id); }
+                }
+                ui.add_space(12.0);
+
+                ui.label(RichText::new("2 · MAP").color(GLACIER).size(13.0));
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    for spec in &maps {
+                        let size = if spec.size >= 1000.0 { format!("{:.1} km", spec.size / 1000.0) } else { format!("{:.0} m", spec.size) };
+                        if card(ui, self.map == spec.id, &format!("{} · {size}", spec.name), spec.note, 170.0) {
                             self.map = spec.id;
                             self.world.set_map(spec.id);
                         }
                     }
                 });
-                if let Some(spec) = terrain::maps().iter().find(|m| m.id == self.map) {
-                    ui.label(RichText::new(spec.note).color(MUTED).size(13.0));
-                }
-                ui.add_space(10.0);
-                ui.label(RichText::new("MODE").color(GLACIER).size(13.0));
+                ui.add_space(12.0);
+
+                ui.label(RichText::new("3 · TEAM AND BOTS").color(GLACIER).size(13.0));
                 ui.add_space(4.0);
-                let points = crate::qa_overrides::staged_point_count().unwrap_or_else(||
-                    peakrunner_core::map_pack::on(self.map).map_or(0, |p| p.manifest.control_points.len()));
                 ui.horizontal(|ui| {
-                    use peakrunner_core::map_catalog::SupportedMode;
-                    for (mode, label) in [(SupportedMode::Ctf, "Capture the Flag"), (SupportedMode::CaptureAndHold, "Capture & Hold")] {
-                        let usable = mode == SupportedMode::Ctf || points >= 2;
-                        let on = self.game_mode == mode && usable;
-                        let fill = if on { FG } else { Color32::from_rgb(22, 28, 38) };
-                        let text = if on { BG } else if usable { FG } else { MUTED };
-                        let button = egui::Button::new(RichText::new(label).color(text)).fill(fill).min_size(Vec2::new(168.0, 36.0));
-                        if ui.add_enabled(usable, button).clicked() { self.game_mode = mode; }
-                    }
-                });
-                if points < 2 {
-                    ui.label(RichText::new("Capture & Hold needs a map with capture towers; none are placed yet.").color(MUTED).size(12.0));
-                }
-                ui.add_space(10.0);
-                ui.label(RichText::new("BOTS").color(GLACIER).size(13.0));
-                ui.add_space(4.0);
-                ui.horizontal_wrapped(|ui| {
+                    team_button(ui, "Ember", self.ember, EMBER, || self.ember = true);
+                    team_button(ui, "Glacier", !self.ember, GLACIER, || self.ember = false);
+                    ui.add_space(12.0);
                     use peakrunner_core::bot_nav::Difficulty;
                     let current = self.world.bot_difficulty;
                     for difficulty in Difficulty::ALL {
                         let on = current == difficulty;
                         let fill = if on { FG } else { Color32::from_rgb(22, 28, 38) };
                         let text = if on { BG } else { FG };
-                        let button = egui::Button::new(RichText::new(difficulty.label()).color(text)).fill(fill).min_size(Vec2::new(82.0, 36.0));
+                        let button = egui::Button::new(RichText::new(difficulty.label()).color(text)).fill(fill).min_size(Vec2::new(72.0, 36.0));
                         if ui.add(button).clicked() {
                             self.world.set_bot_difficulty(difficulty);
                             #[cfg(not(target_arch = "wasm32"))]
@@ -756,29 +1012,216 @@ impl PeakRunnerApp {
                     }
                 });
                 let about = match self.world.bot_difficulty {
-                    peakrunner_core::bot_nav::Difficulty::Easy => "Mostly rookies: slow to react, wide of the mark.",
-                    peakrunner_core::bot_nav::Difficulty::Normal => "A spread of grunts, riders, skirmishers, anchors and hawks.",
-                    peakrunner_core::bot_nav::Difficulty::Hard => "Quick, accurate skiers, jetters, high-flying hawks and aces.",
-                    peakrunner_core::bot_nav::Difficulty::Mixed => "Any personality, from rookie to ace.",
+                    peakrunner_core::bot_nav::Difficulty::Easy => "Bots: mostly rookies, slow to react, wide of the mark.",
+                    peakrunner_core::bot_nav::Difficulty::Normal => "Bots: a spread of grunts, riders, skirmishers, anchors and hawks.",
+                    peakrunner_core::bot_nav::Difficulty::Hard => "Bots: quick, accurate skiers, jetters, high-flying hawks and aces.",
+                    peakrunner_core::bot_nav::Difficulty::Mixed => "Bots: any personality, from rookie to ace.",
                 };
                 ui.label(RichText::new(about).color(MUTED).size(12.0));
-                ui.add_space(12.0);
-                if ui.add(egui::Button::new(RichText::new("Start match").size(20.0).color(BG)).fill(FG).min_size(Vec2::new(180.0, 44.0))).clicked() {
-                    self.start(ui.ctx());
-                }
-                if ui.add(secondary_button("Find match").min_size(Vec2::new(180.0, 40.0))).clicked() {
-                    self.open_browser();
-                }
                 ui.add_space(16.0);
                 ui.horizontal(|ui| {
-                    hint(ui, "Move", "WASD");
-                    hint(ui, "Look", "Mouse");
-                    hint(ui, "Jump / ski", "Space");
+                    if ui.add(egui::Button::new(RichText::new("Start match").size(20.0).color(BG)).fill(FG).min_size(Vec2::new(200.0, 46.0))).clicked() {
+                        self.start(ui.ctx());
+                    }
+                    if ui.add(secondary_button("Find match").min_size(Vec2::new(160.0, 46.0))).clicked() {
+                        self.open_browser();
+                    }
+                });
+                ui.add_space(14.0);
+                ui.horizontal_wrapped(|ui| {
+                    use crate::keybinds::Action;
+                    let k = &self.ctl.keys;
+                    hint(ui, "Move", &[Action::Forward, Action::Left, Action::Back, Action::Right].map(|a| k.name(a)).concat());
+                    hint(ui, "Ski / jump", k.name(Action::Jump));
                     hint(ui, "Jet", "Right click");
-                    hint(ui, "Jet steer", "WASD");
-                    hint(ui, "Fire", "Click · 1/2/3");
+                    hint(ui, "Fire", &format!("Click · {}/{}/{}", k.name(Action::Disc), k.name(Action::Chaingun), k.name(Action::Launcher)));
+                    hint(ui, "Repair", &format!("Hold {}", k.name(Action::Repair)));
+                    hint(ui, "Inventory", &format!("{} at a station", k.name(Action::Use)));
+                    hint(ui, "Grenade / mine", &format!("{} / {}", k.name(Action::Grenade), k.name(Action::Mine)));
+                    hint(ui, "Deploy", k.name(Action::Deploy));
+                    hint(ui, "Respawn", &format!("Ctrl+{}", k.name(Action::Suicide)));
+                    if ui.add(secondary_button("Controls…")).clicked() { self.ctl.keys_open = true; }
+                });
+                    });
+            });
+    }
+
+    fn close_shop(&mut self) {
+        if self.ctl.shop_open {
+            self.ctl.shop_open = false;
+            // The click on a button isn't a shot.
+            self.wait_fire_release = true;
+        }
+    }
+
+    /// The inventory screen, laid out like base Tribes' station menu: Armor,
+    /// Weapons, Packs, Miscellany. Standing at the station heals you and
+    /// restocks rounds, grenades and mines; the buttons (or 1-6) pick armor
+    /// and a pack. Purchases are intents the server checks.
+    fn shop_ui(&mut self, ctx: &egui::Context) {
+        use peakrunner_core::sim::{deploy::{team_limit, DeployKind}, loadout::*, throwables::max_throwables};
+        use crate::keybinds::Action;
+        let Some(me) = self.world.players.get(self.world.player_id).cloned() else { return };
+        let out = |kind: DeployKind| self.world.deployables.iter().filter(|e| e.team == me.team && e.kind == kind).count();
+        let heavy = me.armor == ArmorClass::Heavy;
+        let max = max_ammo(me.armor);
+        let throws = max_throwables(me.armor);
+        let packs = [(DeployKind::Turret, BUY_TURRET, "Turret", "Chaingun rounds at enemies in sight, 70 m."),
+            (DeployKind::Wall, BUY_WALL, "Wall", "Solid cover. Stops everyone and every shot."),
+            (DeployKind::Field, BUY_FIELD, "Force field", "A door for your team; a wall for theirs."),
+            (DeployKind::Ammo, BUY_AMMO, "Ammo station", "Your team restocks here.")];
+        let mut buy = 0u8;
+        ctx.input(|i| for (key, code) in [(egui::Key::Num1, BUY_LIGHT), (egui::Key::Num2, BUY_HEAVY), (egui::Key::Num3, BUY_TURRET),
+            (egui::Key::Num4, BUY_WALL), (egui::Key::Num5, BUY_FIELD), (egui::Key::Num6, BUY_AMMO), (egui::Key::Num7, BUY_RIFLE)] {
+            if i.key_pressed(key) { buy = code; }
+        });
+        let mut close = false;
+        let heading = |ui: &mut egui::Ui, text: &str| {
+            ui.add_space(8.0);
+            ui.label(RichText::new(text).size(13.0).color(GLACIER).strong());
+            ui.separator();
+        };
+        egui::Area::new(egui::Id::new("inventory_station"))
+            .order(egui::Order::Foreground)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(Color32::from_rgba_unmultiplied(12, 18, 28, 240))
+                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(40, 70, 90)))
+                    .corner_radius(10.0)
+                    .inner_margin(20.0)
+                    .show(ui, |ui| {
+                        let width = (ctx.content_rect().width() - 64.0).clamp(280.0, 560.0);
+                        ui.set_width(width);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Inventory station").size(24.0).color(FG).strong());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.add(secondary_button("Close")).clicked() { close = true; }
+                            });
+                        });
+                        ui.label(RichText::new("Standing here heals you and restocks rounds, grenades and mines.").size(12.0).color(MUTED));
+                        // A row: its shortcut, name and blurb; a note (counts); and, for
+                        // things you can take, a button, disabled with `why` when not.
+                        let row = |ui: &mut egui::Ui, key: &str, name: &str, about: &str, note: &str, action: Option<(bool, &str)>| -> bool {
+                            let mut clicked = false;
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(key).monospace().color(MUTED));
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new(name).size(15.0).color(FG));
+                                    ui.label(RichText::new(about).size(11.0).color(MUTED));
+                                });
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if let Some((enabled, why)) = action {
+                                        clicked = ui.add_enabled(enabled, egui::Button::new(RichText::new(if enabled { "Take" } else { why }).color(FG))
+                                            .min_size(Vec2::new(86.0, 26.0))).clicked();
+                                    }
+                                    if !note.is_empty() { ui.label(RichText::new(note).size(12.0).color(GLACIER)); }
+                                });
+                            });
+                            clicked
+                        };
+                        egui::ScrollArea::vertical().max_height((ctx.content_rect().height() - 160.0).max(200.0)).show(ui, |ui| {
+                            heading(ui, "ARMOR");
+                            if row(ui, "1", "Light armor", "Fast, jets hard. Carries the grenade launcher.", "", Some((heavy, "Wearing"))) { buy = BUY_LIGHT; }
+                            if row(ui, "2", "Heavy armor", "Twice the armor, slow, a long weak jet. Carries the mortar.", "", Some((!heavy, "Wearing"))) { buy = BUY_HEAVY; }
+                            heading(ui, "WEAPONS");
+                            let third = if heavy { "Mortar" } else { "Grenade launcher" };
+                            for (k, (name, about)) in [("Disc launcher", "Splash damage and disc jumps."), ("Chaingun", "Fast rounds, some spread."),
+                                (third, if heavy { "Sticks where it lands; a big blast." } else { "Bouncing shells on a short fuse." })].into_iter().enumerate() {
+                                row(ui, " ", name, about, &format!("{}/{}", me.ammo[k], max[k]), None);
+                            }
+                            let (rifle, blurb) = if heavy { ("Railgun", "Heavy only. A very fast straight slug; hard hitting. Hold E to zoom.") }
+                                else { ("Laser rifle", "Light only. An instant beam at any range; spends energy. Hold E to zoom.") };
+                            let note = if !me.rifle { String::new() } else if heavy { format!("{}/{}", me.ammo[3], max[3]) } else { "Energy".to_string() };
+                            if row(ui, "7", rifle, blurb, &note, Some((!me.rifle, "Carrying"))) { buy = BUY_RIFLE; }
+                            heading(ui, "PACKS · one at a time");
+                            for (n, (kind, code, name, about)) in packs.into_iter().enumerate() {
+                                let carrying = me.pack == Some(kind);
+                                let full = out(kind) >= team_limit(kind);
+                                // A full team can still carry one, to place when one comes down.
+                                let note = format!("{}/{} out{}", out(kind), team_limit(kind), if full { " (full)" } else { "" });
+                                if row(ui, &(n + 3).to_string(), name, about, &note, Some((!carrying, "Carrying"))) { buy = code; }
+                            }
+                            heading(ui, "MISCELLANY");
+                            let keys = &self.ctl.keys;
+                            row(ui, " ", "Grenades", &format!("Hold {} to wind up, release to throw. 2 s fuse.", keys.name(Action::Grenade)),
+                                &format!("{}/{}", me.throwables[0], throws[0]), None);
+                            row(ui, " ", "Mines", &format!("Hold {} to throw. Arms at rest; enemies set it off.", keys.name(Action::Mine)),
+                                &format!("{}/{}", me.throwables[1], throws[1]), None);
+                            row(ui, " ", "Repair tool", &format!("Hold {}. Spends energy.", keys.name(Action::Repair)), "Carried", None);
+                        });
+                        ui.add_space(6.0);
+                        ui.label(RichText::new(format!("{} or Esc closes · 1-7 take", self.ctl.keys.name(Action::Use))).size(11.0).color(MUTED));
+                    });
+            });
+        if buy != 0 { self.world.input.buy = buy; }
+        if close { self.close_shop(); }
+    }
+
+    /// Key bindings: click an action, then press its new key. A key already
+    /// in use swaps onto the action's old key. Saved with the preferences.
+    fn controls_ui(&mut self, ctx: &egui::Context) {
+        use crate::keybinds::{Action, Keybinds};
+        if let Some(action) = self.ctl.rebinding {
+            let pressed = ctx.input_mut(|i| {
+                let key = i.events.iter().find_map(|e| match e {
+                    egui::Event::Key { key, pressed: true, repeat: false, .. } => Some(*key),
+                    _ => None,
+                });
+                if key.is_some() { i.events.retain(|e| !matches!(e, egui::Event::Key { .. } | egui::Event::Text(_))); }
+                key
+            });
+            if let Some(key) = pressed {
+                if key != egui::Key::Escape { self.ctl.keys.bind(action, key); }
+                self.ctl.rebinding = None;
+                self.save_keys();
+            }
+        }
+        let mut open = true;
+        let mut reset = false;
+        egui::Window::new("Controls")
+            .order(egui::Order::Foreground)
+            .frame(egui::Frame::new().fill(Color32::from_rgb(16, 22, 32)).stroke(egui::Stroke::new(1.0, Color32::from_rgb(40, 70, 90))).corner_radius(10.0).inner_margin(16.0))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.label(RichText::new("Click an action, then press a key. Esc cancels. Mouse: left fire, right jet. Arrow keys also move.")
+                    .size(12.0).color(MUTED));
+                egui::ScrollArea::vertical().max_height((ctx.content_rect().height() - 180.0).max(200.0)).show(ui, |ui| {
+                    egui::Grid::new("keybinds").num_columns(2).spacing([24.0, 6.0]).striped(true).show(ui, |ui| {
+                        for action in Action::ALL {
+                            ui.label(RichText::new(action.label()).color(FG));
+                            let waiting = self.ctl.rebinding == Some(action);
+                            let text = if waiting { "Press a key…".to_string() } else if action == Action::Suicide {
+                                format!("Ctrl+{}", self.ctl.keys.name(action)) } else { self.ctl.keys.name(action).to_string() };
+                            if ui.add(egui::Button::new(RichText::new(text).monospace()).selected(waiting).min_size(Vec2::new(120.0, 24.0))).clicked() {
+                                self.ctl.rebinding = if waiting { None } else { Some(action) };
+                            }
+                            ui.end_row();
+                        }
+                    });
+                });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(!self.ctl.keys.is_default(), egui::Button::new("Reset to defaults")).clicked() { reset = true; }
                 });
             });
+        if reset {
+            self.ctl.keys = Keybinds::default();
+            self.ctl.rebinding = None;
+            self.save_keys();
+        }
+        if !open {
+            self.ctl.keys_open = false;
+            self.ctl.rebinding = None;
+        }
+    }
+
+    fn save_keys(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.net.preferences.set_keys(self.ctl.keys.clone());
     }
 
     fn pause_ui(&mut self, ui: &mut egui::Ui) {
@@ -820,6 +1263,7 @@ impl PeakRunnerApp {
                         if big(ui, "Resume", true) {
                             self.resume(ui.ctx());
                         }
+                        if big(ui, "Controls", false) { self.ctl.keys_open = true; }
                         let mute = if self.audio.muted() { "Unmute" } else { "Mute" };
                         if big(ui, mute, false) {
                             let next = !self.audio.muted();
@@ -948,14 +1392,14 @@ fn play_hud(
     painter.text(
         rect.center_top() + Vec2::new(0.0, 18.0),
         Align2::CENTER_TOP,
-        format!("{}    {mm}:{ss:02}    {}", hud.ember, hud.glacier),
+        match &hud.ffa_line { Some(line) => format!("{line}    {mm}:{ss:02}"), None => format!("{}    {mm}:{ss:02}    {}", hud.ember, hud.glacier) },
         FontId::proportional(26.0),
         FG,
     );
     painter.text(
         rect.center_top() + Vec2::new(0.0, 50.0),
         Align2::CENTER_TOP,
-        hud.goal,
+        if hud.conditions.is_empty() { hud.goal.to_string() } else { format!("{} · {}", hud.goal, hud.conditions) },
         FontId::proportional(12.0),
         MUTED,
     );
@@ -988,13 +1432,44 @@ fn play_hud(
         painter.text(
             rect.center_top() + Vec2::new(0.0, 124.0),
             Align2::CENTER_TOP,
-            "Your flag is on the snow",
+            "Your flag is down · touch it to return it",
             FontId::proportional(15.0),
             EMBER,
         );
     }
+    // The enemy flag lying loose is a chance: say so (the marker shows where).
+    if hud.enemy_flag == 3 && hud.flag < 0 && !hud.football {
+        painter.text(
+            rect.center_top() + Vec2::new(0.0, if hud.own_flag == 1 { 124.0 } else { 144.0 }),
+            Align2::CENTER_TOP,
+            "Their flag is down · grab it",
+            FontId::proportional(15.0),
+            GLACIER,
+        );
+    }
 
     let c = rect.center();
+    if hud.zoomed {
+        // A sight: dark surround outside a circle, fine cross hairs.
+        let r = rect.height().min(rect.width())*0.42;
+        let shade = Color32::from_black_alpha(215);
+        painter.rect_filled(egui::Rect::from_min_max(rect.min, egui::pos2(c.x-r, rect.max.y)), 0.0, shade);
+        painter.rect_filled(egui::Rect::from_min_max(egui::pos2(c.x+r, rect.min.y), rect.max), 0.0, shade);
+        painter.rect_filled(egui::Rect::from_min_max(egui::pos2(c.x-r, rect.min.y), egui::pos2(c.x+r, c.y-r)), 0.0, shade);
+        painter.rect_filled(egui::Rect::from_min_max(egui::pos2(c.x-r, c.y+r), egui::pos2(c.x+r, rect.max.y)), 0.0, shade);
+        for k in 0..48 {
+            let a0 = k as f32/48.0*std::f32::consts::TAU; let a1 = (k+1) as f32/48.0*std::f32::consts::TAU;
+            // Corner wedges between the square and the circle.
+            let corner = |a: f32| egui::pos2(c.x+a.cos()*r*1.42, c.y+a.sin()*r*1.42);
+            painter.add(egui::Shape::convex_polygon(vec![egui::pos2(c.x+a0.cos()*r, c.y+a0.sin()*r), corner(a0), corner(a1),
+                egui::pos2(c.x+a1.cos()*r, c.y+a1.sin()*r)], shade, egui::Stroke::NONE));
+        }
+        painter.circle_stroke(c, r, egui::Stroke::new(2.0, Color32::from_rgb(120, 220, 255)));
+        for (a, b) in [(egui::vec2(-r, 0.0), egui::vec2(-8.0, 0.0)), (egui::vec2(8.0, 0.0), egui::vec2(r, 0.0)),
+            (egui::vec2(0.0, -r), egui::vec2(0.0, -8.0)), (egui::vec2(0.0, 8.0), egui::vec2(0.0, r))] {
+            painter.line_segment([c+a, c+b], egui::Stroke::new(1.0, Color32::from_rgb(120, 220, 255)));
+        }
+    }
     let hit = if hud.hit > 0.0 { EMBER } else { FG };
     for (a, b) in [
         (c + Vec2::new(-14.0, 0.0), c + Vec2::new(-6.0, 0.0)),
@@ -1007,23 +1482,63 @@ fn play_hud(
 
     bar(ui, rect.left_bottom() + Vec2::new(22.0, -78.0), "Armor", hud.health, 100.0, EMBER);
     bar(ui, rect.left_bottom() + Vec2::new(22.0, -48.0), "Energy", hud.energy, ENERGY_MAX, GLACIER);
-    if hud.alive == 1 {
-        let (text, color) = if hud.kit_heal > 0.0 { (format!("Repair kit · healing +{:.0}", hud.kit_heal), EMBER) }
-            else if hud.kits > 0 { (format!("Repair kit ×{} · Q", hud.kits), FG) }
-            else { ("No repair kit · refill at an inventory station".to_string(), MUTED) };
-        painter.text(rect.left_bottom() + Vec2::new(214.0, -64.0), Align2::LEFT_BOTTOM, text, FontId::proportional(13.0), color);
+    if hud.alive == 1 && !hud.football {
+        let armor = if hud.armor == 1 { "Heavy armor" } else { "Light armor" };
+        use crate::keybinds::Action;
+        let k = &hud.keys;
+        let (text, color) = if hud.repairing == 1 { (format!("{armor} · repairing…"), Color32::from_rgb(120, 230, 140)) }
+            else { (format!("{armor} · hold {} to repair", k.name(Action::Repair)), FG) };
+        painter.text(rect.left_bottom() + Vec2::new(214.0, -78.0), Align2::LEFT_BOTTOM, text, FontId::proportional(13.0), color);
+        let pack = match hud.pack { 0 => "Turret pack", 1 => "Wall pack", 2 => "Force field pack", 3 => "Ammo station pack", _ => "" };
+        if !pack.is_empty() {
+            painter.text(rect.left_bottom() + Vec2::new(214.0, -60.0), Align2::LEFT_BOTTOM,
+                format!("{pack} · {} to deploy", k.name(Action::Deploy)), FontId::proportional(13.0), GLACIER);
+        }
+        if let Some(problem) = hud.placing {
+            let (text, color) = if problem.is_empty() { ("Click to place".to_string(), GLACIER) }
+                else { (problem.to_string(), MUTED) };
+            painter.text(rect.center() + Vec2::new(0.0, 34.0), Align2::CENTER_TOP, text, FontId::proportional(15.0), color);
+            painter.text(rect.center() + Vec2::new(0.0, 54.0), Align2::CENTER_TOP,
+                format!("Wheel or {} turns · {} puts it away", k.name(Action::View), k.name(Action::Deploy)),
+                FontId::proportional(12.0), MUTED);
+        }
+        // Grenades and mines, and the wind-up while one is held.
+        painter.text(rect.left_bottom() + Vec2::new(214.0, -42.0), Align2::LEFT_BOTTOM,
+            format!("Grenades {}/{} ({}) · Mines {}/{} ({})", hud.grenades, hud.grenades_max, k.name(Action::Grenade),
+                hud.mines, hud.mines_max, k.name(Action::Mine)), FontId::proportional(13.0), MUTED);
+        if let Some((what, held)) = hud.winding {
+            let t = (held / peakrunner_core::sim::throwables::WIND_UP).clamp(0.0, 1.0);
+            let at = rect.center() + Vec2::new(-60.0, 46.0);
+            painter.rect_filled(egui::Rect::from_min_size(at, Vec2::new(120.0, 6.0)), 3.0, Color32::from_black_alpha(140));
+            painter.rect_filled(egui::Rect::from_min_size(at, Vec2::new(120.0 * (0.3 + 0.7 * t), 6.0)), 3.0, EMBER);
+            painter.text(at + Vec2::new(60.0, 10.0), Align2::CENTER_TOP,
+                if what == peakrunner_core::sim::throwables::THROW_MINE { "Mine" } else { "Grenade" }, FontId::proportional(12.0), FG);
+        }
+        let use_key = k.name(Action::Use);
+        let station = match hud.station {
+            1 => format!("INVENTORY STATION · {use_key} to open"),
+            2 => format!("AMMO STATION · hold {use_key} to restock"),
+            _ => String::new(),
+        };
+        if !station.is_empty() {
+            painter.text(rect.center_bottom() + Vec2::new(0.0, -120.0), Align2::CENTER_BOTTOM, station, FontId::proportional(14.0), GLACIER);
+        }
     }
     painter.text(
         rect.center_bottom() + Vec2::new(0.0, -56.0),
         Align2::CENTER_BOTTOM,
-        match hud.weapon { 0 => "Disc", 1 => "Chaingun", _ => "Grenade launcher" },
+        &if hud.football { "Football".to_string() } else {
+            let name = match hud.weapon { 0 => "Disc", 1 => "Chaingun", 3 if hud.rifle == 2 => "Railgun", 3 => "Laser rifle",
+                _ if hud.armor == 1 => "Mortar", _ => "Grenade launcher" };
+            if hud.placing.is_some() { "Deployer".to_string() } else { format!("{name} · {}/{}", hud.ammo, hud.ammo_max) }
+        },
         FontId::proportional(22.0),
         FG,
     );
     painter.text(
         rect.center_bottom() + Vec2::new(0.0, -32.0),
         Align2::CENTER_BOTTOM,
-        format!("{} frag · {} down", hud.kills, hud.deaths),
+        if hud.football { format!("{} pts · {} down", hud.kills, hud.deaths) } else { format!("{} frag · {} down", hud.kills, hud.deaths) },
         FontId::proportional(13.0),
         MUTED,
     );
@@ -1031,7 +1546,8 @@ fn play_hud(
         painter.text(
             rect.right_bottom() + Vec2::new(-22.0, -40.0),
             Align2::RIGHT_BOTTOM,
-            format!("Hold Space to ski · Right click jet · Esc\n{}", if hud.team == 0 { "Ember" } else { "Glacier" }),
+            format!("Hold {} to ski · Right click jet · Ctrl+{} respawn · Esc\n{}", hud.keys.name(crate::keybinds::Action::Jump),
+                hud.keys.name(crate::keybinds::Action::Suicide), if hud.team == 0 { "Ember" } else { "Glacier" }),
             FontId::proportional(13.0),
             MUTED,
         );

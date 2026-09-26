@@ -12,7 +12,7 @@
 //! `genN=boom` destroys team N's generators `QA_BOOM_AT` seconds in (default
 //! 5): the hull drops to zero, the generator blast plays, and the wreck and
 //! announcement follow through the normal paths. `QA_KIT=heal` shows the local
-//! player mid-way through a repair kit.
+//! player repairing themselves (the repair tool's HUD and beam).
 //! An optional fourth field stages a pose for animation captures: `dive`
 //! (airborne, pitched down, firing), `land@T` (falling until `T` seconds,
 //! then grounded: a hard landing) or `switch@T` (disc launcher until `T`,
@@ -24,6 +24,7 @@
 //! control points (`name:x,y,z[:drain][:rRADIUS]`) on any map, `QA_POINT_STATE="0=1/0.4/0/c"`
 //! forces point `index=owner/progress/capturing[/c for contested]` (`-` = none),
 //! and `QA_MODE=cnh` with `QA_SCORE=120,45` shows Capture & Hold on the client.
+//! `QA_MODE=football` starts offline matches in Football on any map.
 //! `QA_ROUNDS="1:1010,246,870:0,0,-300;0:..."` stages projectiles in flight
 //! (`kind:x,y,z:vx,vy,vz`, kind 0 disc, 1 bullet, 2 grenade, 3 plasma). Each
 //! loops along its velocity over 0.25 s so incoming fire can be captured.
@@ -34,7 +35,7 @@ use peakrunner_core::sim::{Team, World};
 use std::sync::OnceLock;
 
 #[derive(Clone, Copy)]
-enum StagedPose { Stand, Dive, Land(f32), Switch(f32), Splash(f32) }
+enum StagedPose { Stand, Dive, Land(f32), Switch(f32), Splash(f32), Run, Ski, Rise, Fall, Jet, Repair }
 
 struct Overrides { equipment: Vec<(usize, f32, f32)>, down: Vec<u8>, boom: Vec<u8>, boom_at: f32, kit_heal: bool, players: Vec<(String, Team, Vec3, bool, StagedPose)>, started: std::time::Instant, carry_at: f32, rounds: Vec<(u8, Vec3, Vec3)>, blasts: Vec<(u8, Vec3, f32)> }
 
@@ -91,6 +92,12 @@ fn parse() -> Option<&'static Overrides> {
             let pose = match parts.get(3) {
                 None => StagedPose::Stand,
                 Some(&"dive") => StagedPose::Dive,
+                Some(&"run") => StagedPose::Run,
+                Some(&"ski") => StagedPose::Ski,
+                Some(&"rise") => StagedPose::Rise,
+                Some(&"fall") => StagedPose::Fall,
+                Some(&"jet") => StagedPose::Jet,
+                Some(&"repair") => StagedPose::Repair,
                 Some(_) => at("land@").map(StagedPose::Land).or_else(|| at("switch@").map(StagedPose::Switch))
                     .or_else(|| at("splash@").map(StagedPose::Splash)).unwrap_or(StagedPose::Stand),
             };
@@ -125,7 +132,7 @@ pub fn apply(world: &mut World) {
     }
     peakrunner_core::equipment::power(defs, &mut world.equipment);
     if o.kit_heal {
-        if let Some(p) = world.players.get_mut(world.player_id) { p.kits = 0; p.kit_heal = 35.0; p.health = 55.0; }
+        if let Some(p) = world.players.get_mut(world.player_id) { p.repair_beam = Some(p.pos + Vec3::Y * 0.9); p.health = 55.0; }
     }
     for &(i, h, s) in &o.equipment {
         if let Some(state) = world.equipment.get_mut(i) { state.health = h; if state.powered { state.shield = s; } }
@@ -159,6 +166,22 @@ pub fn apply(world: &mut World) {
         p.on_ground = true; p.jetting = false; p.skiing = false;
         match *pose {
             StagedPose::Stand => {}
+            StagedPose::Repair => {
+                let fwd = Vec3::new(-p.yaw.sin(), 0.0, -p.yaw.cos());
+                p.repair_beam = Some(p.pos + fwd * 5.0 + Vec3::Y * 0.4);
+            }
+            // Movement poses: moving along the player's facing.
+            StagedPose::Run | StagedPose::Ski | StagedPose::Rise | StagedPose::Fall | StagedPose::Jet => {
+                let fwd = Vec3::new(-p.yaw.sin(), 0.0, -p.yaw.cos());
+                let (speed, vy, ground, ski, jet) = match pose {
+                    StagedPose::Run => (11.0, 0.0, true, false, false),
+                    StagedPose::Ski => (34.0, 0.0, true, true, false),
+                    StagedPose::Rise => (9.0, 6.0, false, false, false),
+                    StagedPose::Fall => (9.0, -9.0, false, false, false),
+                    _ => (14.0, 7.0, false, false, true),
+                };
+                p.vel = fwd * speed + Vec3::Y * vy; p.on_ground = ground; p.skiing = ski; p.jetting = jet;
+            }
             StagedPose::Dive => {
                 p.on_ground = false; p.vel = Vec3::new(0.0, -24.0, -12.0); p.pitch = -1.0; p.weapon = 0;
                 p.cooldown = peakrunner_core::sim::weapon_reload(0) - 0.03;
@@ -201,6 +224,10 @@ fn qa_points() -> Option<&'static Vec<peakrunner_core::control::Definition>> {
 /// Number of QA-staged control points, if any are staged.
 pub fn staged_point_count() -> Option<usize> { qa_points().map(|d| d.len()) }
 
+/// `QA_MODE=football`: offline Football on any map (end zones fall back to the
+/// flag stands) before a stadium exists, for captures.
+pub fn football_staged() -> bool { std::env::var("QA_MODE").is_ok_and(|m| m == "football") }
+
 /// Put QA-staged control points into a world (offline start and client view).
 pub fn stage_points(world: &mut World) {
     if let Some(defs) = qa_points() { world.set_control_points(defs.clone()); }
@@ -208,7 +235,7 @@ pub fn stage_points(world: &mut World) {
 
 /// Client-view staging for control points, mode and score; see the module docs.
 pub fn apply_points(world: &mut World) {
-    let Some(defs) = qa_points() else { return; };
+    let Some(defs) = qa_points() else { apply_point_state(world); return; };
     if world.points.len() != defs.len() { world.set_control_points(defs.clone()); }
     if std::env::var("QA_MODE").is_ok_and(|m| m == "cnh") {
         world.mode = peakrunner_core::map_catalog::SupportedMode::CaptureAndHold;
@@ -217,6 +244,12 @@ pub fn apply_points(world: &mut World) {
             let v: Vec<u32> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
             (v.len() == 2).then(|| [v[0], v[1]]) }) { world.score = score; }
     }
+    apply_point_state(world);
+}
+
+/// `QA_POINT_STATE="0=1/0.4/0/c"`: owner / progress / capturing / contested
+/// for a point, staged or from the map.
+fn apply_point_state(world: &mut World) {
     for item in std::env::var("QA_POINT_STATE").unwrap_or_default().split(',') {
         let Some((i, v)) = item.split_once('=') else { continue; };
         let Ok(i) = i.trim().parse::<usize>() else { continue; };
@@ -229,3 +262,134 @@ pub fn apply_points(world: &mut World) {
         p.contested = f.get(3) == Some(&"c");
     }
 }
+
+/// Loadout staging for captures (client view only): `QA_DEPLOY="turret:0:x,y,z,yaw;wall:1:...;field:0:...;ammo:0:..."`
+/// places deployables (team 0 = Ember, yaw in radians); `QA_HEAVY="Name,Name"`
+/// puts those staged players in heavy armor (`QA_HEAVY=me` the local player);
+/// `QA_MORTAR="x,y,z"` shows a mortar shell hanging there;
+/// `QA_MORTAR_BLAST="x,y,z,age"` a mortar explosion that age (seconds) old.
+/// `QA_THROWN="mine:0:x,y,z;grenade:1:x,y,z"` shows resting mines (armed)
+/// and grenades; `QA_SHOP=1` opens the inventory screen (see app.rs);
+/// `QA_EMPTY=1` empties the local player's weapons.
+/// `QA_CONDITIONS="night,rain"` forces deathmatch conditions on the client
+/// (time dawn/day/dusk/night, weather clear/overcast/rain/storm/snow/fog;
+/// a view change only).
+pub fn apply_loadout(world: &mut World) {
+    use peakrunner_core::sim::deploy::{DeployKind, Deployable};
+    if let Ok(raw) = std::env::var("QA_CONDITIONS") {
+        use peakrunner_core::conditions::{TimeOfDay, Weather};
+        let mut c = world.conditions;
+        for word in raw.split(',') {
+            match word.trim() {
+                "dawn" => c.time = TimeOfDay::Dawn, "day" => c.time = TimeOfDay::Day,
+                "dusk" => c.time = TimeOfDay::Dusk, "night" => c.time = TimeOfDay::Night,
+                "clear" => c.weather = Weather::Clear, "overcast" => c.weather = Weather::Overcast,
+                "rain" => c.weather = Weather::Rain, "storm" => c.weather = Weather::Storm,
+                "snow" => c.weather = Weather::Snow, "fog" => c.weather = Weather::Fog,
+                _ => {}
+            }
+        }
+        if c.wind == [0.0, 0.0] { c.wind = [3.0, 1.5]; }
+        world.conditions = c;
+    }
+    if let Ok(raw) = std::env::var("QA_DEPLOY") {
+        world.deployables = raw.split(';').filter_map(|item| {
+            let parts: Vec<_> = item.split(':').collect();
+            let kind = match *parts.first()? { "turret" => DeployKind::Turret, "wall" => DeployKind::Wall, "field" => DeployKind::Field,
+                "ammo" => DeployKind::Ammo, _ => return None };
+            let team = if *parts.get(1)? == "0" { Team::Ember } else { Team::Glacier };
+            let v: Vec<f32> = parts.get(2)?.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            if v.len() != 4 { return None; }
+            Some(Deployable { kind, team, pos: Vec3::new(v[0], v[1], v[2]), yaw: v[3],
+                health: peakrunner_core::sim::deploy::max_health(kind), cooldown: 0.0, aim: Vec3::new(-v[3].sin(), 0.0, -v[3].cos()) })
+        }).collect();
+    }
+    if let Ok(raw) = std::env::var("QA_HEAVY") {
+        for name in raw.split(',') {
+            let slot = if name == "me" { Some(world.player_id) } else { world.players.iter().position(|p| p.name == name) };
+            if let Some(p) = slot.and_then(|i| world.players.get_mut(i)) { p.armor = peakrunner_core::sim::ArmorClass::Heavy; }
+        }
+    }
+    if let Some(at) = std::env::var("QA_MORTAR").ok().and_then(|s| {
+        let v: Vec<f32> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+        (v.len() == 3).then(|| Vec3::new(v[0], v[1], v[2])) }) {
+        if !world.discs.iter().any(|d| d.kind == peakrunner_core::sim::loadout::MORTAR_KIND) {
+            world.discs.push(peakrunner_core::sim::Disc { pos: at, vel: Vec3::ZERO, team: Team::Glacier, owner: 0,
+                life: peakrunner_core::sim::loadout::MORTAR_LIFE, kind: peakrunner_core::sim::loadout::MORTAR_KIND, spin: 0.0 });
+        }
+    }
+    if let Some(v) = std::env::var("QA_MORTAR_BLAST").ok().map(|s| s.split(',').filter_map(|x| x.trim().parse::<f32>().ok()).collect::<Vec<_>>())
+        .filter(|v| v.len() == 4) {
+        use peakrunner_core::sim::loadout::MORTAR_KIND;
+        world.explosions.retain(|e| e.kind != MORTAR_KIND);
+        world.explosions.push(peakrunner_core::sim::Explosion { pos: Vec3::new(v[0], v[1], v[2]), age: v[3],
+            max_r: peakrunner_core::combat::MORTAR.radius, kind: MORTAR_KIND });
+    }
+    // `QA_FLAG_DOWN="team:x,y,z"`: that team's flag (0 Ember) lies dropped there.
+    if let Some((team, at)) = std::env::var("QA_FLAG_DOWN").ok().and_then(|raw| {
+        let (t, xyz) = raw.split_once(':')?;
+        let v: Vec<f32> = xyz.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+        (v.len() == 3).then(|| (t == "1", Vec3::new(v[0], v[1], v[2])))
+    }) {
+        if let Some(f) = world.flags.iter_mut().find(|f| (f.team == Team::Glacier) == team) {
+            f.carrier = None;
+            f.pos = at;
+            f.drop_timer = 30.0;
+        }
+    }
+    // `QA_RIFLE=1` buys and raises the local player's rifle (`=heavy` buys
+    // heavy armor first, for the railgun); `QA_FIRE=1`
+    // (app.rs) holds the trigger; `QA_ZOOM=1` looks through the sight; `QA_THIRD=1`
+    // uses the third-person view.
+    // The local match is served, so the rifle is bought through the server
+    // (the spawn stands at the inventory station) rather than granted.
+    if let Ok(kind) = std::env::var("QA_RIFLE") {
+        use peakrunner_core::sim::{loadout::{BUY_HEAVY, BUY_RIFLE}, ArmorClass};
+        if let Some(p) = world.players.get(world.player_id) {
+            if kind == "heavy" && p.armor != ArmorClass::Heavy { world.input.buy = BUY_HEAVY; }
+            else if !p.rifle { world.input.buy = BUY_RIFLE; }
+        }
+        world.input.weapon = peakrunner_core::sim::rifles::RIFLE_SLOT;
+    }
+    if std::env::var_os("QA_ZOOM").is_some() { world.zoomed = true; }
+    if std::env::var_os("QA_THIRD").is_some() { world.third_person = true; }
+    if std::env::var_os("QA_EMPTY").is_some() {
+        if let Some(p) = world.players.get_mut(world.player_id) { p.ammo = [0; 4]; }
+    }
+    if let Ok(raw) = std::env::var("QA_THROWN") {
+        use peakrunner_core::sim::throwables::{GRENADE_KIND, MINE_KIND, MINE_LIFE, is_throwable};
+        world.discs.retain(|d| !is_throwable(d.kind));
+        for item in raw.split(';') {
+            let parts: Vec<_> = item.split(':').collect();
+            let Some(kind) = parts.first().and_then(|k| match *k { "mine" => Some(MINE_KIND), "grenade" => Some(GRENADE_KIND), _ => None }) else { continue };
+            let team = if parts.get(1) == Some(&"0") { Team::Ember } else { Team::Glacier };
+            let v: Vec<f32> = parts.get(2).map_or(Vec::new(), |p| p.split(',').filter_map(|x| x.trim().parse().ok()).collect());
+            if v.len() != 3 { continue; }
+            world.discs.push(peakrunner_core::sim::Disc { pos: Vec3::new(v[0], v[1], v[2]), vel: Vec3::ZERO, team, owner: 0,
+                life: if kind == MINE_KIND { MINE_LIFE - 5.0 } else { 1.0 }, kind, spin: 0.0 });
+        }
+    }
+}
+
+/// `QA_PLACING="wall:turn_deg:yaw_deg:pitch_deg:x,y,z"`: the local player
+/// stands at x,y,z facing yaw/pitch, lining up that pack turned turn_deg (the
+/// deploy hologram and deployer). Returns the pack and turn (radians).
+pub fn placing(world: &mut World) -> Option<(peakrunner_core::sim::deploy::DeployKind, f32)> {
+    use peakrunner_core::sim::deploy::DeployKind;
+    let raw = std::env::var("QA_PLACING").ok()?;
+    let parts: Vec<_> = raw.split(':').collect();
+    let kind = match *parts.first()? { "turret" => DeployKind::Turret, "wall" => DeployKind::Wall, "field" => DeployKind::Field,
+        "ammo" => DeployKind::Ammo, _ => return None };
+    let num = |k: usize| parts.get(k).and_then(|v| v.trim().parse::<f32>().ok());
+    let (turn, yaw, pitch) = (num(1)?.to_radians(), num(2)?.to_radians(), num(3)?.to_radians());
+    let at: Vec<f32> = parts.get(4)?.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+    if at.len() != 3 { return None; }
+    if let Some(p) = world.players.get_mut(world.player_id) {
+        p.pos = Vec3::new(at[0], at[1], at[2]);
+        p.vel = Vec3::ZERO;
+        p.yaw = yaw;
+        p.pitch = pitch;
+    }
+    Some((kind, turn))
+}
+

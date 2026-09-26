@@ -9,6 +9,8 @@ pub enum Entry {
     Chat { sender: String, text: String },
     TeamChat { sender: String, text: String, team: crate::sim::Team },
     Frag { killer: String, victim: String, weapon: String },
+    /// A server-announced play (football passes, tackles, touchdowns).
+    Play { text: String },
 }
 
 pub fn safe_text(text: &str) -> bool {
@@ -33,7 +35,9 @@ impl Entry {
         match self {
             Self::Chat { sender, text } => format!("{sender}: {text}"),
             Self::TeamChat { sender, text, .. } => format!("[TEAM] {sender}: {text}"),
+            Self::Frag { killer, victim, weapon } if killer == victim && weapon == "Suicide" => format!("{victim} took the quick way out"),
             Self::Frag { killer, victim, weapon } => format!("{killer} fragged {victim} · {weapon}"),
+            Self::Play { text } => text.clone(),
         }
     }
 }

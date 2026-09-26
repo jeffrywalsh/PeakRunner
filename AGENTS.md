@@ -71,6 +71,31 @@ packs; switching needs a full matching client/server release.
   whiteout fog (`src/assets/maps/frostline/`). See `docs/frostline.md`.
 - **Dustreach:** sandstone citadels in dunes, the Sun Gate on the central
   saddle (`src/assets/maps/dustreach/`). See `docs/dustreach.md`.
+- **Longfield** (key `longfield`, source only): the first **Football** map, a
+  floodlit stadium (`src/assets/maps/longfield/`, `build-longfield.py`,
+  `test-longfield.py`). Football (`ball1`) is a third mode: no weapons, passes,
+  fumbles, tackles, touchdowns, only on maps whose manifest declares a
+  `football` field. Body checks (`bump1`: every player blocks every other,
+  teammates included; only enemy hits hurt) apply in every mode.
+  **Highgoal** (key `highgoal`): walled arena with goals on 7 m platforms.
+  Football uses its own armor (`FOOTBALL_ARMOR`, a half-second jet burst after
+  the classic mod); CTF movement is unchanged. Marker is now `maps8`.
+  See `docs/football.md`.
+- **Loadouts** (`loadout1:throw1`, source only; `docs/loadouts.md`): light and
+  heavy armor, limited ammo, the mortar (heavy), the repair tool (hold Q,
+  replaces the kit), an inventory screen (E at a station) and deployables (B:
+  turrets, walls, force fields, ammo stations, per-team limits), hand grenades
+  (G) and mines (M), rebindable keys (Controls screen, `src/keybinds.rs`). The menu picks mode then map; server rotations
+  accept playlists (`{"playlist":"ctf_cnh"}`, `{"playlist":"football"}`).
+- **Ozarktic Blast** (`ozarktic-blast`, `docs/ozarktic-blast.md`) and **Reefbreak**
+  (`reefbreak`, `docs/reefbreak.md`; atoll with floating freighter bases, one
+  sea water volume; `build-reefbreak.py` / `test-reefbreak.py`) are original CTF
+  maps, source only. Marker is `maps10`.
+- **Deathmatch / Team Deathmatch** (`dm1`, source only; `docs/deathmatch.md`):
+  any map; FFA uses `World::hostile` for every enemy check; the server rolls
+  per-round `Conditions` (time of day, weather, wind, twist) sent in snapshots.
+  Only TDM is offered for now (playlist `team_deathmatch`, stadiums excluded
+  unless named); FFA is implemented but rejected by rotations and hidden in menus.
 - The replaced reference maps (Broadside, Stonehenge, Snowblind, Desert of
   Death) were studied privately for statistics only; none of their data is in
   any build. Their packs remain only in ignored `research/` for future study.
@@ -506,7 +531,8 @@ were later removed from source; notes below that use them are history only.
 
 - Multiplayer map rotation and modes are SERVER-selected. Client-local map data
   supports fast rendering and prediction, not authority over map/mode choice.
-  Only implemented modes can be configured: CTF, and Capture & Hold
+  Only implemented modes can be configured: CTF, Football (`football`, only
+  on maps with a manifest field, i.e. Longfield and Highgoal; see `docs/football.md`), and Capture & Hold
   (`capture_and_hold`, source only; rotation entries need a map with ≥2 control
   points and none ship yet, so it is not in the default rotation; see
   `docs/capture-and-hold.md`). Future server-delivered

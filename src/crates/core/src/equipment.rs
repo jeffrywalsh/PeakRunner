@@ -261,15 +261,12 @@ pub fn power(defs:&[Definition],states:&mut [State]) {
 }
 pub fn service(d:&Definition,s:&mut State,p:&mut Player,using:bool,dt:f32) {
     if !p.alive || p.team.idx()!=d.team as usize || p.pos.distance(d.pos())>d.radius+1.5 {return;}
-    // Repairs require a held server input, proximity and energy. A ruined
-    // generator can be brought back online; no automatic hidden respawn.
-    if using && s.health<d.max_health() && p.energy>0. {
-        let spent=p.energy.min(12.*dt);
-        p.energy-=spent;s.repair(d,spent*4.);
-    } else if s.powered && s.health>0. && (d.kind==Kind::Repair || (d.kind==Kind::Inventory && using)) {
+    // Repairs are the repair tool's job (hold Q, spending energy; see
+    // sim::loadout). Stations heal and recharge, and inventories restock ammo.
+    if s.powered && s.health>0. && (d.kind==Kind::Repair || (d.kind==Kind::Inventory && using)) {
         p.health=(p.health+35.*dt).min(100.);
         p.energy=(p.energy+40.*dt).min(ENERGY_MAX);
-        if d.kind==Kind::Inventory {p.kits=p.kits.max(crate::sim::KITS_PER_LIFE);}
+        if d.kind==Kind::Inventory {p.ammo=crate::sim::loadout::max_ammo(p.armor);crate::sim::World::restock_throwables(p);}
     }
 }
 
@@ -407,7 +404,7 @@ mod tests {
     fn shield_regen_beats_one_player_and_loses_to_two() {
         // Best sustained point-blank damage per player weapon against a shield.
         let disc=crate::combat::DISC.max_damage/crate::sim::DISC_RELOAD;
-        let grenade=crate::combat::GRENADE.max_damage/crate::sim::weapon_reload(2);
+        let grenade=crate::combat::GRENADE_STRUCTURE.max_damage/crate::sim::weapon_reload(2);
         let chaingun=8.*0.5/crate::sim::weapon_reload(1);
         let best=disc.max(grenade).max(chaingun);
         assert!(SHIELD_REGEN>best*1.2,"one player ({best:.1}/s) must not out-damage regen with margin");

@@ -5,6 +5,7 @@ pub mod terrain;
 pub mod grass;
 pub mod map_pack;
 pub mod look;
+pub mod conditions;
 pub mod interior_survey;
 pub mod map_catalog;
 pub mod equipment;

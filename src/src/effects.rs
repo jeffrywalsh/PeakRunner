@@ -199,7 +199,7 @@ impl Effects {
 
     /// Advance everything by `dt` and pick up new explosions, impacts and shots.
     pub fn update(&mut self, world: &World, eye: Vec3, dt: f32) {
-        self.players.update(&world.players, dt);
+        self.players.update(&world.players, dt, &|a, b| world.clear_distance(a, b));
         if self.map != Some(world.map) {
             // A new map or round: nothing lingers from the last one.
             self.parts.fill(Particle::DEAD);
@@ -254,6 +254,8 @@ impl Effects {
         let (smoke, sparks, debris, dark, spark_color, rise) = match kind {
             0 => (5, 7, 0, [0.52, 0.58, 0.64], [0.45, 0.85, 1.0], 0.9),
             3 => (2, 8, 0, [0.42, 0.52, 0.40], [0.45, 1.0, 0.3], 0.6),
+            // Mortar: green sparks, dark smoke.
+            5 => (10, 12, 8, [0.16, 0.2, 0.15], [0.45, 1.0, 0.25], 1.5),
             4 => (14, 16, 12, [0.10, 0.095, 0.09], [1.0, 0.62, 0.2], 2.0),
             _ => (8, 8, 7, [0.19, 0.18, 0.17], [1.0, 0.58, 0.16], 1.3),
         };
@@ -499,6 +501,10 @@ pub fn ground_tint(map: MapId) -> [f32; 3] {
         MapId::StonehengeClone => [0.46, 0.43, 0.38],
         MapId::BroadsideClone => [0.42, 0.38, 0.30],
         MapId::Raindance => [0.40, 0.34, 0.25],
+        MapId::Longfield => [0.36, 0.40, 0.26],
+        MapId::Highgoal => [0.78, 0.66, 0.48],
+        MapId::OzarkticBlast => [0.44, 0.46, 0.38],
+        MapId::Reefbreak => [0.8, 0.74, 0.6],
     }
 }
 
