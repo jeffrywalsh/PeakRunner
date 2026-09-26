@@ -1,17 +1,21 @@
 {
   "repository": "git@github.com:jeffrywalsh/PeakRunner.git",
-  "base_revision": "a4f00b55498569cdffccb149294090e320a78649",
-  "source_kind": "working-tree source archive; six-map test requested by user; uncommitted changes; not a clean Git reproduction",
-  "status": "deployed and published; health, HTTPS signatures and hashes verified on 2026-09-21",
-  "version": "0.1.0-private.20260921.1",
-  "source_archive": "/data/peakrunner/releases/20260921-private1/source-v3.tar.gz",
-  "source_sha256": "9f38581e9a63897b7e3930c038f380d3a6deb76aa188c5271d58fae4bdd38050",
-  "private_maps_archive": "/data/peakrunner/releases/20260921-private1/private-maps.tar.gz",
-  "private_maps_sha256": "e89328f4b2834c12d0d8d39052cbf59793b7c00989bda42eeca5a989eea732cb",
-  "image_archive_sha256": "43efb09c5e449fe7d9266c6c0edf5d61bb7fa088fbac897e092d954b01d6f519",
-  "image": "sha256:d801944ba2641ce9aafc6c4eb991aab131e7cb59b26671571a0d88a24f86b40d",
+  "base_revision": "a8522459c926bec92c3e85a5b4b6b9ed84697860",
+  "branch": "release/20260926",
+  "source_kind": "git archive of the pushed commit (src/ only); a clean Git reproduction",
+  "status": "staged",
+  "version": "0.1.0-playtest.20260926.1",
+  "source_archive": "/data/peakrunner/releases/20260926-playtest1/source-a852245.tar.gz",
+  "source_sha256": "a638fcf7bcbd0ff797b5d3fedcf295322c46273cb71785882f26a7453c1f14b7",
+  "image_archive": "/data/peakrunner/releases/20260926-playtest1/server-image.tar.gz",
+  "image_archive_sha256": "c378015652c002f7ad598ab19dceb52bb8f74826a1a04d2b51ba8b8485627e2f",
+  "image": "sha256:b33320aecfeea773085bb7b722db868285ceac3a21730c3f095c169113e768a9",
   "directory": "src",
   "dockerfile": "crates/server/Dockerfile",
   "platform": "linux/amd64",
-  "tag": "peakrunner/server:20260921-private1-r2"
+  "tag": "peakrunner/server:20260926-playtest1",
+  "services": {
+    "match": "Springdale Central, UDP 7777: CTF, Capture & Hold, Team Deathmatch",
+    "football": "Springdale Football, UDP 7778: football playlist"
+  }
 }
